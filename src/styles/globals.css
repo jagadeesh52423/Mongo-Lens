@@ -1,0 +1,33 @@
+:root {
+  --bg: #1e1e1e;
+  --bg-panel: #252526;
+  --bg-rail: #333333;
+  --bg-hover: #2a2d2e;
+  --fg: #d4d4d4;
+  --fg-dim: #858585;
+  --border: #3c3c3c;
+  --accent: #007acc;
+  --accent-green: #4ec9b0;
+  --accent-red: #f48771;
+  --font-mono: "SF Mono", Menlo, Consolas, monospace;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+}
+* { box-sizing: border-box; }
+html, body, #root { margin: 0; padding: 0; height: 100%; width: 100%; }
+body {
+  background: var(--bg); color: var(--fg);
+  font-family: var(--font-sans); font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+}
+button {
+  font: inherit; color: inherit; background: transparent;
+  border: 1px solid var(--border); padding: 4px 10px;
+  border-radius: 3px; cursor: pointer;
+}
+button:hover { background: var(--bg-hover); }
+input, select, textarea {
+  font: inherit; color: inherit;
+  background: var(--bg); border: 1px solid var(--border);
+  padding: 4px 8px; border-radius: 3px;
+}
+input:focus, select:focus, textarea:focus { outline: 1px solid var(--accent); }
