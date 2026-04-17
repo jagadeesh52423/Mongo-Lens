@@ -3,6 +3,7 @@ import { IconRail, type PanelKey } from './components/layout/IconRail';
 import { SidePanel } from './components/layout/SidePanel';
 import { StatusBar } from './components/layout/StatusBar';
 import { ConnectionPanel } from './components/connections/ConnectionPanel';
+import { EditorArea } from './components/editor/EditorArea';
 import { useConnectionsStore } from './store/connections';
 
 export default function App() {
@@ -21,9 +22,7 @@ export default function App() {
           )}
         </SidePanel>
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-          <div style={{ flex: 1, padding: 20, color: 'var(--fg-dim)' }}>
-            Open a connection to get started.
-          </div>
+          <EditorArea />
         </div>
       </div>
       <StatusBar
