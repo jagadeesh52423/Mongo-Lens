@@ -5,12 +5,14 @@ import { BrowseTab } from './BrowseTab';
 import { runScript } from '../../ipc';
 import { useResultsStore } from '../../store/results';
 import { ResultsPanel } from '../results/ResultsPanel';
+import { useCollectionCompletions } from '../../hooks/useCollectionCompletions';
 
 export function EditorArea() {
   const { tabs, activeTabId, setActive, closeTab, updateContent, openTab } = useEditorStore();
   const { activeConnectionId, activeDatabase } = useConnectionsStore();
   const startRun = useResultsStore((s) => s.startRun);
   const active = tabs.find((t) => t.id === activeTabId);
+  const completions = useCollectionCompletions(activeConnectionId, activeDatabase);
 
   async function handleRun() {
     if (!active || active.type !== 'script') return;
@@ -97,6 +99,7 @@ export function EditorArea() {
                 value={active.content}
                 onChange={(v) => updateContent(active.id, v)}
                 onRun={handleRun}
+                collections={completions.map((c) => c.name)}
               />
             </div>
             <div style={{ height: 260, borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column' }}>
