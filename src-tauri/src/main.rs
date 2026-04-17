@@ -9,18 +9,30 @@ mod state;
 
 use state::AppState;
 use std::fs;
+use std::path::PathBuf;
+use tauri::Manager;
 
 fn main() {
-    let base = dirs_dir();
-    fs::create_dir_all(&base).expect("create app dir");
-    let db_path = base.join("mongomacapp.sqlite");
-    let _ = db::open(&db_path).expect("open & migrate sqlite");
-    let app_state = AppState::new(db_path);
+    if let Err(e) = run() {
+        eprintln!("MongoMacApp failed to start: {}", e);
+        std::process::exit(1);
+    }
+}
 
+fn run() -> Result<(), Box<dyn std::error::Error>> {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .manage(app_state)
+        .setup(|app| {
+            let base = dirs_dir()?;
+            fs::create_dir_all(&base)
+                .map_err(|e| format!("failed to create app dir {}: {}", base.display(), e))?;
+            let db_path = base.join("mongomacapp.sqlite");
+            db::open(&db_path)
+                .map_err(|e| format!("failed to open/migrate sqlite at {}: {}", db_path.display(), e))?;
+            app.manage(AppState::new(db_path));
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             commands::connection::list_connections,
             commands::connection::create_connection,
@@ -29,6 +41,12 @@ fn main() {
             commands::connection::test_connection,
             commands::connection::connect_connection,
             commands::connection::disconnect_connection,
+            commands::collection::list_databases,
+            commands::collection::list_collections,
+            commands::collection::list_indexes,
+            commands::collection::browse_collection,
+            commands::document::update_document,
+            commands::document::delete_document,
             commands::script::run_script,
             commands::saved_script::list_scripts,
             commands::saved_script::create_script,
@@ -38,11 +56,12 @@ fn main() {
             runner::executor::check_node_runner,
             runner::executor::install_node_runner,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .run(tauri::generate_context!())?;
+    Ok(())
 }
 
-fn dirs_dir() -> std::path::PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-    std::path::PathBuf::from(home).join(".mongomacapp")
+fn dirs_dir() -> Result<PathBuf, String> {
+    let home = std::env::var("HOME")
+        .map_err(|_| "HOME environment variable is not set".to_string())?;
+    Ok(PathBuf::from(home).join(".mongomacapp"))
 }

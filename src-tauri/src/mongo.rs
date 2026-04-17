@@ -1,4 +1,6 @@
 use crate::db::connections::ConnectionRecord;
+use crate::state::AppState;
+use tauri::State;
 
 pub fn build_uri(rec: &ConnectionRecord, password: Option<&str>) -> String {
     if let Some(cs) = &rec.conn_string {
@@ -48,6 +50,16 @@ pub async fn client_for(uri: &str) -> Result<mongodb::Client, String> {
     use mongodb::{options::ClientOptions, Client};
     let opts = ClientOptions::parse(uri).await.map_err(|e| e.to_string())?;
     Client::with_options(opts).map_err(|e| e.to_string())
+}
+
+pub fn active_client(state: &State<'_, AppState>, id: &str) -> Result<mongodb::Client, String> {
+    state
+        .mongo_clients
+        .lock()
+        .unwrap()
+        .get(id)
+        .cloned()
+        .ok_or_else(|| "connection not active — connect first".to_string())
 }
 
 #[cfg(test)]

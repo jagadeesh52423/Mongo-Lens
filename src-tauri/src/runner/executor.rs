@@ -67,9 +67,9 @@ pub fn spawn_script(
 ) -> Result<std::process::Child, String> {
     Command::new("node")
         .arg(harness_path())
-        .arg(uri)
         .arg(database)
         .arg(script_path)
+        .env("MONGO_URI", uri)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()

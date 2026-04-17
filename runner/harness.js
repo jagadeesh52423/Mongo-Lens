@@ -1,7 +1,12 @@
 const { MongoClient } = require('mongodb');
 const fs = require('fs');
 
-const [uri, dbName, scriptPath] = process.argv.slice(2);
+const uri = process.env.MONGO_URI;
+if (!uri) {
+  process.stderr.write(JSON.stringify({ __error: 'MONGO_URI env var is required' }) + '\n');
+  process.exit(1);
+}
+const [dbName, scriptPath] = process.argv.slice(2);
 const userScript = fs.readFileSync(scriptPath, 'utf8');
 
 let groupIndex = 0;
