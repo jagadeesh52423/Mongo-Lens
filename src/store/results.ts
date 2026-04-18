@@ -7,11 +7,12 @@ interface TabResults {
   executionMs?: number;
   lastError?: string;
   pagination?: PaginationState;
+  runId?: string;
 }
 
 interface ResultsState {
   byTab: Record<string, TabResults>;
-  startRun: (tabId: string) => void;
+  startRun: (tabId: string, runId: string) => void;
   appendGroup: (tabId: string, group: ResultGroup) => void;
   setError: (tabId: string, error: string) => void;
   finishRun: (tabId: string, executionMs: number) => void;
@@ -21,11 +22,11 @@ interface ResultsState {
 
 export const useResultsStore = create<ResultsState>((set) => ({
   byTab: {},
-  startRun: (tabId) =>
+  startRun: (tabId, runId) =>
     set((s) => ({
       byTab: {
         ...s.byTab,
-        [tabId]: { groups: [], isRunning: true, executionMs: undefined, lastError: undefined, pagination: undefined },
+        [tabId]: { groups: [], isRunning: true, executionMs: undefined, lastError: undefined, pagination: undefined, runId },
       },
     })),
   appendGroup: (tabId, group) =>
@@ -41,7 +42,7 @@ export const useResultsStore = create<ResultsState>((set) => ({
   finishRun: (tabId, executionMs) =>
     set((s) => {
       const cur = s.byTab[tabId] ?? { groups: [], isRunning: true };
-      return { byTab: { ...s.byTab, [tabId]: { ...cur, isRunning: false, executionMs } } };
+      return { byTab: { ...s.byTab, [tabId]: { ...cur, isRunning: false, executionMs, runId: undefined } } };
     }),
   setPagination: (tabId, pagination) =>
     set((s) => {

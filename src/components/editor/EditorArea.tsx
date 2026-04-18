@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useEditorStore } from '../../store/editor';
 import { useConnectionsStore } from '../../store/connections';
 import { ScriptEditor } from './ScriptEditor';
-import { runScript } from '../../ipc';
+import { runScript, cancelScript } from '../../ipc';
 import { useResultsStore } from '../../store/results';
 import { ResultsPanel } from '../results/ResultsPanel';
 import { useCollectionCompletions } from '../../hooks/useCollectionCompletions';
@@ -17,6 +17,7 @@ export function EditorArea() {
   const completions = useCollectionCompletions(activeConnectionId, activeDatabase);
   const [pageSizes, setPageSizes] = useState<Record<string, number>>({});
   const activePageSize = active ? (pageSizes[active.id] ?? 50) : 50;
+  const isRunning = useResultsStore((s) => (active ? !!s.byTab[active.id]?.isRunning : false));
 
   async function handleRun(page = 0, pageSize = activePageSize) {
     if (!active || active.type !== 'script') return;
@@ -26,16 +27,24 @@ export function EditorArea() {
       alert('Select a connection and database first');
       return;
     }
-    console.log('[handleRun] tabId:', active.id, 'connId:', connId, 'db:', db, 'page:', page, 'pageSize:', pageSize);
-    startRun(active.id);
+    const runId = crypto.randomUUID();
+    console.log('[handleRun] tabId:', active.id, 'connId:', connId, 'db:', db, 'page:', page, 'pageSize:', pageSize, 'runId:', runId);
+    startRun(active.id, runId);
     try {
-      await runScript(active.id, connId, db, active.content, page, pageSize);
+      await runScript(active.id, connId, db, active.content, page, pageSize, runId);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      if (msg === 'cancelled') return;
       console.error('[handleRun] runScript failed:', msg);
       setError(active.id, msg);
       finishRun(active.id, 0);
     }
+  }
+
+  async function handleCancel() {
+    if (!active) return;
+    await cancelScript(active.id);
+    finishRun(active.id, 0);
   }
 
   function newScriptTab() {
@@ -96,10 +105,18 @@ export function EditorArea() {
             + New
           </button>
         </div>
-        <div style={{ paddingRight: 10 }}>
-          <button onClick={() => handleRun(0)} disabled={!active || active.type !== 'script'}>
+        <div style={{ paddingRight: 10, display: 'flex', gap: 6 }}>
+          <button
+            onClick={() => handleRun(0)}
+            disabled={!active || active.type !== 'script' || isRunning}
+          >
             ▶ Run
           </button>
+          {isRunning && (
+            <button onClick={handleCancel}>
+              ✕ Cancel
+            </button>
+          )}
         </div>
       </div>
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>

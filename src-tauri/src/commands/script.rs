@@ -5,6 +5,7 @@ use crate::runner::executor::spawn_script;
 use crate::state::AppState;
 use serde::Serialize;
 use std::io::{BufRead, BufReader};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 use tauri::{AppHandle, Emitter, State};
@@ -30,6 +31,16 @@ pub struct ScriptEvent {
     pub error: Option<String>,
     pub execution_ms: Option<u128>,
     pub pagination: Option<PaginationInfo>,
+    pub run_id: Option<String>,
+}
+
+#[tauri::command]
+pub fn cancel_script(state: State<'_, AppState>, tab_id: String) -> Result<(), String> {
+    let mut scripts = state.active_scripts.lock().unwrap();
+    if let Some(flag) = scripts.remove(&tab_id) {
+        flag.store(true, Ordering::Relaxed);
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -42,6 +53,7 @@ pub async fn run_script(
     script: String,
     page: Option<u32>,
     page_size: Option<u32>,
+    run_id: Option<String>,
 ) -> Result<(), String> {
     println!("[run_script] tab={tab_id} connection_id={connection_id} db={database}");
     let conn = state.open_db().map_err(|e| e.to_string())?;
@@ -58,12 +70,23 @@ pub async fn run_script(
     std::fs::write(&script_path, &script).map_err(|e| e.to_string())?;
     println!("[run_script] script written to {:?}", script_path);
 
-    let tab_id_arc: Arc<String> = Arc::new(tab_id);
+    let tab_id_arc: Arc<String> = Arc::new(tab_id.clone());
+    let run_id_arc: Arc<Option<String>> = Arc::new(run_id);
     let app_handle = app.clone();
     let start = Instant::now();
 
     let page = page.unwrap_or(0);
     let page_size = page_size.unwrap_or(50);
+
+    // Cancel any previously running script on this tab, then register the new flag.
+    let cancel_flag = Arc::new(AtomicBool::new(false));
+    {
+        let mut scripts = state.active_scripts.lock().unwrap();
+        if let Some(old_flag) = scripts.remove(&*tab_id_arc) {
+            old_flag.store(true, Ordering::Relaxed);
+        }
+        scripts.insert((*tab_id_arc).clone(), cancel_flag.clone());
+    }
 
     // Wrap the body so the temp script file is always cleaned up,
     // even if spawn_script or stdout/stderr take fail with `?`.
@@ -76,6 +99,7 @@ pub async fn run_script(
         let stdout_handle = {
             let ah = app_handle.clone();
             let tab = tab_id_arc.clone();
+            let rid = run_id_arc.clone();
             std::thread::spawn(move || {
                 let reader = BufReader::new(stdout);
                 for line in reader.lines().flatten() {
@@ -98,6 +122,7 @@ pub async fn run_script(
                                         page: page_val as u32,
                                         page_size: page_size_val as u32,
                                     }),
+                                    run_id: (*rid).clone(),
                                 };
                                 let _ = ah.emit("script-event", evt);
                             }
@@ -113,6 +138,7 @@ pub async fn run_script(
                                 error: None,
                                 execution_ms: None,
                                 pagination: None,
+                                run_id: (*rid).clone(),
                             };
                             let _ = ah.emit("script-event", evt);
                         }
@@ -124,6 +150,7 @@ pub async fn run_script(
         let stderr_handle = {
             let ah = app_handle.clone();
             let tab = tab_id_arc.clone();
+            let rid = run_id_arc.clone();
             std::thread::spawn(move || {
                 let reader = BufReader::new(stderr);
                 for line in reader.lines().flatten() {
@@ -144,6 +171,7 @@ pub async fn run_script(
                         error: Some(err),
                         execution_ms: None,
                         pagination: None,
+                        run_id: (*rid).clone(),
                     };
                     let _ = ah.emit("script-event", evt);
                 }
@@ -152,6 +180,14 @@ pub async fn run_script(
 
         let wait_result = timeout(Duration::from_secs(SCRIPT_TIMEOUT_SECS), async {
             loop {
+                if cancel_flag.load(Ordering::Relaxed) {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::Interrupted,
+                        "cancelled",
+                    ));
+                }
                 match child.try_wait() {
                     Ok(Some(status)) => return Ok(status),
                     Ok(None) => tokio::time::sleep(Duration::from_millis(50)).await,
@@ -175,6 +211,7 @@ pub async fn run_script(
                     error: if status.success() { None } else { Some("exited with error".into()) },
                     execution_ms: Some(elapsed),
                     pagination: None,
+                    run_id: (*run_id_arc).clone(),
                 };
                 let _ = app_handle.emit("script-event", done);
                 Ok(())
@@ -182,8 +219,14 @@ pub async fn run_script(
             Ok(Err(e)) => {
                 let _ = stdout_handle.join();
                 let _ = stderr_handle.join();
-                println!("[run_script] wait failed: {e}");
-                Err(e.to_string())
+                if e.kind() == std::io::ErrorKind::Interrupted {
+                    println!("[run_script] cancelled by user");
+                    // Intentional cancel — frontend handles via handleCancel.
+                    Ok(())
+                } else {
+                    println!("[run_script] wait failed: {e}");
+                    Err(e.to_string())
+                }
             }
             Err(_) => {
                 // Kill, then reap so we don't leave a zombie and so the
@@ -201,6 +244,7 @@ pub async fn run_script(
                     error: Some(format!("Script execution timed out ({SCRIPT_TIMEOUT_SECS}s)")),
                     execution_ms: None,
                     pagination: None,
+                    run_id: (*run_id_arc).clone(),
                 };
                 let _ = app_handle.emit("script-event", evt);
                 Ok(())
@@ -208,6 +252,16 @@ pub async fn run_script(
         }
     }
     .await;
+
+    // Only remove our flag — a newer run may have already replaced it.
+    {
+        let mut scripts = state.active_scripts.lock().unwrap();
+        if let Some(current) = scripts.get(&*tab_id_arc) {
+            if Arc::ptr_eq(current, &cancel_flag) {
+                scripts.remove(&*tab_id_arc);
+            }
+        }
+    }
 
     let _ = std::fs::remove_file(&script_path);
     result
