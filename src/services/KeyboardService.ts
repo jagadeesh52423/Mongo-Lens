@@ -1,3 +1,5 @@
+import { createContext, createElement, useContext, useMemo, type ReactNode } from 'react';
+
 export interface KeyCombo {
   cmd?: boolean;
   ctrl?: boolean;
@@ -55,3 +57,20 @@ export class KeyboardService {
 }
 
 export const keyboardService = new KeyboardService();
+
+export const KeyboardServiceContext = createContext<KeyboardService>(keyboardService);
+
+export function KeyboardServiceProvider({
+  svc,
+  children,
+}: {
+  svc?: KeyboardService;
+  children: ReactNode;
+}) {
+  const value = useMemo(() => svc ?? new KeyboardService(), [svc]);
+  return createElement(KeyboardServiceContext.Provider, { value }, children);
+}
+
+export function useKeyboardService(): KeyboardService {
+  return useContext(KeyboardServiceContext);
+}
