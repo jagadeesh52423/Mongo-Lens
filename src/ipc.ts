@@ -86,8 +86,10 @@ export async function runScript(
   connectionId: string,
   database: string,
   script: string,
+  page = 0,
+  pageSize = 50,
 ): Promise<void> {
-  return invoke('run_script', { tabId, connectionId, database, script });
+  return invoke('run_script', { tabId, connectionId, database, script, page, pageSize });
 }
 
 export async function listScripts(): Promise<SavedScript[]> {
