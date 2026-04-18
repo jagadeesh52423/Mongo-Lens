@@ -1,7 +1,10 @@
-import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen, act, renderHook } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import type { ReactNode } from 'react';
 import { CellSelectionProvider, useCellSelection } from '../contexts/CellSelectionContext';
+import { useCellShortcuts } from '../hooks/useCellShortcuts';
+import { KeyboardService } from '../services/KeyboardService';
 
 function TestConsumer() {
   const { selected, select, clear } = useCellSelection();
@@ -37,5 +40,90 @@ describe('CellSelectionContext', () => {
     await user.click(screen.getByText('Select'));
     await user.click(screen.getByText('Clear'));
     expect(screen.getByTestId('col').textContent).toBe('none');
+  });
+});
+
+describe('useCellShortcuts', () => {
+  beforeEach(() => {
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: vi.fn().mockResolvedValue(undefined) },
+      writable: true,
+      configurable: true,
+    });
+  });
+
+  function makeWrapper(_svc: KeyboardService) {
+    return ({ children }: { children: ReactNode }) => (
+      <CellSelectionProvider>{children}</CellSelectionProvider>
+    );
+  }
+
+  it('registers 4 shortcuts', () => {
+    const svc = new KeyboardService();
+    renderHook(() => useCellShortcuts(svc), { wrapper: makeWrapper(svc) });
+    expect(svc.getAll()).toHaveLength(4);
+  });
+
+  it('all 4 shortcuts have showInContextMenu: true', () => {
+    const svc = new KeyboardService();
+    renderHook(() => useCellShortcuts(svc), { wrapper: makeWrapper(svc) });
+    expect(svc.getAll().every((s) => s.showInContextMenu)).toBe(true);
+  });
+
+  it('cmd+c copies value to clipboard', async () => {
+    const svc = new KeyboardService();
+    const { result } = renderHook(
+      () => ({ shortcuts: useCellShortcuts(svc), selection: useCellSelection() }),
+      { wrapper: makeWrapper(svc) }
+    );
+    act(() => {
+      result.current.selection.select({ rowIndex: 0, colKey: 'name', doc: { name: 'alice' }, value: 'alice' });
+    });
+    const copyValue = svc.getAll().find((s) => s.id === 'cell.copyValue')!;
+    await act(async () => { copyValue.action(); });
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('alice');
+  });
+
+  it('ctrl+cmd+c copies field to clipboard', async () => {
+    const svc = new KeyboardService();
+    const { result } = renderHook(
+      () => ({ shortcuts: useCellShortcuts(svc), selection: useCellSelection() }),
+      { wrapper: makeWrapper(svc) }
+    );
+    act(() => {
+      result.current.selection.select({ rowIndex: 0, colKey: 'name', doc: { name: 'alice' }, value: 'alice' });
+    });
+    const copyField = svc.getAll().find((s) => s.id === 'cell.copyField')!;
+    await act(async () => { copyField.action(); });
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('"name": "alice"');
+  });
+
+  it('shift+alt+cmd+c copies field path', async () => {
+    const svc = new KeyboardService();
+    const { result } = renderHook(
+      () => ({ shortcuts: useCellShortcuts(svc), selection: useCellSelection() }),
+      { wrapper: makeWrapper(svc) }
+    );
+    act(() => {
+      result.current.selection.select({ rowIndex: 0, colKey: 'name', doc: { name: 'alice' }, value: 'alice' });
+    });
+    const copyPath = svc.getAll().find((s) => s.id === 'cell.copyFieldPath')!;
+    await act(async () => { copyPath.action(); });
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('name');
+  });
+
+  it('shift+cmd+c copies full document', async () => {
+    const svc = new KeyboardService();
+    const doc = { name: 'alice', age: 30 };
+    const { result } = renderHook(
+      () => ({ shortcuts: useCellShortcuts(svc), selection: useCellSelection() }),
+      { wrapper: makeWrapper(svc) }
+    );
+    act(() => {
+      result.current.selection.select({ rowIndex: 0, colKey: 'name', doc, value: 'alice' });
+    });
+    const copyDoc = svc.getAll().find((s) => s.id === 'cell.copyDocument')!;
+    await act(async () => { copyDoc.action(); });
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(JSON.stringify(doc, null, 2));
   });
 });
