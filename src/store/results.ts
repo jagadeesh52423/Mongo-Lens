@@ -1,11 +1,12 @@
 import { create } from 'zustand';
-import type { ResultGroup } from '../types';
+import type { PaginationState, ResultGroup } from '../types';
 
 interface TabResults {
   groups: ResultGroup[];
   isRunning: boolean;
   executionMs?: number;
   lastError?: string;
+  pagination?: PaginationState;
 }
 
 interface ResultsState {
@@ -14,6 +15,7 @@ interface ResultsState {
   appendGroup: (tabId: string, group: ResultGroup) => void;
   setError: (tabId: string, error: string) => void;
   finishRun: (tabId: string, executionMs: number) => void;
+  setPagination: (tabId: string, pagination: PaginationState) => void;
   clearTab: (tabId: string) => void;
 }
 
@@ -23,7 +25,7 @@ export const useResultsStore = create<ResultsState>((set) => ({
     set((s) => ({
       byTab: {
         ...s.byTab,
-        [tabId]: { groups: [], isRunning: true, executionMs: undefined, lastError: undefined },
+        [tabId]: { groups: [], isRunning: true, executionMs: undefined, lastError: undefined, pagination: undefined },
       },
     })),
   appendGroup: (tabId, group) =>
@@ -40,6 +42,11 @@ export const useResultsStore = create<ResultsState>((set) => ({
     set((s) => {
       const cur = s.byTab[tabId] ?? { groups: [], isRunning: true };
       return { byTab: { ...s.byTab, [tabId]: { ...cur, isRunning: false, executionMs } } };
+    }),
+  setPagination: (tabId, pagination) =>
+    set((s) => {
+      const cur = s.byTab[tabId] ?? { groups: [], isRunning: false };
+      return { byTab: { ...s.byTab, [tabId]: { ...cur, pagination } } };
     }),
   clearTab: (tabId) =>
     set((s) => {
