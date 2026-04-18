@@ -5,11 +5,17 @@ import { useResultsStore } from '../../store/results';
 import { JsonView } from './JsonView';
 import { TableView } from './TableView';
 import { toCsv, toJsonText } from '../../utils/export';
-import { CellSelectionProvider } from '../../contexts/CellSelectionContext';
+import { CellSelectionProvider, useCellSelection } from '../../contexts/CellSelectionContext';
 import { useCellShortcuts } from '../../hooks/useCellShortcuts';
 
 function CellShortcutsRegistrar() {
   useCellShortcuts();
+  return null;
+}
+
+function SelectionClearer({ tabId, isRunning }: { tabId: string; isRunning: boolean }) {
+  const { clear } = useCellSelection();
+  useEffect(() => { clear(); }, [tabId, isRunning]);
   return null;
 }
 
@@ -70,6 +76,7 @@ export function ResultsPanel({ tabId, pageSize, onPageChange, onPageSizeChange }
 
   return (
     <CellSelectionProvider>
+      <SelectionClearer tabId={tabId} isRunning={!!res?.isRunning} />
       <CellShortcutsRegistrar />
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
       <div

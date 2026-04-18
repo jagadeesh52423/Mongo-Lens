@@ -167,4 +167,33 @@ describe('ResultsPanel cell shortcuts integration', () => {
     await user.keyboard('{Meta>}c{/Meta}');
     expect(writeText).toHaveBeenCalledWith('Tokyo');
   });
+
+  it('clears selection when tabId changes', async () => {
+    useResultsStore.setState({
+      byTab: {
+        t1: {
+          groups: [{ groupIndex: 0, docs: [{ city: 'Tokyo' }] }],
+          isRunning: false,
+          executionMs: 5,
+        },
+        t2: {
+          groups: [{ groupIndex: 0, docs: [{ city: 'Paris' }] }],
+          isRunning: false,
+          executionMs: 5,
+        },
+      },
+    });
+    const user = userEvent.setup();
+    const { rerender } = render(<ResultsPanel tabId="t1" pageSize={50} />);
+    await user.click(screen.getByText('Table'));
+    const cell = screen.getAllByRole('cell').find((c) => c.textContent === 'Tokyo')!;
+    await user.click(cell);
+    expect(cell.getAttribute('aria-selected')).toBe('true');
+
+    // Switch to tab t2 — selection must clear
+    rerender(<ResultsPanel tabId="t2" pageSize={50} />);
+    // No cell should be selected in the new tab
+    const cells = screen.getAllByRole('cell');
+    expect(cells.every((c) => c.getAttribute('aria-selected') !== 'true')).toBe(true);
+  });
 });
