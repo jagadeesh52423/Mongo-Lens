@@ -16,7 +16,7 @@ export function EditorArea() {
   const active = tabs.find((t) => t.id === activeTabId);
   const completions = useCollectionCompletions(activeConnectionId, activeDatabase);
 
-  async function handleRun() {
+  async function handleRun(page = 0) {
     if (!active || active.type !== 'script') return;
     const connId = active.connectionId ?? activeConnectionId;
     const db = active.database ?? activeDatabase;
@@ -24,10 +24,10 @@ export function EditorArea() {
       alert('Select a connection and database first');
       return;
     }
-    console.log('[handleRun] tabId:', active.id, 'connId:', connId, 'db:', db);
+    console.log('[handleRun] tabId:', active.id, 'connId:', connId, 'db:', db, 'page:', page);
     startRun(active.id);
     try {
-      await runScript(active.id, connId, db, active.content);
+      await runScript(active.id, connId, db, active.content, page, 50);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error('[handleRun] runScript failed:', msg);
@@ -95,7 +95,7 @@ export function EditorArea() {
           </button>
         </div>
         <div style={{ paddingRight: 10 }}>
-          <button onClick={handleRun} disabled={!active || active.type !== 'script'}>
+          <button onClick={() => handleRun(0)} disabled={!active || active.type !== 'script'}>
             ▶ Run
           </button>
         </div>
@@ -110,12 +110,12 @@ export function EditorArea() {
               <ScriptEditor
                 value={active.content}
                 onChange={(v) => updateContent(active.id, v)}
-                onRun={handleRun}
+                onRun={() => handleRun(0)}
                 collections={completions.map((c) => c.name)}
               />
             </div>
             <div style={{ height: 260, borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column' }}>
-              <ResultsPanel tabId={active.id} />
+              <ResultsPanel tabId={active.id} onPageChange={(page) => handleRun(page)} />
             </div>
           </>
         )}
