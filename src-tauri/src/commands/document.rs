@@ -5,7 +5,8 @@ use tauri::State;
 
 fn id_filter(id: &str) -> Document {
     match ObjectId::parse_str(id) {
-        Ok(oid) => doc! { "_id": oid },
+        // Hex string could be stored as ObjectId or as a plain string — match either.
+        Ok(oid) => doc! { "$or": [{ "_id": oid }, { "_id": id }] },
         Err(_) => doc! { "_id": id },
     }
 }
@@ -28,9 +29,12 @@ pub async fn update_document(
         _ => return Err("updateJson must be a JSON object".into()),
     };
     updated.remove("_id");
-    coll.update_one(id_filter(&id), doc! { "$set": updated })
+    let result = coll.update_one(id_filter(&id), doc! { "$set": updated })
         .await
         .map_err(|e| e.to_string())?;
+    if result.matched_count == 0 {
+        return Err(format!("Document not found (id={})", id));
+    }
     Ok(())
 }
 

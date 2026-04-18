@@ -61,6 +61,7 @@ export function RecordModal({
       onSaved();
       onClose();
     } catch (e) {
+      console.error('[RecordModal] updateDocument failed:', e);
       setError(String(e));
     } finally {
       setSaving(false);
