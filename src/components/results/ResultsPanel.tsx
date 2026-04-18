@@ -10,13 +10,14 @@ const PAGE_SIZE_OPTIONS = [5, 10, 20, 50, 100, 200] as const;
 
 interface Props {
   tabId: string;
+  pageSize: number;
   onPageChange?: (page: number, pageSize: number) => void;
+  onPageSizeChange?: (pageSize: number) => void;
 }
 
-export function ResultsPanel({ tabId, onPageChange }: Props) {
+export function ResultsPanel({ tabId, pageSize, onPageChange, onPageSizeChange }: Props) {
   const res = useResultsStore((s) => s.byTab[tabId]);
   const [view, setView] = useState<'json' | 'table'>('json');
-  const [pageSize, setPageSize] = useState(50);
   const pagination = res?.pagination;
   const totalPages = pagination && pagination.total >= 0
     ? Math.max(1, Math.ceil(pagination.total / pageSize))
@@ -129,7 +130,7 @@ export function ResultsPanel({ tabId, onPageChange }: Props) {
             value={pageSize}
             onChange={(e) => {
               const next = Number(e.target.value);
-              setPageSize(next);
+              onPageSizeChange?.(next);
               onPageChange?.(0, next);
             }}
             disabled={res.isRunning}

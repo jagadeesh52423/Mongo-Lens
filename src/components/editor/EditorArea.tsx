@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useEditorStore } from '../../store/editor';
 import { useConnectionsStore } from '../../store/connections';
 import { ScriptEditor } from './ScriptEditor';
@@ -15,8 +16,10 @@ export function EditorArea() {
   const setError = useResultsStore((s) => s.setError);
   const active = tabs.find((t) => t.id === activeTabId);
   const completions = useCollectionCompletions(activeConnectionId, activeDatabase);
+  const [pageSizes, setPageSizes] = useState<Record<string, number>>({});
+  const activePageSize = active ? (pageSizes[active.id] ?? 50) : 50;
 
-  async function handleRun(page = 0, pageSize = 50) {
+  async function handleRun(page = 0, pageSize = activePageSize) {
     if (!active || active.type !== 'script') return;
     const connId = active.connectionId ?? activeConnectionId;
     const db = active.database ?? activeDatabase;
@@ -115,7 +118,12 @@ export function EditorArea() {
               />
             </div>
             <div style={{ height: 260, borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column' }}>
-              <ResultsPanel tabId={active.id} onPageChange={(page, pageSize) => handleRun(page, pageSize)} />
+              <ResultsPanel
+                tabId={active.id}
+                pageSize={activePageSize}
+                onPageChange={(page, pageSize) => handleRun(page, pageSize)}
+                onPageSizeChange={(size) => setPageSizes((prev) => ({ ...prev, [active.id]: size }))}
+              />
             </div>
           </>
         )}

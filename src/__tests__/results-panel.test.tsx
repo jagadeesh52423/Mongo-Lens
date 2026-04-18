@@ -10,7 +10,7 @@ beforeEach(() => {
 
 describe('ResultsPanel', () => {
   it('shows placeholder when no results for tab', () => {
-    render(<ResultsPanel tabId="t1" />);
+    render(<ResultsPanel tabId="t1" pageSize={50} />);
     expect(screen.getByText(/Run a script/i)).toBeInTheDocument();
   });
 
@@ -24,7 +24,7 @@ describe('ResultsPanel', () => {
         },
       },
     });
-    render(<ResultsPanel tabId="t1" />);
+    render(<ResultsPanel tabId="t1" pageSize={50} />);
     expect(screen.getByText(/alice/)).toBeInTheDocument();
   });
 
@@ -39,7 +39,7 @@ describe('ResultsPanel', () => {
       },
     });
     const user = userEvent.setup();
-    render(<ResultsPanel tabId="t1" />);
+    render(<ResultsPanel tabId="t1" pageSize={50} />);
     await user.click(screen.getByText('Table'));
     expect(screen.getAllByRole('cell').some((c) => c.textContent === 'alice')).toBe(true);
   });
@@ -56,7 +56,7 @@ describe('ResultsPanel pagination', () => {
         },
       },
     });
-    render(<ResultsPanel tabId="t1" onPageChange={() => {}} />);
+    render(<ResultsPanel tabId="t1" pageSize={50} onPageChange={() => {}} />);
     expect(screen.queryByRole('button', { name: /prev/i })).not.toBeInTheDocument();
   });
 
@@ -71,7 +71,7 @@ describe('ResultsPanel pagination', () => {
         },
       },
     });
-    render(<ResultsPanel tabId="t1" onPageChange={() => {}} />);
+    render(<ResultsPanel tabId="t1" pageSize={50} onPageChange={() => {}} />);
     expect(screen.getByRole('button', { name: /prev/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /next/i })).toBeInTheDocument();
     expect(screen.getByText(/of 4/i)).toBeInTheDocument();
@@ -89,7 +89,7 @@ describe('ResultsPanel pagination', () => {
       },
     });
     const user = userEvent.setup();
-    render(<ResultsPanel tabId="t1" onPageChange={onPageChange} />);
+    render(<ResultsPanel tabId="t1" pageSize={50} onPageChange={onPageChange} />);
     await user.click(screen.getByRole('button', { name: /prev/i }));
     expect(onPageChange).toHaveBeenCalledWith(1);
   });
@@ -104,7 +104,7 @@ describe('ResultsPanel pagination', () => {
         },
       },
     });
-    render(<ResultsPanel tabId="t1" onPageChange={() => {}} />);
+    render(<ResultsPanel tabId="t1" pageSize={50} onPageChange={() => {}} />);
     expect(screen.getByRole('button', { name: /prev/i })).toBeDisabled();
   });
 
@@ -118,7 +118,7 @@ describe('ResultsPanel pagination', () => {
         },
       },
     });
-    render(<ResultsPanel tabId="t1" onPageChange={() => {}} />);
+    render(<ResultsPanel tabId="t1" pageSize={50} onPageChange={() => {}} />);
     expect(screen.getByRole('button', { name: /next/i })).toBeDisabled();
   });
 
@@ -132,7 +132,7 @@ describe('ResultsPanel pagination', () => {
         },
       },
     });
-    render(<ResultsPanel tabId="t1" onPageChange={() => {}} />);
+    render(<ResultsPanel tabId="t1" pageSize={50} onPageChange={() => {}} />);
     expect(screen.getByText(/of 1/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /next/i })).toBeDisabled();
   });
