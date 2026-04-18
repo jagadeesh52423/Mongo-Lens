@@ -84,15 +84,19 @@ pub fn spawn_script(
     uri: &str,
     database: &str,
     script_path: &PathBuf,
+    page: u32,
+    page_size: u32,
 ) -> Result<std::process::Child, String> {
     let node = resolve_node().ok_or("Node.js not found — check node installation")?;
-    println!("[spawn_script] node={node} harness={:?} db={database}", harness_path());
+    println!("[spawn_script] node={node} harness={:?} db={database} page={page} page_size={page_size}", harness_path());
     // Spawn node directly (not via shell) to avoid login-shell startup noise on stderr
     Command::new(node)
         .arg(harness_path())
         .arg(database)
         .arg(script_path)
         .env("MONGO_URI", uri)
+        .env("MONGO_PAGE", page.to_string())
+        .env("MONGO_PAGE_SIZE", page_size.to_string())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
