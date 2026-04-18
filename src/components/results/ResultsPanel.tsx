@@ -5,6 +5,13 @@ import { useResultsStore } from '../../store/results';
 import { JsonView } from './JsonView';
 import { TableView } from './TableView';
 import { toCsv, toJsonText } from '../../utils/export';
+import { CellSelectionProvider } from '../../contexts/CellSelectionContext';
+import { useCellShortcuts } from '../../hooks/useCellShortcuts';
+
+function CellShortcutsRegistrar() {
+  useCellShortcuts();
+  return null;
+}
 
 const PAGE_SIZE_OPTIONS = [5, 10, 20, 50, 100, 200] as const;
 
@@ -53,14 +60,18 @@ export function ResultsPanel({ tabId, pageSize, onPageChange, onPageSizeChange }
 
   if (!res || (res.groups.length === 0 && !res.isRunning && !res.lastError && !res.pagination)) {
     return (
-      <div style={{ padding: 12, color: 'var(--fg-dim)' }}>
-        Run a script to see results.
-      </div>
+      <CellSelectionProvider>
+        <div style={{ padding: 12, color: 'var(--fg-dim)' }}>
+          Run a script to see results.
+        </div>
+      </CellSelectionProvider>
     );
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+    <CellSelectionProvider>
+      <CellShortcutsRegistrar />
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
       <div
         style={{
           display: 'flex',
@@ -144,5 +155,6 @@ export function ResultsPanel({ tabId, pageSize, onPageChange, onPageSizeChange }
         </div>
       )}
     </div>
+    </CellSelectionProvider>
   );
 }

@@ -137,3 +137,34 @@ describe('ResultsPanel pagination', () => {
     expect(screen.getByRole('button', { name: /next/i })).toBeDisabled();
   });
 });
+
+describe('ResultsPanel cell shortcuts integration', () => {
+  beforeEach(() => {
+    useResultsStore.setState({ byTab: {} });
+  });
+
+  it('clicking a table cell and pressing Cmd+C copies the value', async () => {
+    useResultsStore.setState({
+      byTab: {
+        t1: {
+          groups: [{ groupIndex: 0, docs: [{ city: 'Tokyo' }] }],
+          isRunning: false,
+          executionMs: 5,
+        },
+      },
+    });
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText },
+      writable: true,
+      configurable: true,
+    });
+    render(<ResultsPanel tabId="t1" pageSize={50} />);
+    await user.click(screen.getByText('Table'));
+    const cell = screen.getAllByRole('cell').find((c) => c.textContent === 'Tokyo')!;
+    await user.click(cell);
+    await user.keyboard('{Meta>}c{/Meta}');
+    expect(writeText).toHaveBeenCalledWith('Tokyo');
+  });
+});
