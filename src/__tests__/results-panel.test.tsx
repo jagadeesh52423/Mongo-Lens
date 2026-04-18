@@ -197,3 +197,85 @@ describe('ResultsPanel cell shortcuts integration', () => {
     expect(cells.every((c) => c.getAttribute('aria-selected') !== 'true')).toBe(true);
   });
 });
+
+describe('ResultsPanel record modal', () => {
+  beforeEach(() => {
+    useResultsStore.setState({
+      byTab: {
+        t1: {
+          groups: [{ groupIndex: 0, docs: [{ _id: 'abc123', city: 'Tokyo' }] }],
+          isRunning: false,
+          executionMs: 5,
+        },
+      },
+    });
+  });
+
+  it('F3 opens view modal when a cell is selected', async () => {
+    const user = userEvent.setup();
+    render(
+      <ResultsPanel
+        tabId="t1"
+        pageSize={50}
+        connectionId="conn1"
+        database="mydb"
+        collection="users"
+      />
+    );
+    await user.click(screen.getByText('Table'));
+    const cell = screen.getAllByRole('cell').find((c) => c.textContent === 'Tokyo')!;
+    await user.click(cell);
+    await user.keyboard('{F3}');
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.getByText('Full Record')).toBeInTheDocument();
+  });
+
+  it('F4 opens edit modal when a cell is selected', async () => {
+    const user = userEvent.setup();
+    render(
+      <ResultsPanel
+        tabId="t1"
+        pageSize={50}
+        connectionId="conn1"
+        database="mydb"
+        collection="users"
+      />
+    );
+    await user.click(screen.getByText('Table'));
+    const cell = screen.getAllByRole('cell').find((c) => c.textContent === 'Tokyo')!;
+    await user.click(cell);
+    await user.keyboard('{F4}');
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.getByText('Edit Record')).toBeInTheDocument();
+  });
+
+  it('Esc closes the modal', async () => {
+    const user = userEvent.setup();
+    render(
+      <ResultsPanel
+        tabId="t1"
+        pageSize={50}
+        connectionId="conn1"
+        database="mydb"
+        collection="users"
+      />
+    );
+    await user.click(screen.getByText('Table'));
+    const cell = screen.getAllByRole('cell').find((c) => c.textContent === 'Tokyo')!;
+    await user.click(cell);
+    await user.keyboard('{F3}');
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('does not open modal when connectionId is absent', async () => {
+    const user = userEvent.setup();
+    render(<ResultsPanel tabId="t1" pageSize={50} />);
+    await user.click(screen.getByText('Table'));
+    const cell = screen.getAllByRole('cell').find((c) => c.textContent === 'Tokyo')!;
+    await user.click(cell);
+    await user.keyboard('{F3}');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+});

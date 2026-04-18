@@ -4,12 +4,20 @@ import { writeTextFile } from '@tauri-apps/plugin-fs';
 import { useResultsStore } from '../../store/results';
 import { JsonView } from './JsonView';
 import { TableView } from './TableView';
+import { RecordModal } from './RecordModal';
 import { toCsv, toJsonText } from '../../utils/export';
 import { CellSelectionProvider, useCellSelection } from '../../contexts/CellSelectionContext';
 import { useCellShortcuts } from '../../hooks/useCellShortcuts';
+import { keyboardService } from '../../services/KeyboardService';
 
-function CellShortcutsRegistrar() {
-  useCellShortcuts();
+function CellShortcutsRegistrar({
+  onViewRecord,
+  onEditRecord,
+}: {
+  onViewRecord?: (doc: Record<string, unknown>) => void;
+  onEditRecord?: (doc: Record<string, unknown>) => void;
+}) {
+  useCellShortcuts(keyboardService, { onViewRecord, onEditRecord });
   return null;
 }
 
@@ -26,11 +34,22 @@ interface Props {
   pageSize: number;
   onPageChange?: (page: number, pageSize: number) => void;
   onPageSizeChange?: (pageSize: number) => void;
+  connectionId?: string;
+  database?: string;
+  collection?: string;
+  onDocUpdated?: () => void;
 }
 
-export function ResultsPanel({ tabId, pageSize, onPageChange, onPageSizeChange }: Props) {
+export function ResultsPanel({
+  tabId, pageSize, onPageChange, onPageSizeChange,
+  connectionId, database, collection, onDocUpdated,
+}: Props) {
   const res = useResultsStore((s) => s.byTab[tabId]);
-  const [view, setView] = useState<'json' | 'table'>('json');
+  const [view, setView] = useState<'json' | 'table'>('table');
+  const [recordModal, setRecordModal] = useState<{
+    doc: Record<string, unknown>;
+    mode: 'view' | 'edit';
+  } | null>(null);
   const pagination = res?.pagination;
   const totalPages = pagination && pagination.total >= 0
     ? Math.max(1, Math.ceil(pagination.total / pageSize))
@@ -67,9 +86,28 @@ export function ResultsPanel({ tabId, pageSize, onPageChange, onPageSizeChange }
   if (!res || (res.groups.length === 0 && !res.isRunning && !res.lastError && !res.pagination)) {
     return (
       <CellSelectionProvider>
+        <CellShortcutsRegistrar
+          onViewRecord={connectionId && database && collection
+            ? (doc) => setRecordModal({ doc, mode: 'view' })
+            : undefined}
+          onEditRecord={connectionId && database && collection
+            ? (doc) => setRecordModal({ doc, mode: 'edit' })
+            : undefined}
+        />
         <div style={{ padding: 12, color: 'var(--fg-dim)' }}>
           Run a script to see results.
         </div>
+        {recordModal && connectionId && database && collection && (
+          <RecordModal
+            doc={recordModal.doc}
+            initialMode={recordModal.mode}
+            connectionId={connectionId}
+            database={database}
+            collection={collection}
+            onClose={() => setRecordModal(null)}
+            onSaved={() => { setRecordModal(null); onDocUpdated?.(); }}
+          />
+        )}
       </CellSelectionProvider>
     );
   }
@@ -77,7 +115,14 @@ export function ResultsPanel({ tabId, pageSize, onPageChange, onPageSizeChange }
   return (
     <CellSelectionProvider>
       <SelectionClearer tabId={tabId} isRunning={!!res?.isRunning} />
-      <CellShortcutsRegistrar />
+      <CellShortcutsRegistrar
+        onViewRecord={connectionId && database && collection
+          ? (doc) => setRecordModal({ doc, mode: 'view' })
+          : undefined}
+        onEditRecord={connectionId && database && collection
+          ? (doc) => setRecordModal({ doc, mode: 'edit' })
+          : undefined}
+      />
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
       <div
         style={{
@@ -162,6 +207,17 @@ export function ResultsPanel({ tabId, pageSize, onPageChange, onPageSizeChange }
         </div>
       )}
     </div>
+    {recordModal && connectionId && database && collection && (
+      <RecordModal
+        doc={recordModal.doc}
+        initialMode={recordModal.mode}
+        connectionId={connectionId}
+        database={database}
+        collection={collection}
+        onClose={() => setRecordModal(null)}
+        onSaved={() => { setRecordModal(null); onDocUpdated?.(); }}
+      />
+    )}
     </CellSelectionProvider>
   );
 }
