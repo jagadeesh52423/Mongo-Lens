@@ -14,6 +14,14 @@ const SCRIPT_TIMEOUT_SECS: u64 = 30;
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
+pub struct PaginationInfo {
+    pub total: i64,
+    pub page: u32,
+    pub page_size: u32,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct ScriptEvent {
     pub tab_id: String,
     pub kind: String,
@@ -21,6 +29,7 @@ pub struct ScriptEvent {
     pub docs: Option<serde_json::Value>,
     pub error: Option<String>,
     pub execution_ms: Option<u128>,
+    pub pagination: Option<PaginationInfo>,
 }
 
 #[tauri::command]
@@ -31,6 +40,8 @@ pub async fn run_script(
     connection_id: String,
     database: String,
     script: String,
+    page: Option<u32>,
+    page_size: Option<u32>,
 ) -> Result<(), String> {
     println!("[run_script] tab={tab_id} connection_id={connection_id} db={database}");
     let conn = state.open_db().map_err(|e| e.to_string())?;
@@ -51,10 +62,13 @@ pub async fn run_script(
     let app_handle = app.clone();
     let start = Instant::now();
 
+    let page = page.unwrap_or(0);
+    let page_size = page_size.unwrap_or(50);
+
     // Wrap the body so the temp script file is always cleaned up,
     // even if spawn_script or stdout/stderr take fail with `?`.
     let result: Result<(), String> = async {
-        let mut child = spawn_script(&uri, &database, &script_path)?;
+        let mut child = spawn_script(&uri, &database, &script_path, page, page_size)?;
         println!("[run_script] child spawned pid={:?}", child.id());
         let stdout = child.stdout.take().ok_or_else(|| "no stdout".to_string())?;
         let stderr = child.stderr.take().ok_or_else(|| "no stderr".to_string())?;
@@ -66,9 +80,31 @@ pub async fn run_script(
                 let reader = BufReader::new(stdout);
                 for line in reader.lines().flatten() {
                     if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
-                        if let (Some(idx), Some(docs)) =
-                            (v.get("__group").and_then(|x| x.as_i64()), v.get("docs"))
-                        {
+                        if let Some(pg) = v.get("__pagination") {
+                            if let (Some(total), Some(page_val), Some(page_size_val)) = (
+                                pg.get("total").and_then(|x| x.as_i64()),
+                                pg.get("page").and_then(|x| x.as_u64()),
+                                pg.get("pageSize").and_then(|x| x.as_u64()),
+                            ) {
+                                let evt = ScriptEvent {
+                                    tab_id: (*tab).clone(),
+                                    kind: "pagination".into(),
+                                    group_index: None,
+                                    docs: None,
+                                    error: None,
+                                    execution_ms: None,
+                                    pagination: Some(PaginationInfo {
+                                        total,
+                                        page: page_val as u32,
+                                        page_size: page_size_val as u32,
+                                    }),
+                                };
+                                let _ = ah.emit("script-event", evt);
+                            }
+                        } else if let (Some(idx), Some(docs)) = (
+                            v.get("__group").and_then(|x| x.as_i64()),
+                            v.get("docs"),
+                        ) {
                             let evt = ScriptEvent {
                                 tab_id: (*tab).clone(),
                                 kind: "group".into(),
@@ -76,6 +112,7 @@ pub async fn run_script(
                                 docs: Some(docs.clone()),
                                 error: None,
                                 execution_ms: None,
+                                pagination: None,
                             };
                             let _ = ah.emit("script-event", evt);
                         }
@@ -106,6 +143,7 @@ pub async fn run_script(
                         docs: None,
                         error: Some(err),
                         execution_ms: None,
+                        pagination: None,
                     };
                     let _ = ah.emit("script-event", evt);
                 }
@@ -136,6 +174,7 @@ pub async fn run_script(
                     docs: None,
                     error: if status.success() { None } else { Some("exited with error".into()) },
                     execution_ms: Some(elapsed),
+                    pagination: None,
                 };
                 let _ = app_handle.emit("script-event", done);
                 Ok(())
@@ -161,6 +200,7 @@ pub async fn run_script(
                     docs: None,
                     error: Some(format!("Script execution timed out ({SCRIPT_TIMEOUT_SECS}s)")),
                     execution_ms: None,
+                    pagination: None,
                 };
                 let _ = app_handle.emit("script-event", evt);
                 Ok(())
