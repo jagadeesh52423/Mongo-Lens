@@ -4,7 +4,7 @@ import { useResultsStore } from '../store/results';
 import type { ScriptEvent } from '../types';
 
 export function useScriptEvents() {
-  const { appendGroup, setError, finishRun } = useResultsStore();
+  const { appendGroup, setError, finishRun, setPagination } = useResultsStore();
 
   useEffect(() => {
     let unsub: (() => void) | null = null;
@@ -16,6 +16,8 @@ export function useScriptEvents() {
           groupIndex: p.groupIndex,
           docs: Array.isArray(p.docs) ? p.docs : [p.docs],
         });
+      } else if (p.kind === 'pagination' && p.pagination) {
+        setPagination(p.tabId, p.pagination);
       } else if (p.kind === 'error' && p.error) {
         setError(p.tabId, p.error);
       } else if (p.kind === 'done') {
@@ -27,5 +29,5 @@ export function useScriptEvents() {
     return () => {
       if (unsub) unsub();
     };
-  }, [appendGroup, setError, finishRun]);
+  }, [appendGroup, setError, finishRun, setPagination]);
 }
