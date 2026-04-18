@@ -80,3 +80,19 @@ describe('formatKeyCombo', () => {
     expect(formatKeyCombo({ shift: true, cmd: true, key: 'c' })).toBe('⇧⌘C');
   });
 });
+
+import { renderHook } from '@testing-library/react';
+import { useKeyboard } from '../hooks/useKeyboard';
+
+describe('useKeyboard', () => {
+  it('registers shortcut on mount and unregisters on unmount', () => {
+    const svc2 = new KeyboardService();
+    const action = vi.fn();
+    const { unmount } = renderHook(() =>
+      useKeyboard({ id: 'hook-test', keys: { cmd: true, key: 'z' }, label: 'Test', action }, svc2)
+    );
+    expect(svc2.getAll()).toHaveLength(1);
+    unmount();
+    expect(svc2.getAll()).toHaveLength(0);
+  });
+});
