@@ -81,11 +81,18 @@ export interface BrowsePage {
   pageSize: number;
 }
 
+export interface PaginationState {
+  total: number;   // -1 means count unavailable
+  page: number;    // 0-indexed
+  pageSize: number;
+}
+
 export interface ScriptEvent {
   tabId: string;
-  kind: 'group' | 'error' | 'done';
+  kind: 'group' | 'error' | 'done' | 'pagination';
   groupIndex?: number;
   docs?: unknown[];
   error?: string;
   executionMs?: number;
+  pagination?: PaginationState;
 }
