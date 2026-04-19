@@ -1,0 +1,41 @@
+<svg width="100%" viewBox="0 0 680 680" role="img" xmlns="http://www.w3.org/2000/svg" style="max-width: 680px; display: block; margin-inline: auto;">
+  <title>MongoLens menu bar icon</title>
+  <desc>MongoLens square icon — MongoDB leaf with lens overlay, for mac menu bar use.</desc>
+
+  <defs>
+    <style>
+      @media (prefers-color-scheme: dark) {
+        .icon-bg { fill: #0A2A20; }
+      }
+    </style>
+  </defs>
+
+  <!-- Square background -->
+  <rect class="icon-bg" x="90" y="90" width="500" height="500" rx="110" fill="#001E2B"></rect>
+
+  <!-- Leaf -->
+  <path d="M340 168 C340 168, 430 238, 436 340 C442 428, 390 496, 340 522 C290 496, 238 428, 244 340 C250 238, 340 168, 340 168 Z" fill="#00ED64"></path>
+
+  <!-- Stem -->
+  <rect x="333" y="510" width="14" height="52" rx="7" fill="#00ED64"></rect>
+
+  <!-- Lens outer dark ring -->
+  <circle cx="355" cy="336" r="108" fill="none" stroke="#001E2B" stroke-width="28"></circle>
+  <!-- Lens outer green ring -->
+  <circle cx="355" cy="336" r="108" fill="none" stroke="#00ED64" stroke-width="13"></circle>
+
+  <!-- Cross-hairs -->
+  <line x1="355" y1="252" x2="355" y2="274" stroke="#001E2B" stroke-width="6" stroke-linecap="round"></line>
+  <line x1="355" y1="398" x2="355" y2="420" stroke="#001E2B" stroke-width="6" stroke-linecap="round"></line>
+  <line x1="271" y1="336" x2="293" y2="336" stroke="#001E2B" stroke-width="6" stroke-linecap="round"></line>
+  <line x1="417" y1="336" x2="439" y2="336" stroke="#001E2B" stroke-width="6" stroke-linecap="round"></line>
+
+  <!-- Center dot -->
+  <circle cx="355" cy="336" r="18" fill="#001E2B"></circle>
+  <circle cx="355" cy="336" r="10" fill="#00ED64"></circle>
+
+  <!-- Lens handle -->
+  <line x1="438" y1="419" x2="508" y2="490" stroke="#001E2B" stroke-width="28" stroke-linecap="round"></line>
+  <line x1="438" y1="419" x2="508" y2="490" stroke="#00ED64" stroke-width="13" stroke-linecap="round"></line>
+
+</svg>

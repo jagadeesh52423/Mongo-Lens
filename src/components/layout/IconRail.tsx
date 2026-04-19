@@ -23,6 +23,18 @@ export function IconRail({ active, onChange }: Props) {
         borderRight: '1px solid var(--border)',
       }}
     >
+      <div
+        style={{
+          height: 44,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          borderBottom: '1px solid var(--border)',
+          flexShrink: 0,
+        }}
+      >
+        <img src="/logo.svg" alt="Logo" style={{ width: 24, height: 24 }} />
+      </div>
       {items.map((it) => (
         <button
           key={it.key}
