@@ -63,20 +63,20 @@ describe('useTableActions', () => {
   it('registers 6 actions', () => {
     const svc = new KeyboardService();
     renderHook(() => useTableActions(), { wrapper: makeWrapper(svc) });
-    expect(svc.getAll()).toHaveLength(6);
+    expect(svc.getShortcuts()).toHaveLength(6);
   });
 
   it('cell.viewRecord has showInContextMenu: true always', () => {
     const svc = new KeyboardService();
     renderHook(() => useTableActions(), { wrapper: makeWrapper(svc) });
-    const s = svc.getAll().find((s) => s.id === 'cell.viewRecord')!;
+    const s = svc.getShortcuts().find((s) => s.id === 'cell.viewRecord')!;
     expect(s.showInContextMenu).toBe(true);
   });
 
   it('cell.editRecord has showInContextMenu: true', () => {
     const svc = new KeyboardService();
     renderHook(() => useTableActions(), { wrapper: makeWrapper(svc) });
-    const s = svc.getAll().find((s) => s.id === 'cell.editRecord')!;
+    const s = svc.getShortcuts().find((s) => s.id === 'cell.editRecord')!;
     expect(s.showInContextMenu).toBe(true);
   });
 
@@ -91,7 +91,7 @@ describe('useTableActions', () => {
     act(() => {
       result.current.selection.select({ rowIndex: 0, colKey: 'name', doc, value: 'alice' });
     });
-    const viewAction = svc.getAll().find((s) => s.id === 'cell.viewRecord')!;
+    const viewAction = svc.getShortcuts().find((s) => s.id === 'cell.viewRecord')!;
     act(() => { viewAction.action(); });
     expect(onViewRecord).toHaveBeenCalledWith(doc);
   });
@@ -107,7 +107,7 @@ describe('useTableActions', () => {
     act(() => {
       result.current.selection.select({ rowIndex: 0, colKey: 'name', doc, value: 'alice' });
     });
-    const editAction = svc.getAll().find((s) => s.id === 'cell.editRecord')!;
+    const editAction = svc.getShortcuts().find((s) => s.id === 'cell.editRecord')!;
     act(() => { editAction.action(); });
     expect(onEditRecord).toHaveBeenCalledWith(doc);
   });
@@ -116,7 +116,7 @@ describe('useTableActions', () => {
     const svc = new KeyboardService();
     const onViewRecord = vi.fn();
     renderHook(() => useTableActions({ onViewRecord }), { wrapper: makeWrapper(svc) });
-    const viewAction = svc.getAll().find((s) => s.id === 'cell.viewRecord')!;
+    const viewAction = svc.getShortcuts().find((s) => s.id === 'cell.viewRecord')!;
     act(() => { viewAction.action(); });
     expect(onViewRecord).not.toHaveBeenCalled();
   });
@@ -130,7 +130,7 @@ describe('useTableActions', () => {
     act(() => {
       result.current.selection.select({ rowIndex: 0, colKey: 'name', doc: { name: 'alice' }, value: 'alice' });
     });
-    const copyValue = svc.getAll().find((s) => s.id === 'cell.copyValue')!;
+    const copyValue = svc.getShortcuts().find((s) => s.id === 'cell.copyValue')!;
     await act(async () => { copyValue.action(); });
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith('alice');
   });

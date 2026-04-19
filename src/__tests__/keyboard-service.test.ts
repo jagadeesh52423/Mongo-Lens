@@ -59,7 +59,7 @@ describe('KeyboardService', () => {
   it('getAll returns registered shortcuts', () => {
     svc.register({ id: 'a', keys: { cmd: true, key: 'c' }, label: 'A', action: vi.fn(), showInContextMenu: true });
     svc.register({ id: 'b', keys: { cmd: true, key: 'v' }, label: 'B', action: vi.fn() });
-    expect(svc.getAll()).toHaveLength(2);
+    expect(svc.getShortcuts()).toHaveLength(2);
   });
 });
 
@@ -91,8 +91,8 @@ describe('useKeyboard', () => {
     const { unmount } = renderHook(() =>
       useKeyboard({ id: 'hook-test', keys: { cmd: true, key: 'z' }, label: 'Test', action }, svc2)
     );
-    expect(svc2.getAll()).toHaveLength(1);
+    expect(svc2.getShortcuts()).toHaveLength(1);
     unmount();
-    expect(svc2.getAll()).toHaveLength(0);
+    expect(svc2.getShortcuts()).toHaveLength(0);
   });
 });

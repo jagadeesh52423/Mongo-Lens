@@ -21,7 +21,8 @@ export function RecordModal({
   onSaved,
 }: RecordModalProps) {
   const idStr = String(doc._id ?? '');
-  const originalJson = JSON.stringify(doc, null, 2);
+  const { _id: _removed, ...docWithoutId } = doc;
+  const originalJson = JSON.stringify(docWithoutId, null, 2);
 
   const [mode, setMode] = useState<'view' | 'edit'>(initialMode);
   const [editedJson, setEditedJson] = useState(originalJson);
@@ -49,19 +50,19 @@ export function RecordModal({
       setError((e as Error).message);
       return;
     }
-    if (String(parsed._id) !== idStr) {
+    if ('_id' in parsed && String(parsed._id) !== idStr) {
       setError(`_id cannot be changed. Original: ${idStr}`);
       return;
     }
-    if (JSON.stringify(parsed) === JSON.stringify(doc)) {
+    const { _id: _drop, ...parsedWithoutId } = parsed;
+    if (JSON.stringify(parsedWithoutId) === JSON.stringify(docWithoutId)) {
       onClose();
       return;
     }
     setSaving(true);
     setError(null);
     try {
-      const { _id: _ignored, ...updatePayload } = parsed;
-      await updateDocument(connectionId, database, collection, idStr, JSON.stringify(updatePayload));
+      await updateDocument(connectionId, database, collection, idStr, JSON.stringify(parsedWithoutId));
       onSaved();
       onClose();
     } catch (e) {
@@ -123,13 +124,30 @@ export function RecordModal({
         }}
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span
-            style={{
-              fontWeight: 600,
-              color: mode === 'edit' ? 'var(--accent-orange, #ed8936)' : 'var(--fg)',
-            }}
-          >
-            {mode === 'view' ? 'Full Record' : 'Edit Record'}
+          <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span
+              style={{
+                fontWeight: 600,
+                color: mode === 'edit' ? 'var(--accent-orange, #ed8936)' : 'var(--fg)',
+              }}
+            >
+              {mode === 'view' ? 'Full Record' : 'Edit Record'}
+            </span>
+            {idStr && (
+              <span
+                style={{
+                  fontSize: 11,
+                  color: 'var(--fg-dim)',
+                  background: 'var(--bg-rail)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 3,
+                  padding: '1px 6px',
+                  fontFamily: 'var(--font-mono)',
+                }}
+              >
+                {idStr}
+              </span>
+            )}
           </span>
           <button aria-label="Close" onClick={onClose}>✕</button>
         </div>

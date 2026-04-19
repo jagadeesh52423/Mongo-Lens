@@ -1,18 +1,19 @@
-export type PanelKey = 'connections' | 'collections' | 'saved' | 'settings';
+export type PanelKey = 'connections' | 'collections' | 'saved';
 
 interface Props {
   active: PanelKey;
   onChange: (p: PanelKey) => void;
+  onSettingsOpen: () => void;
+  settingsOpen: boolean;
 }
 
 const items: { key: PanelKey; label: string; icon: string }[] = [
   { key: 'connections', label: 'Connections', icon: '⚡' },
   { key: 'collections', label: 'Collections', icon: '🗂' },
   { key: 'saved', label: 'Saved Scripts', icon: '⭐' },
-  { key: 'settings', label: 'Settings', icon: '⚙' },
 ];
 
-export function IconRail({ active, onChange }: Props) {
+export function IconRail({ active, onChange, onSettingsOpen, settingsOpen }: Props) {
   return (
     <div
       style={{
@@ -44,9 +45,11 @@ export function IconRail({ active, onChange }: Props) {
             height: 44,
             border: 'none',
             borderLeft:
-              active === it.key ? '2px solid var(--accent)' : '2px solid transparent',
+              !settingsOpen && active === it.key
+                ? '2px solid var(--accent)'
+                : '2px solid transparent',
             background: 'transparent',
-            color: active === it.key ? 'var(--fg)' : 'var(--fg-dim)',
+            color: !settingsOpen && active === it.key ? 'var(--fg)' : 'var(--fg-dim)',
             fontSize: 18,
             cursor: 'pointer',
           }}
@@ -54,6 +57,25 @@ export function IconRail({ active, onChange }: Props) {
           {it.icon}
         </button>
       ))}
+      <div style={{ flex: 1 }} />
+      <button
+        aria-label="Settings"
+        onClick={onSettingsOpen}
+        style={{
+          height: 44,
+          border: 'none',
+          borderLeft: settingsOpen
+            ? '2px solid var(--accent)'
+            : '2px solid transparent',
+          background: 'transparent',
+          color: settingsOpen ? 'var(--fg)' : 'var(--fg-dim)',
+          fontSize: 18,
+          cursor: 'pointer',
+          flexShrink: 0,
+        }}
+      >
+        ⚙
+      </button>
     </div>
   );
 }

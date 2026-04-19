@@ -72,7 +72,7 @@ export function TableView({ docs }: Props) {
   );
 
   const contextMenuItems: ContextMenuItem[] = keyboardService
-    .getAll()
+    .getShortcuts()
     .filter((s) => s.showInContextMenu)
     .map((s) => ({
       label: s.label,

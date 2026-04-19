@@ -5,9 +5,11 @@ import { StatusBar } from './components/layout/StatusBar';
 import { ConnectionPanel } from './components/connections/ConnectionPanel';
 import { EditorArea } from './components/editor/EditorArea';
 import { SavedScriptsPanel } from './components/saved-scripts/SavedScriptsPanel';
+import { SettingsView } from './settings/SettingsView';
 import { useConnectionsStore } from './store/connections';
 import { useScriptEvents } from './hooks/useScriptEvents';
 import { checkNodeRunner, installNodeRunner } from './ipc';
+import { keyboardService } from './services/KeyboardService';
 
 export default function App() {
   useScriptEvents();
@@ -35,26 +37,50 @@ export default function App() {
     }).catch((e) => console.error('[runner] check failed:', e));
   }, []);
   const [panel, setPanel] = useState<PanelKey>('connections');
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const { connections, activeConnectionId, activeDatabase } = useConnectionsStore();
   const active = connections.find((c) => c.id === activeConnectionId);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => keyboardService.dispatch(e);
+    window.addEventListener('keydown', handler, false);
+    return () => window.removeEventListener('keydown', handler, false);
+  }, []);
+
+  useEffect(() => {
+    return keyboardService.register({
+      id: 'open-settings',
+      keys: { cmd: true, key: ',' },
+      label: 'Open Settings',
+      action: () => setSettingsOpen((s) => !s),
+    });
+  }, []);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
-        <IconRail active={panel} onChange={setPanel} />
-        <SidePanel active={panel}>
-          {panel === 'connections' && <ConnectionPanel />}
-          {panel === 'saved' && <SavedScriptsPanel />}
-          {panel === 'collections' && (
-            <div style={{ padding: 12, color: 'var(--fg-dim)' }}>Connect to a server to view collections.</div>
-          )}
-          {panel === 'settings' && (
-            <div style={{ padding: 12, color: 'var(--fg-dim)' }}>Settings — coming soon.</div>
-          )}
-        </SidePanel>
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-          <EditorArea />
-        </div>
+        <IconRail
+          active={panel}
+          onChange={setPanel}
+          onSettingsOpen={() => setSettingsOpen((s) => !s)}
+          settingsOpen={settingsOpen}
+        />
+        {settingsOpen ? (
+          <SettingsView onClose={() => setSettingsOpen(false)} />
+        ) : (
+          <>
+            <SidePanel active={panel}>
+              {panel === 'connections' && <ConnectionPanel />}
+              {panel === 'saved' && <SavedScriptsPanel />}
+              {panel === 'collections' && (
+                <div style={{ padding: 12, color: 'var(--fg-dim)' }}>Connect to a server to view collections.</div>
+              )}
+            </SidePanel>
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+              <EditorArea />
+            </div>
+          </>
+        )}
       </div>
       <StatusBar
         connectionName={active?.name}

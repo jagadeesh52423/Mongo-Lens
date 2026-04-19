@@ -9,7 +9,6 @@ const titles: Record<PanelKey, string> = {
   connections: 'Connections',
   collections: 'Collections',
   saved: 'Saved Scripts',
-  settings: 'Settings',
 };
 
 export function SidePanel({ active, children }: Props) {
