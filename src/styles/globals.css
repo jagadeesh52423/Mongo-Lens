@@ -1,13 +1,13 @@
 :root {
-  --bg: #1e1e1e;
-  --bg-panel: #252526;
-  --bg-rail: #333333;
-  --bg-hover: #2a2d2e;
+  --bg: #001e2b;
+  --bg-panel: #0d2d3c;
+  --bg-rail: #022e45;
+  --bg-hover: #1a3d4f;
   --fg: #d4d4d4;
   --fg-dim: #858585;
-  --border: #3c3c3c;
-  --accent: #007acc;
-  --accent-green: #4ec9b0;
+  --border: #1e4d63;
+  --accent: #00ed64;
+  --accent-green: #00ed64;
   --accent-red: #f48771;
   --font-mono: "SF Mono", Menlo, Consolas, monospace;
   --font-sans: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;

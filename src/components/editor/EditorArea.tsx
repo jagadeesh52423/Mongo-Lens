@@ -3,13 +3,13 @@ import { useEditorStore } from '../../store/editor';
 import { useConnectionsStore } from '../../store/connections';
 import { ScriptEditor } from './ScriptEditor';
 import { ContextBar } from './ContextBar';
-import { runScript, cancelScript } from '../../ipc';
+import { runScript, cancelScript, createScript } from '../../ipc';
 import { useResultsStore } from '../../store/results';
 import { ResultsPanel } from '../results/ResultsPanel';
 import { useCollectionCompletions } from '../../hooks/useCollectionCompletions';
 
 export function EditorArea() {
-  const { tabs, activeTabId, setActive, closeTab, updateContent, openTab, updateTab } = useEditorStore();
+  const { tabs, activeTabId, setActive, closeTab, updateContent, openTab, updateTab, bumpScriptsVersion } = useEditorStore();
   const { activeConnectionId, activeDatabase } = useConnectionsStore();
   const startRun = useResultsStore((s) => s.startRun);
   const finishRun = useResultsStore((s) => s.finishRun);
@@ -48,6 +48,12 @@ export function EditorArea() {
     finishRun(active.id, 0);
   }
 
+  async function handleSave(name: string, tags: string) {
+    if (!active || active.type !== 'script') return;
+    await createScript(name, active.content, tags);
+    bumpScriptsVersion();
+  }
+
   function newScriptTab() {
     const id = `script:${Date.now()}`;
     openTab({
@@ -83,7 +89,8 @@ export function EditorArea() {
                 alignItems: 'center',
                 gap: 6,
                 cursor: 'pointer',
-                background: t.id === activeTabId ? 'var(--bg)' : 'transparent',
+                background: t.id === activeTabId ? 'var(--accent)' : 'transparent',
+                color: t.id === activeTabId ? 'var(--bg)' : 'inherit',
                 borderRight: '1px solid var(--border)',
               }}
             >
@@ -122,6 +129,7 @@ export function EditorArea() {
           }
           onDatabaseChange={(db) => updateTab(active.id, { database: db })}
           onRun={() => handleRun(0)}
+          onSave={handleSave}
           isRunning={isRunning}
         />
       )}

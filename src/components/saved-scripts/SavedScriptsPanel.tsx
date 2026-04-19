@@ -1,14 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { listScripts, deleteScript, createScript } from '../../ipc';
+import { listScripts, deleteScript } from '../../ipc';
 import { useEditorStore } from '../../store/editor';
 import type { SavedScript, EditorTab } from '../../types';
-import { SaveScriptDialog } from './SaveScriptDialog';
 
 export function SavedScriptsPanel() {
   const [scripts, setScripts] = useState<SavedScript[]>([]);
   const [query, setQuery] = useState('');
-  const { openTab, tabs, activeTabId } = useEditorStore();
-  const [saving, setSaving] = useState(false);
+  const { openTab, savedScriptsVersion } = useEditorStore();
 
   async function reload() {
     setScripts(await listScripts());
@@ -16,7 +14,7 @@ export function SavedScriptsPanel() {
 
   useEffect(() => {
     reload();
-  }, []);
+  }, [savedScriptsVersion]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -43,16 +41,6 @@ export function SavedScriptsPanel() {
     reload();
   }
 
-  async function handleSaveCurrent(name: string, tags: string) {
-    const active = tabs.find((t) => t.id === activeTabId);
-    if (!active || active.type !== 'script') {
-      throw new Error('Open a script tab first');
-    }
-    await createScript(name, active.content, tags);
-    setSaving(false);
-    reload();
-  }
-
   return (
     <div>
       <div style={{ padding: 8, borderBottom: '1px solid var(--border)', display: 'flex', gap: 6 }}>
@@ -62,7 +50,6 @@ export function SavedScriptsPanel() {
           onChange={(e) => setQuery(e.target.value)}
           style={{ flex: 1 }}
         />
-        <button onClick={() => setSaving(true)}>+ Save</button>
       </div>
       <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
         {filtered.map((s) => (
@@ -88,12 +75,6 @@ export function SavedScriptsPanel() {
           </li>
         ))}
       </ul>
-      {saving && (
-        <SaveScriptDialog
-          onSave={handleSaveCurrent}
-          onCancel={() => setSaving(false)}
-        />
-      )}
     </div>
   );
 }

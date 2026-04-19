@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { SaveScriptDialog } from '../saved-scripts/SaveScriptDialog';
 import { useConnectionsStore } from '../../store/connections';
 import { listDatabases } from '../../ipc';
 
@@ -9,6 +10,7 @@ interface Props {
   onConnectionChange: (id: string) => void;
   onDatabaseChange: (db: string) => void;
   onRun: () => void;
+  onSave: (name: string, tags: string) => Promise<void>;
   isRunning: boolean;
 }
 
@@ -19,6 +21,7 @@ export function ContextBar({
   onConnectionChange,
   onDatabaseChange,
   onRun,
+  onSave,
   isRunning,
 }: Props) {
   const connections = useConnectionsStore((s) => s.connections);
@@ -66,8 +69,10 @@ export function ContextBar({
   }, [connectionId, connectedIds]);
 
   const canRun = !!connectionId && !!database && !isRunning;
+  const [saving, setSaving] = useState(false);
 
   return (
+    <>
     <div
       style={{
         display: 'flex',
@@ -131,6 +136,7 @@ export function ContextBar({
         </>
       )}
       <div style={{ flex: 1 }} />
+      <button onClick={() => setSaving(true)}>+ Save</button>
       <button
         onClick={onRun}
         disabled={!canRun}
@@ -142,5 +148,12 @@ export function ContextBar({
         ▶ Run
       </button>
     </div>
+    {saving && (
+      <SaveScriptDialog
+        onSave={async (name, tags) => { await onSave(name, tags); setSaving(false); }}
+        onCancel={() => setSaving(false)}
+      />
+    )}
+  </>
   );
 }

@@ -5,6 +5,7 @@ import { useConnectionsStore } from './connections';
 interface EditorState {
   tabs: EditorTab[];
   activeTabId: string | null;
+  savedScriptsVersion: number;
   openTab: (tab: EditorTab) => void;
   closeTab: (id: string) => void;
   setActive: (id: string) => void;
@@ -12,11 +13,13 @@ interface EditorState {
   markClean: (id: string) => void;
   renameTab: (id: string, title: string) => void;
   updateTab: (id: string, patch: Partial<EditorTab>) => void;
+  bumpScriptsVersion: () => void;
 }
 
 export const useEditorStore = create<EditorState>((set) => ({
   tabs: [],
   activeTabId: null,
+  savedScriptsVersion: 0,
   openTab: (tab) =>
     set((s) => {
       const existing = s.tabs.find((t) => t.id === tab.id);
@@ -60,4 +63,5 @@ export const useEditorStore = create<EditorState>((set) => ({
     set((s) => ({
       tabs: s.tabs.map((t) => (t.id === id ? { ...t, ...patch } : t)),
     })),
+  bumpScriptsVersion: () => set((s) => ({ savedScriptsVersion: s.savedScriptsVersion + 1 })),
 }));
