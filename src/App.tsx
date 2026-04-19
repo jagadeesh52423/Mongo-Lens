@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { Panel, PanelGroup, type ImperativePanelHandle } from 'react-resizable-panels';
 import { IconRail, type PanelKey } from './components/layout/IconRail';
 import { SidePanel } from './components/layout/SidePanel';
 import { StatusBar } from './components/layout/StatusBar';
@@ -6,6 +7,7 @@ import { ConnectionPanel } from './components/connections/ConnectionPanel';
 import { EditorArea } from './components/editor/EditorArea';
 import { SavedScriptsPanel } from './components/saved-scripts/SavedScriptsPanel';
 import { SettingsView } from './settings/SettingsView';
+import { SplitHandle } from './components/shared/SplitHandle';
 import { useConnectionsStore } from './store/connections';
 import { useScriptEvents } from './hooks/useScriptEvents';
 import { checkNodeRunner, installNodeRunner } from './ipc';
@@ -13,6 +15,7 @@ import { keyboardService } from './services/KeyboardService';
 
 export default function App() {
   useScriptEvents();
+  const sidePanelRef = useRef<ImperativePanelHandle>(null);
 
   useEffect(() => {
     // Prevent WKWebView from forwarding Escape to the native macOS responder
@@ -68,18 +71,29 @@ export default function App() {
         {settingsOpen ? (
           <SettingsView onClose={() => setSettingsOpen(false)} />
         ) : (
-          <>
-            <SidePanel active={panel}>
-              {panel === 'connections' && <ConnectionPanel />}
-              {panel === 'saved' && <SavedScriptsPanel />}
-              {panel === 'collections' && (
-                <div style={{ padding: 12, color: 'var(--fg-dim)' }}>Connect to a server to view collections.</div>
-              )}
-            </SidePanel>
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-              <EditorArea />
-            </div>
-          </>
+          <PanelGroup direction="horizontal" style={{ flex: 1 }}>
+            <Panel
+              ref={sidePanelRef}
+              minSize={10}
+              defaultSize={20}
+              collapsible
+              collapsedSize={0}
+            >
+              <SidePanel active={panel}>
+                {panel === 'connections' && <ConnectionPanel />}
+                {panel === 'saved' && <SavedScriptsPanel />}
+                {panel === 'collections' && (
+                  <div style={{ padding: 12, color: 'var(--fg-dim)' }}>Connect to a server to view collections.</div>
+                )}
+              </SidePanel>
+            </Panel>
+            <SplitHandle direction="horizontal" />
+            <Panel minSize={50} defaultSize={80}>
+              <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minWidth: 0 }}>
+                <EditorArea />
+              </div>
+            </Panel>
+          </PanelGroup>
         )}
       </div>
       <StatusBar

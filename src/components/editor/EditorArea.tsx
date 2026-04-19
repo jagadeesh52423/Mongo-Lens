@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { useEditorStore } from '../../store/editor';
+import { Panel, PanelGroup } from 'react-resizable-panels';
+import { useEditorStore, DEFAULT_PANEL_SIZES } from '../../store/editor';
 import { useConnectionsStore } from '../../store/connections';
 import { ScriptEditor } from './ScriptEditor';
 import { ContextBar } from './ContextBar';
@@ -7,9 +8,21 @@ import { runScript, cancelScript, createScript } from '../../ipc';
 import { useResultsStore } from '../../store/results';
 import { ResultsPanel } from '../results/ResultsPanel';
 import { useCollectionCompletions } from '../../hooks/useCollectionCompletions';
+import { SplitHandle } from '../shared/SplitHandle';
 
 export function EditorArea() {
-  const { tabs, activeTabId, setActive, closeTab, updateContent, openTab, updateTab, bumpScriptsVersion } = useEditorStore();
+  const {
+    tabs,
+    activeTabId,
+    setActive,
+    closeTab,
+    updateContent,
+    openTab,
+    updateTab,
+    bumpScriptsVersion,
+    panelSizes,
+    setPanelSizes,
+  } = useEditorStore();
   const { activeConnectionId, activeDatabase } = useConnectionsStore();
   const startRun = useResultsStore((s) => s.startRun);
   const finishRun = useResultsStore((s) => s.finishRun);
@@ -64,6 +77,9 @@ export function EditorArea() {
       type: 'script',
     });
   }
+
+  const activeSizes = (active && panelSizes[active.id]) || DEFAULT_PANEL_SIZES;
+  const [editorDefault, resultsDefault] = activeSizes;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
@@ -138,28 +154,36 @@ export function EditorArea() {
           <div style={{ padding: 20, color: 'var(--fg-dim)' }}>No editor tab open.</div>
         )}
         {active?.type === 'script' && (
-          <>
-            <div style={{ flex: 1, minHeight: 0 }}>
+          <PanelGroup
+            key={active.id}
+            direction="vertical"
+            onLayout={(sizes) => setPanelSizes(active.id, sizes as [number, number])}
+            style={{ flex: 1, minHeight: 0 }}
+          >
+            <Panel minSize={20} defaultSize={editorDefault}>
               <ScriptEditor
                 value={active.content}
                 onChange={(v) => updateContent(active.id, v)}
                 onRun={() => handleRun(0)}
                 collections={completions.map((c) => c.name)}
               />
-            </div>
-            <div style={{ height: 260, borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column' }}>
-              <ResultsPanel
-                tabId={active.id}
-                pageSize={activePageSize}
-                onPageChange={(page, pageSize) => handleRun(page, pageSize)}
-                onPageSizeChange={(size) => setPageSizes((prev) => ({ ...prev, [active.id]: size }))}
-                connectionId={active.connectionId}
-                database={active.database}
-                collection={active.collection}
-                onDocUpdated={() => handleRun(0, activePageSize)}
-              />
-            </div>
-          </>
+            </Panel>
+            <SplitHandle direction="vertical" />
+            <Panel minSize={20} defaultSize={resultsDefault}>
+              <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+                <ResultsPanel
+                  tabId={active.id}
+                  pageSize={activePageSize}
+                  onPageChange={(page, pageSize) => handleRun(page, pageSize)}
+                  onPageSizeChange={(size) => setPageSizes((prev) => ({ ...prev, [active.id]: size }))}
+                  connectionId={active.connectionId}
+                  database={active.database}
+                  collection={active.collection}
+                  onDocUpdated={() => handleRun(0, activePageSize)}
+                />
+              </div>
+            </Panel>
+          </PanelGroup>
         )}
       </div>
     </div>

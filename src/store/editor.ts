@@ -2,10 +2,13 @@ import { create } from 'zustand';
 import type { EditorTab } from '../types';
 import { useConnectionsStore } from './connections';
 
+export const DEFAULT_PANEL_SIZES: [number, number] = [60, 40];
+
 interface EditorState {
   tabs: EditorTab[];
   activeTabId: string | null;
   savedScriptsVersion: number;
+  panelSizes: Record<string, [number, number]>;
   openTab: (tab: EditorTab) => void;
   closeTab: (id: string) => void;
   setActive: (id: string) => void;
@@ -14,13 +17,18 @@ interface EditorState {
   renameTab: (id: string, title: string) => void;
   updateTab: (id: string, patch: Partial<EditorTab>) => void;
   bumpScriptsVersion: () => void;
+  setPanelSizes: (tabId: string, sizes: [number, number]) => void;
+  initPanelSizes: (tabId: string) => void;
+  removePanelSizes: (tabId: string) => void;
 }
 
-export const useEditorStore = create<EditorState>((set) => ({
+export const useEditorStore = create<EditorState>((set, get) => ({
   tabs: [],
   activeTabId: null,
   savedScriptsVersion: 0,
-  openTab: (tab) =>
+  panelSizes: {},
+  openTab: (tab) => {
+    let openedId = tab.id;
     set((s) => {
       const existing = s.tabs.find((t) => t.id === tab.id);
       if (existing) return { activeTabId: tab.id };
@@ -35,9 +43,12 @@ export const useEditorStore = create<EditorState>((set) => ({
           };
         }
       }
+      openedId = next.id;
       return { tabs: [...s.tabs, next], activeTabId: next.id };
-    }),
-  closeTab: (id) =>
+    });
+    get().initPanelSizes(openedId);
+  },
+  closeTab: (id) => {
     set((s) => {
       const remaining = s.tabs.filter((t) => t.id !== id);
       const nextActive =
@@ -45,7 +56,9 @@ export const useEditorStore = create<EditorState>((set) => ({
           ? remaining[remaining.length - 1]?.id ?? null
           : s.activeTabId;
       return { tabs: remaining, activeTabId: nextActive };
-    }),
+    });
+    get().removePanelSizes(id);
+  },
   setActive: (id) => set({ activeTabId: id }),
   updateContent: (id, content) =>
     set((s) => ({
@@ -64,4 +77,17 @@ export const useEditorStore = create<EditorState>((set) => ({
       tabs: s.tabs.map((t) => (t.id === id ? { ...t, ...patch } : t)),
     })),
   bumpScriptsVersion: () => set((s) => ({ savedScriptsVersion: s.savedScriptsVersion + 1 })),
+  setPanelSizes: (tabId, sizes) =>
+    set((s) => ({ panelSizes: { ...s.panelSizes, [tabId]: sizes } })),
+  initPanelSizes: (tabId) =>
+    set((s) =>
+      s.panelSizes[tabId]
+        ? s
+        : { panelSizes: { ...s.panelSizes, [tabId]: DEFAULT_PANEL_SIZES } },
+    ),
+  removePanelSizes: (tabId) =>
+    set((s) => {
+      const { [tabId]: _removed, ...rest } = s.panelSizes;
+      return { panelSizes: rest };
+    }),
 }));
