@@ -21,6 +21,9 @@ function columnsOf(docs: unknown[]): string[] {
       }
     }
   }
+  if (out.length === 0 && docs.some((d) => d !== null && typeof d !== 'object')) {
+    out.push('value');
+  }
   return out;
 }
 
@@ -120,7 +123,10 @@ export function TableView({ docs }: Props) {
           {sorted.map((d, i) => (
             <tr key={i}>
               {columns.map((c) => {
-                const doc = d as Record<string, unknown>;
+                const doc =
+                  d !== null && typeof d === 'object'
+                    ? (d as Record<string, unknown>)
+                    : { value: d };
                 const raw = doc[c];
                 const isSelected = selected?.rowIndex === i && selected?.colKey === c;
                 return (

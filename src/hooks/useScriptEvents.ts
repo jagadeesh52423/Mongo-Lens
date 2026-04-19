@@ -7,6 +7,7 @@ export function useScriptEvents() {
   const { appendGroup, setError, finishRun, setPagination } = useResultsStore();
 
   useEffect(() => {
+    let cancelled = false;
     let unsub: (() => void) | null = null;
     listen<ScriptEvent>('script-event', (e) => {
       const p = e.payload;
@@ -27,10 +28,15 @@ export function useScriptEvents() {
         finishRun(p.tabId, p.executionMs ?? 0);
       }
     }).then((fn) => {
-      unsub = fn;
+      if (cancelled) {
+        fn();
+      } else {
+        unsub = fn;
+      }
     });
     return () => {
-      if (unsub) unsub();
+      cancelled = true;
+      unsub?.();
     };
   }, [appendGroup, setError, finishRun, setPagination]);
 }

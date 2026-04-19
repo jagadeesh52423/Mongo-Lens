@@ -47,11 +47,12 @@ pub async fn list_collections(
     database: String,
 ) -> Result<Vec<CollectionNode>, String> {
     let client = mongo::active_client(&state, &connection_id)?;
-    let names = client
+    let mut names = client
         .database(&database)
         .list_collection_names()
         .await
         .map_err(|e| e.to_string())?;
+    names.sort();
     Ok(names.into_iter().map(|name| CollectionNode { name }).collect())
 }
 
