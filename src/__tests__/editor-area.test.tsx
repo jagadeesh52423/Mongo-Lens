@@ -23,7 +23,7 @@ vi.mock('../ipc', () => ({
   listDatabases: vi.fn().mockResolvedValue(['mydb']),
 }));
 
-const mockConn = { id: 'conn1', name: 'Test Connection' };
+const mockConn = { id: 'conn1', name: 'Test Connection', createdAt: new Date().toISOString() };
 
 function openScriptTab() {
   useConnectionsStore.setState({
