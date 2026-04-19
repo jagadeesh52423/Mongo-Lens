@@ -4,7 +4,6 @@ import {
   createConnection,
   updateConnection as ipcUpdate,
   deleteConnection as ipcDelete,
-  testConnection,
   connectConnection,
   disconnectConnection,
 } from '../../ipc';
@@ -12,6 +11,7 @@ import { useConnectionsStore } from '../../store/connections';
 import { useEditorStore } from '../../store/editor';
 import { ConnectionDialog } from './ConnectionDialog';
 import { ConnectionTree } from './ConnectionTree';
+import { ContextMenu } from '../ui/ContextMenu';
 import type { Connection, ConnectionInput } from '../../types';
 
 export function ConnectionPanel() {
@@ -29,8 +29,17 @@ export function ConnectionPanel() {
   } = useConnectionsStore();
   const [editing, setEditing] = useState<Connection | null>(null);
   const [creating, setCreating] = useState(false);
-  const [status, setStatus] = useState<Record<string, string>>({});
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; connection: Connection } | null>(null);
+  const [expandedConns, setExpandedConns] = useState<Set<string>>(new Set());
   const openTab = useEditorStore((s) => s.openTab);
+
+  function toggleConnExpanded(id: string) {
+    setExpandedConns((s) => {
+      const n = new Set(s);
+      n.has(id) ? n.delete(id) : n.add(id);
+      return n;
+    });
+  }
 
   function openCollectionScriptTab(db: string, col: string, cId: string) {
     openTab({
@@ -67,25 +76,25 @@ export function ConnectionPanel() {
     removeConnection(c.id);
   }
 
-  async function handleTest(c: Connection) {
-    setStatus((s) => ({ ...s, [c.id]: 'Testing…' }));
-    const r = await testConnection(c.id);
-    setStatus((s) => ({ ...s, [c.id]: r.ok ? 'OK' : `Error: ${r.error ?? 'unknown'}` }));
-  }
-
   async function handleConnect(c: Connection) {
     try {
       await connectConnection(c.id);
       markConnected(c.id);
+      setExpandedConns((s) => new Set(s).add(c.id));
       setActive(c.id, null);
     } catch (e) {
-      setStatus((s) => ({ ...s, [c.id]: `Error: ${(e as Error).message}` }));
+      alert(`Error: ${(e as Error).message}`);
     }
   }
 
   async function handleDisconnect(c: Connection) {
     await disconnectConnection(c.id);
     markDisconnected(c.id);
+    setExpandedConns((s) => {
+      const n = new Set(s);
+      n.delete(c.id);
+      return n;
+    });
     if (activeConnectionId === c.id) setActive(null, null);
   }
 
@@ -100,6 +109,10 @@ export function ConnectionPanel() {
           return (
             <li
               key={c.id}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setContextMenu({ x: e.clientX, y: e.clientY, connection: c });
+              }}
               style={{
                 padding: '6px 10px',
                 borderBottom: '1px solid var(--border)',
@@ -110,22 +123,19 @@ export function ConnectionPanel() {
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <span style={{ color: connected ? 'var(--accent-green)' : 'var(--fg-dim)' }}>●</span>
-                <span style={{ flex: 1 }}>{c.name}</span>
+                <span
+                  onClick={() => connected && toggleConnExpanded(c.id)}
+                  style={{ cursor: connected ? 'pointer' : 'default', flex: 1 }}
+                >
+                  {c.name}
+                </span>
                 {connected ? (
                   <button onClick={() => handleDisconnect(c)}>Disconnect</button>
                 ) : (
                   <button onClick={() => handleConnect(c)}>Connect</button>
                 )}
               </div>
-              <div style={{ display: 'flex', gap: 6, fontSize: 11 }}>
-                <button onClick={() => handleTest(c)}>Test</button>
-                <button onClick={() => setEditing(c)}>Edit</button>
-                <button onClick={() => handleDelete(c)}>Delete</button>
-              </div>
-              {status[c.id] && (
-                <div style={{ fontSize: 11, color: 'var(--fg-dim)' }}>{status[c.id]}</div>
-              )}
-              {connected && (
+              {connected && expandedConns.has(c.id) && (
                 <ConnectionTree
                   connectionId={c.id}
                   onOpenCollection={(db, col) => openCollectionScriptTab(db, col, c.id)}
@@ -143,6 +153,17 @@ export function ConnectionPanel() {
             setEditing(null);
             setCreating(false);
           }}
+        />
+      )}
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={[
+            { label: 'Edit', action: () => setEditing(contextMenu.connection) },
+            { label: 'Delete', action: () => handleDelete(contextMenu.connection) },
+          ]}
+          onClose={() => setContextMenu(null)}
         />
       )}
     </div>
