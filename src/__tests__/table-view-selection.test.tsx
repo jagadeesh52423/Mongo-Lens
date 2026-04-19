@@ -39,7 +39,7 @@ function Wrapper({ children }: { children: ReactNode }) {
 describe('TableView cell selection', () => {
   it('clicking a cell gives it a selected style', async () => {
     const user = userEvent.setup();
-    render(<TableView docs={docs} />, { wrapper: Wrapper });
+    render(<TableView docs={docs} sortKey={null} sortDir={1} onToggleSort={() => {}} />, { wrapper: Wrapper });
     const cell = screen.getAllByRole('cell').find((c) => c.textContent === 'alice')!;
     await user.click(cell);
     expect(cell.getAttribute('aria-selected')).toBe('true');
@@ -47,7 +47,7 @@ describe('TableView cell selection', () => {
 
   it('clicking a different cell deselects the previous one', async () => {
     const user = userEvent.setup();
-    render(<TableView docs={docs} />, { wrapper: Wrapper });
+    render(<TableView docs={docs} sortKey={null} sortDir={1} onToggleSort={() => {}} />, { wrapper: Wrapper });
     const cells = screen.getAllByRole('cell');
     const alice = cells.find((c) => c.textContent === 'alice')!;
     const bob = cells.find((c) => c.textContent === 'bob')!;
@@ -59,7 +59,7 @@ describe('TableView cell selection', () => {
 
   it('right-clicking a cell opens context menu', async () => {
     const user = userEvent.setup();
-    render(<TableView docs={docs} />, { wrapper: Wrapper });
+    render(<TableView docs={docs} sortKey={null} sortDir={1} onToggleSort={() => {}} />, { wrapper: Wrapper });
     const cell = screen.getAllByRole('cell').find((c) => c.textContent === 'alice')!;
     await user.pointer({ target: cell, keys: '[MouseRight]' });
     expect(screen.getByRole('menu')).toBeInTheDocument();
@@ -67,7 +67,7 @@ describe('TableView cell selection', () => {
 
   it('context menu shows copy actions', async () => {
     const user = userEvent.setup();
-    render(<TableView docs={docs} />, { wrapper: Wrapper });
+    render(<TableView docs={docs} sortKey={null} sortDir={1} onToggleSort={() => {}} />, { wrapper: Wrapper });
     const cell = screen.getAllByRole('cell').find((c) => c.textContent === 'alice')!;
     await user.pointer({ target: cell, keys: '[MouseRight]' });
     expect(screen.getByText('Copy Value')).toBeInTheDocument();
@@ -78,7 +78,7 @@ describe('TableView cell selection', () => {
 
   it('context menu shows View Full Record action', async () => {
     const user = userEvent.setup();
-    render(<TableView docs={docs} />, { wrapper: Wrapper });
+    render(<TableView docs={docs} sortKey={null} sortDir={1} onToggleSort={() => {}} />, { wrapper: Wrapper });
     const cell = screen.getAllByRole('cell').find((c) => c.textContent === 'alice')!;
     await user.pointer({ target: cell, keys: '[MouseRight]' });
     expect(screen.getByText('View Full Record')).toBeInTheDocument();
@@ -86,7 +86,7 @@ describe('TableView cell selection', () => {
 
   it('context menu shows Edit Full Record action', async () => {
     const user = userEvent.setup();
-    render(<TableView docs={docs} />, { wrapper: Wrapper });
+    render(<TableView docs={docs} sortKey={null} sortDir={1} onToggleSort={() => {}} />, { wrapper: Wrapper });
     const cell = screen.getAllByRole('cell').find((c) => c.textContent === 'alice')!;
     await user.pointer({ target: cell, keys: '[MouseRight]' });
     expect(screen.getByText('Edit Full Record')).toBeInTheDocument();
@@ -94,7 +94,7 @@ describe('TableView cell selection', () => {
 
   it('context menu closes on Escape', async () => {
     const user = userEvent.setup();
-    render(<TableView docs={docs} />, { wrapper: Wrapper });
+    render(<TableView docs={docs} sortKey={null} sortDir={1} onToggleSort={() => {}} />, { wrapper: Wrapper });
     const cell = screen.getAllByRole('cell').find((c) => c.textContent === 'alice')!;
     await user.pointer({ target: cell, keys: '[MouseRight]' });
     expect(screen.getByRole('menu')).toBeInTheDocument();
@@ -115,7 +115,7 @@ describe('TableView cell selection', () => {
       );
     }
 
-    render(<TableView docs={docs} />, { wrapper: WrapperWithHandlers });
+    render(<TableView docs={docs} sortKey={null} sortDir={1} onToggleSort={() => {}} />, { wrapper: WrapperWithHandlers });
     const cell = screen.getAllByRole('cell').find((c) => c.textContent === 'alice')!;
     await user.click(cell);
     await user.keyboard('{F3}');
@@ -135,7 +135,7 @@ describe('TableView cell selection', () => {
       );
     }
 
-    render(<TableView docs={docs} />, { wrapper: WrapperWithHandlers });
+    render(<TableView docs={docs} sortKey={null} sortDir={1} onToggleSort={() => {}} />, { wrapper: WrapperWithHandlers });
     const cell = screen.getAllByRole('cell').find((c) => c.textContent === 'alice')!;
     await user.click(cell);
     await user.keyboard('{F4}');

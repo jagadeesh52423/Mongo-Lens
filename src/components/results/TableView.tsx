@@ -6,9 +6,12 @@ import { keyboardService, formatKeyCombo } from '../../services/KeyboardService'
 
 interface Props {
   docs: unknown[];
+  sortKey: string | null;
+  sortDir: 1 | -1;
+  onToggleSort: (colKey: string) => void;
 }
 
-function columnsOf(docs: unknown[]): string[] {
+export function columnsOf(docs: unknown[]): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
   for (const d of docs) {
@@ -32,27 +35,11 @@ interface ContextMenuState {
   y: number;
 }
 
-export function TableView({ docs }: Props) {
+export function TableView({ docs, sortKey, sortDir, onToggleSort }: Props) {
   const columns = useMemo(() => columnsOf(docs), [docs]);
-  const [sortKey, setSortKey] = useState<string | null>(null);
-  const [sortDir, setSortDir] = useState<1 | -1>(1);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const { selected, select, clear } = useCellSelection();
-
-  const sorted = useMemo(() => {
-    if (!sortKey) return docs;
-    const arr = [...docs];
-    arr.sort((a, b) => {
-      const av = (a as Record<string, unknown>)[sortKey] as unknown;
-      const bv = (b as Record<string, unknown>)[sortKey] as unknown;
-      if (av === bv) return 0;
-      if (av === undefined || av === null) return 1;
-      if (bv === undefined || bv === null) return -1;
-      return String(av) < String(bv) ? -sortDir : sortDir;
-    });
-    return arr;
-  }, [docs, sortKey, sortDir]);
 
   const handleCellClick = useCallback(
     (rowIndex: number, colKey: string, doc: Record<string, unknown>) => {
@@ -97,13 +84,7 @@ export function TableView({ docs }: Props) {
             {columns.map((c) => (
               <th
                 key={c}
-                onClick={() => {
-                  if (sortKey === c) setSortDir((d) => (d === 1 ? -1 : 1));
-                  else {
-                    setSortKey(c);
-                    setSortDir(1);
-                  }
-                }}
+                onClick={() => onToggleSort(c)}
                 style={{
                   borderBottom: '1px solid var(--border)',
                   padding: '4px 8px',
@@ -120,7 +101,7 @@ export function TableView({ docs }: Props) {
           </tr>
         </thead>
         <tbody>
-          {sorted.map((d, i) => (
+          {docs.map((d, i) => (
             <tr key={i}>
               {columns.map((c) => {
                 const doc =
@@ -132,6 +113,8 @@ export function TableView({ docs }: Props) {
                 return (
                   <td
                     key={c}
+                    data-row={i}
+                    data-col={c}
                     aria-selected={isSelected}
                     onClick={() => handleCellClick(i, c, doc)}
                     onContextMenu={(e) => handleCellContextMenu(e, i, c, doc)}

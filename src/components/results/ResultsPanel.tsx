@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { MutableRefObject } from 'react';
 import { save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { writeTextFile } from '@tauri-apps/plugin-fs';
 import { useResultsStore } from '../../store/results';
 import { JsonView } from './JsonView';
-import { TableView } from './TableView';
+import { TableView, columnsOf } from './TableView';
 import { RecordModal } from './RecordModal';
 import { toCsv, toJsonText } from '../../utils/export';
 import { CellSelectionProvider, useCellSelection } from '../../contexts/CellSelectionContext';
@@ -12,11 +13,15 @@ import { useTableActions } from '../../hooks/useTableActions';
 function TableActionsRegistrar({
   onViewRecord,
   onEditRecord,
+  docsRef,
+  columnsRef,
 }: {
   onViewRecord?: (doc: Record<string, unknown>) => void;
   onEditRecord?: (doc: Record<string, unknown>) => void;
+  docsRef: MutableRefObject<unknown[]>;
+  columnsRef: MutableRefObject<string[]>;
 }) {
-  useTableActions({ onViewRecord, onEditRecord });
+  useTableActions({ onViewRecord, onEditRecord }, docsRef, columnsRef);
   return null;
 }
 
@@ -65,6 +70,41 @@ export function ResultsPanel({
     return res.groups.flatMap((g) => g.docs);
   }, [res]);
 
+  const [sortKey, setSortKey] = useState<string | null>(null);
+  const [sortDir, setSortDir] = useState<1 | -1>(1);
+
+  const sortedDocs = useMemo(() => {
+    if (!sortKey) return allDocs;
+    const arr = [...allDocs];
+    arr.sort((a, b) => {
+      const av = (a as Record<string, unknown>)[sortKey] as unknown;
+      const bv = (b as Record<string, unknown>)[sortKey] as unknown;
+      if (av === bv) return 0;
+      if (av === undefined || av === null) return 1;
+      if (bv === undefined || bv === null) return -1;
+      return String(av) < String(bv) ? -sortDir : sortDir;
+    });
+    return arr;
+  }, [allDocs, sortKey, sortDir]);
+
+  const handleToggleSort = useCallback((colKey: string) => {
+    setSortKey((prevKey) => {
+      if (prevKey === colKey) {
+        setSortDir((d) => (d === 1 ? -1 : 1));
+        return prevKey;
+      }
+      setSortDir(1);
+      return colKey;
+    });
+  }, []);
+
+  const columns = useMemo(() => columnsOf(sortedDocs), [sortedDocs]);
+
+  const docsRef = useRef<unknown[]>(sortedDocs);
+  const columnsRef = useRef<string[]>(columns);
+  useEffect(() => { docsRef.current = sortedDocs; }, [sortedDocs]);
+  useEffect(() => { columnsRef.current = columns; }, [columns]);
+
   async function exportAs(kind: 'csv' | 'json') {
     const suggested = kind === 'csv' ? 'results.csv' : 'results.json';
     const path = await saveDialog({ defaultPath: suggested });
@@ -92,6 +132,8 @@ export function ResultsPanel({
           onEditRecord={connectionId && database && collection
             ? (doc) => setRecordModal({ doc, mode: 'edit' })
             : undefined}
+          docsRef={docsRef}
+          columnsRef={columnsRef}
         />
         <div style={{ padding: 12, color: 'var(--fg-dim)' }}>
           Run a script to see results.
@@ -121,6 +163,8 @@ export function ResultsPanel({
         onEditRecord={connectionId && database && collection
           ? (doc) => setRecordModal({ doc, mode: 'edit' })
           : undefined}
+        docsRef={docsRef}
+        columnsRef={columnsRef}
       />
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
       <div
@@ -147,7 +191,16 @@ export function ResultsPanel({
         </div>
       )}
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-        {view === 'json' ? <JsonView docs={allDocs} /> : <TableView docs={allDocs} />}
+        {view === 'json' ? (
+          <JsonView docs={allDocs} />
+        ) : (
+          <TableView
+            docs={sortedDocs}
+            sortKey={sortKey}
+            sortDir={sortDir}
+            onToggleSort={handleToggleSort}
+          />
+        )}
       </div>
       {pagination && (
         <div
