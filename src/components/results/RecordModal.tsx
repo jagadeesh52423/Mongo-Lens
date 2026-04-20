@@ -115,6 +115,7 @@ export function RecordModal({
           borderRadius: 8,
           width: 600,
           maxWidth: '90vw',
+          height: '80vh',
           maxHeight: '80vh',
           display: 'flex',
           flexDirection: 'column',
