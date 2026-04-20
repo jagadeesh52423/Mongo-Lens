@@ -82,9 +82,6 @@ export default function App() {
               <SidePanel active={panel}>
                 {panel === 'connections' && <ConnectionPanel />}
                 {panel === 'saved' && <SavedScriptsPanel />}
-                {panel === 'collections' && (
-                  <div style={{ padding: 12, color: 'var(--fg-dim)' }}>Connect to a server to view collections.</div>
-                )}
               </SidePanel>
             </Panel>
             <SplitHandle direction="horizontal" />

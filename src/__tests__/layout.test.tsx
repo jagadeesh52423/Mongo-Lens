@@ -16,12 +16,12 @@ beforeEach(() => {
 });
 
 describe('App shell', () => {
-  it('renders icon rail with four buttons', () => {
+  it('renders icon rail with three buttons', () => {
     render(<App />);
     expect(screen.getByLabelText('Connections')).toBeInTheDocument();
-    expect(screen.getByLabelText('Collections')).toBeInTheDocument();
     expect(screen.getByLabelText('Saved Scripts')).toBeInTheDocument();
     expect(screen.getByLabelText('Settings')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Collections')).not.toBeInTheDocument();
   });
 
   it('toggles side panel when icon clicked', async () => {

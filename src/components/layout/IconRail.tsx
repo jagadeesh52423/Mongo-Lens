@@ -1,4 +1,4 @@
-export type PanelKey = 'connections' | 'collections' | 'saved';
+export type PanelKey = 'connections' | 'saved';
 
 interface Props {
   active: PanelKey;
@@ -9,7 +9,6 @@ interface Props {
 
 const items: { key: PanelKey; label: string; icon: string }[] = [
   { key: 'connections', label: 'Connections', icon: '⚡' },
-  { key: 'collections', label: 'Collections', icon: '🗂' },
   { key: 'saved', label: 'Saved Scripts', icon: '⭐' },
 ];
 
