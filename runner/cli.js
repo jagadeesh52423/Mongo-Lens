@@ -120,6 +120,7 @@ function main() {
         MONGO_URI: args.uri,
         MONGO_PAGE: args.page,
         MONGO_PAGE_SIZE: args.pageSize,
+        NODE_PATH: require('os').homedir() + '/.mongomacapp/runner/node_modules',
       },
       stdio: ['inherit', 'pipe', 'pipe'],
     },
