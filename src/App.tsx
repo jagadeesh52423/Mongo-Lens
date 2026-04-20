@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Panel, PanelGroup, type ImperativePanelHandle } from 'react-resizable-panels';
 import { IconRail, type PanelKey } from './components/layout/IconRail';
 import { SidePanel } from './components/layout/SidePanel';
+import { SplashScreen } from './components/layout/SplashScreen';
 import { StatusBar } from './components/layout/StatusBar';
 import { ConnectionPanel } from './components/connections/ConnectionPanel';
 import { EditorArea } from './components/editor/EditorArea';
@@ -41,6 +42,7 @@ export default function App() {
   }, []);
   const [panel, setPanel] = useState<PanelKey>('connections');
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [showSplash, setShowSplash] = useState(true);
   const { connections, activeConnectionId, activeDatabase } = useConnectionsStore();
   const active = connections.find((c) => c.id === activeConnectionId);
 
@@ -61,6 +63,7 @@ export default function App() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
+      {showSplash && <SplashScreen onDone={() => setShowSplash(false)} />}
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
         <IconRail
           active={panel}

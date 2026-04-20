@@ -36,4 +36,7 @@
     <line x1="433" y1="301" x2="486" y2="354" stroke="#001E2B" stroke-width="13" stroke-linecap="round"></line>
     <line x1="433" y1="301" x2="486" y2="354" stroke="#ffffff" stroke-width="7" stroke-linecap="round"></line>
   </g>
+  <text x="340" y="490" text-anchor="middle" font-family="-apple-system,'Inter',sans-serif" font-size="52" font-weight="800" fill="#001E2B" letter-spacing="-1.5">Mongo<tspan fill="#00ED64">Lens</tspan></text>
+  <text x="340" y="524" text-anchor="middle" font-family="-apple-system,'Inter',sans-serif" font-size="14" font-weight="400" fill="#3D7A65" letter-spacing="4">MONGODB EXPLORER</text>
+  <rect x="300" y="534" width="80" height="3" rx="1.5" fill="#00ED64"></rect>
 </svg>

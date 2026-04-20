@@ -1,8 +1,8 @@
 [package]
-name = "mongomacapp"
+name = "mongo-lens"
 version = "0.1.0"
 description = "A native Mac MongoDB client"
-authors = ["MongoMacApp"]
+authors = ["Mongo Lens"]
 edition = "2021"
 
 [build-dependencies]
@@ -28,5 +28,5 @@ futures-util = "0.3"
 tempfile = "3"
 
 [[bin]]
-name = "mongomacapp"
+name = "mongo-lens"
 path = "src/main.rs"

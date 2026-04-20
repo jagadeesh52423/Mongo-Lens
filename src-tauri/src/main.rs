@@ -14,7 +14,7 @@ use tauri::Manager;
 
 fn main() {
     if let Err(e) = run() {
-        eprintln!("MongoMacApp failed to start: {}", e);
+        eprintln!("Mongo Lens failed to start: {}", e);
         std::process::exit(1);
     }
 }
