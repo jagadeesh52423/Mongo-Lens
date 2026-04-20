@@ -10,6 +10,7 @@ interface Props {
   onConnectionChange: (id: string) => void;
   onDatabaseChange: (db: string) => void;
   onRun: () => void;
+  onRunScript?: () => void;
   onSave: (name: string, tags: string) => Promise<void>;
   isRunning: boolean;
 }
@@ -21,6 +22,7 @@ export function ContextBar({
   onConnectionChange,
   onDatabaseChange,
   onRun,
+  onRunScript,
   onSave,
   isRunning,
 }: Props) {
@@ -141,11 +143,26 @@ export function ContextBar({
         onClick={onRun}
         disabled={!canRun}
         style={{
+          background: 'transparent',
+          border: '1px solid var(--accent-green)',
+          color: 'var(--accent-green)',
           opacity: canRun ? 1 : 0.5,
           cursor: canRun ? 'pointer' : 'not-allowed',
         }}
       >
         ▶ Run
+      </button>
+      <button
+        onClick={() => onRunScript?.()}
+        disabled={!canRun}
+        style={{
+          background: 'var(--accent-green)',
+          color: 'var(--bg)',
+          opacity: canRun ? 1 : 0.5,
+          cursor: canRun ? 'pointer' : 'not-allowed',
+        }}
+      >
+        ▶▶ Run Script
       </button>
     </div>
     {saving && (
