@@ -80,6 +80,7 @@ export class KeyboardService {
         !!e.altKey === !!k.alt
       ) {
         e.preventDefault();
+        e.stopPropagation();
         def.action();
         return;
       }
