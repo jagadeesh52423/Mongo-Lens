@@ -65,13 +65,24 @@ export function ResultsPanel({
     if (pagination) setInputPage(pagination.page + 1);
   }, [pagination?.page]);
 
+  const groupCount = res?.groups.length ?? 0;
+  const runId = res?.runId;
+  const [activeGroupIndex, setActiveGroupIndex] = useState(0);
+  // Reset to first tab only when a new run starts (tabId or runId change),
+  // not on every streaming group append.
+  useEffect(() => { setActiveGroupIndex(0); }, [tabId, runId]);
+  const safeActiveIndex = activeGroupIndex < groupCount ? activeGroupIndex : 0;
+
   const allDocs = useMemo(() => {
     if (!res) return [];
-    return res.groups.flatMap((g) => g.docs);
-  }, [res]);
+    const group = res.groups[safeActiveIndex];
+    return group ? group.docs : [];
+  }, [res, safeActiveIndex]);
 
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<1 | -1>(1);
+  // Reset sort when switching tabs (across script tabs or between queries).
+  useEffect(() => { setSortKey(null); setSortDir(1); }, [tabId, safeActiveIndex]);
 
   const sortedDocs = useMemo(() => {
     if (!sortKey) return allDocs;
@@ -185,6 +196,45 @@ export function ResultsPanel({
           {res.isRunning ? 'Running…' : `${allDocs.length} docs · ${res.executionMs ?? 0} ms`}
         </span>
       </div>
+      {groupCount > 1 && (
+        <div
+          role="tablist"
+          style={{
+            display: 'flex',
+            alignItems: 'stretch',
+            gap: 0,
+            padding: '0 8px',
+            borderBottom: '1px solid var(--border)',
+            background: 'var(--bg-panel)',
+            overflowX: 'auto',
+          }}
+        >
+          {res.groups.map((_, idx) => {
+            const isActive = idx === safeActiveIndex;
+            return (
+              <button
+                key={idx}
+                role="tab"
+                aria-selected={isActive}
+                onClick={() => setActiveGroupIndex(idx)}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  padding: '6px 12px',
+                  fontSize: 12,
+                  fontWeight: isActive ? 600 : 400,
+                  color: isActive ? 'var(--accent)' : 'var(--fg-dim)',
+                  borderBottom: isActive ? '2px solid var(--accent)' : '2px solid transparent',
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                Query {idx + 1}
+              </button>
+            );
+          })}
+        </div>
+      )}
       {res.lastError && (
         <div style={{ padding: 8, color: 'var(--accent-red)', fontFamily: 'var(--font-mono)' }}>
           {res.lastError}
