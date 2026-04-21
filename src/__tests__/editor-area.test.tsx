@@ -67,7 +67,7 @@ describe('EditorArea', () => {
   it('Run button is enabled when not running', () => {
     openScriptTab();
     render(<EditorArea />);
-    const runBtn = screen.getByRole('button', { name: /run/i });
+    const runBtn = screen.getByRole('button', { name: /^▶ Run$/ });
     expect(runBtn).not.toBeDisabled();
   });
 
@@ -75,7 +75,7 @@ describe('EditorArea', () => {
     openScriptTab();
     useResultsStore.getState().startRun('t1', 'run-1');
     render(<EditorArea />);
-    const runBtn = screen.getByRole('button', { name: /run/i });
+    const runBtn = screen.getByRole('button', { name: /^▶ Run$/ });
     expect(runBtn).toBeDisabled();
   });
 
@@ -107,7 +107,7 @@ describe('EditorArea', () => {
     openScriptTab();
     const user = userEvent.setup();
     render(<EditorArea />);
-    await user.click(screen.getByRole('button', { name: /run/i }));
+    await user.click(screen.getByRole('button', { name: /^▶ Run$/ }));
     // Wait for the rejected promise to settle
     await new Promise((r) => setTimeout(r, 0));
     const state = useResultsStore.getState().byTab['t1'];
