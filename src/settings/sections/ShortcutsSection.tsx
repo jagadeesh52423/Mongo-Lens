@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import {
   keyboardService,
   formatKeyCombo,
@@ -14,12 +15,9 @@ import { ContextMenu } from '../../components/ui/ContextMenu';
 const MODIFIER_KEYS = new Set(['meta', 'control', 'shift', 'alt', 'option', 'command']);
 
 const RESERVED_COMBOS = new Set<string>([
-  'cmd+q',
-  'cmd+w',
-  'cmd+h',
-  'cmd+m',
-  'cmd+tab',
-  'cmd+space',
+  'cmd+q',     // quit app — never interceptable
+  'cmd+tab',   // app switcher — OS-level
+  'cmd+space', // Spotlight — OS-level
   'cmd+shift+3',
   'cmd+shift+4',
   'cmd+shift+5',
@@ -139,6 +137,16 @@ export function ShortcutsSection() {
     window.addEventListener('keydown', handleKeyDown, true);
     return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, [listeningId, shortcuts, shortcutOverrides, setShortcutOverride]);
+
+  // Prevent macOS "Close Window" (Cmd+W) from closing the app while capturing a new binding
+  useEffect(() => {
+    if (!listeningId) return;
+    let unlisten: (() => void) | undefined;
+    getCurrentWindow()
+      .onCloseRequested((event) => event.preventDefault())
+      .then((fn) => { unlisten = fn; });
+    return () => { unlisten?.(); };
+  }, [listeningId]);
 
   function handleReset(id: string) {
     resetShortcut(id);
