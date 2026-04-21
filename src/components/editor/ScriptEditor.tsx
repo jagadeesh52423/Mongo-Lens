@@ -1,19 +1,60 @@
 import Editor, { OnMount } from '@monaco-editor/react';
 import { useEffect, useRef } from 'react';
 
+interface HighlightRange {
+  startLine: number;
+  endLine: number;
+}
+
 interface Props {
   value: string;
   onChange: (value: string) => void;
   onRun?: () => void;
+  onRunScript?: () => void;
+  onCursorChange?: (line: number) => void;
+  onSelectionChange?: (text: string | null) => void;
+  highlightRange?: HighlightRange | null;
   collections?: string[];
 }
 
-export function ScriptEditor({ value, onChange, onRun, collections = [] }: Props) {
-  const monacoRef = useRef<Parameters<OnMount>[1] | null>(null);
+const HIGHLIGHT_CLASS = 'current-statement-highlight';
+const HIGHLIGHT_STYLE_ID = 'current-statement-highlight-style';
+
+function ensureHighlightStyle() {
+  if (typeof document === 'undefined') return;
+  if (document.getElementById(HIGHLIGHT_STYLE_ID)) return;
+  const style = document.createElement('style');
+  style.id = HIGHLIGHT_STYLE_ID;
+  style.textContent = `.${HIGHLIGHT_CLASS} { background: #0d3a4f; }`;
+  document.head.appendChild(style);
+}
+
+type EditorInstance = Parameters<OnMount>[0];
+type MonacoInstance = Parameters<OnMount>[1];
+
+export function ScriptEditor({
+  value,
+  onChange,
+  onRun,
+  onRunScript,
+  onCursorChange,
+  onSelectionChange,
+  highlightRange,
+  collections = [],
+}: Props) {
+  const monacoRef = useRef<MonacoInstance | null>(null);
+  const editorRef = useRef<EditorInstance | null>(null);
   const providerRef = useRef<{ dispose: () => void } | null>(null);
+  const decorationIdsRef = useRef<string[]>([]);
+
+  const callbacksRef = useRef({ onRun, onRunScript, onCursorChange, onSelectionChange });
+  callbacksRef.current = { onRun, onRunScript, onCursorChange, onSelectionChange };
 
   const handleMount: OnMount = (editor, monaco) => {
     monacoRef.current = monaco;
+    editorRef.current = editor;
+    ensureHighlightStyle();
+
     monaco.editor.defineTheme('mongodb-dark', {
       base: 'vs-dark',
       inherit: true,
@@ -26,8 +67,22 @@ export function ScriptEditor({ value, onChange, onRun, collections = [] }: Props
       },
     });
     monaco.editor.setTheme('mongodb-dark');
+
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
-      onRun?.();
+      callbacksRef.current.onRun?.();
+    });
+    editor.addCommand(monaco.KeyMod.Shift | monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
+      callbacksRef.current.onRunScript?.();
+    });
+
+    editor.onDidChangeCursorPosition((e) => {
+      callbacksRef.current.onCursorChange?.(e.position.lineNumber);
+    });
+    editor.onDidChangeCursorSelection((e) => {
+      const model = editor.getModel();
+      const sel = model?.getValueInRange(e.selection) ?? '';
+      callbacksRef.current.onSelectionChange?.(sel.length > 0 ? sel : null);
+      callbacksRef.current.onCursorChange?.(e.selection.getStartPosition().lineNumber);
     });
   };
 
@@ -60,6 +115,21 @@ export function ScriptEditor({ value, onChange, onRun, collections = [] }: Props
     providerRef.current = disposable;
     return () => disposable.dispose();
   }, [collections]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    const monaco = monacoRef.current;
+    if (!editor || !monaco) return;
+    const newDecorations = highlightRange
+      ? [
+          {
+            range: new monaco.Range(highlightRange.startLine, 1, highlightRange.endLine, 1),
+            options: { isWholeLine: true, className: HIGHLIGHT_CLASS },
+          },
+        ]
+      : [];
+    decorationIdsRef.current = editor.deltaDecorations(decorationIdsRef.current, newDecorations);
+  }, [highlightRange]);
 
   return (
     <Editor
