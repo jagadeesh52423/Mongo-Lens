@@ -2,8 +2,8 @@ import { useEffect, useRef } from 'react';
 import type { MutableRefObject } from 'react';
 import { useCellSelection } from '../contexts/CellSelectionContext';
 import type { SelectedCell } from '../contexts/CellSelectionContext';
-import { useKeyboardService } from '../services/KeyboardService';
-import type { KeyCombo } from '../services/KeyboardService';
+import { keyboardService, useKeyboardService } from '../services/KeyboardService';
+import { DEFAULT_SHORTCUTS } from '../shortcuts/defaults';
 
 export interface TableActionHandlers {
   onViewRecord?: (doc: Record<string, unknown>) => void;
@@ -12,20 +12,12 @@ export interface TableActionHandlers {
 
 interface TableActionDef {
   id: string;
-  keys: KeyCombo;
-  label: string;
-  showInContextMenu: boolean;
-  scope?: string;
   execute: (selected: SelectedCell | null, handlers: TableActionHandlers) => void;
 }
 
 const TABLE_ACTIONS: TableActionDef[] = [
   {
     id: 'cell.copyValue',
-    keys: { cmd: true, key: 'c' },
-    label: 'Copy Value',
-    showInContextMenu: true,
-    scope: 'results',
     execute: (selected) => {
       if (!selected) return;
       navigator.clipboard.writeText(String(selected.value));
@@ -33,10 +25,6 @@ const TABLE_ACTIONS: TableActionDef[] = [
   },
   {
     id: 'cell.copyField',
-    keys: { ctrl: true, cmd: true, key: 'c' },
-    label: 'Copy Field',
-    showInContextMenu: true,
-    scope: 'results',
     execute: (selected) => {
       if (!selected) return;
       navigator.clipboard.writeText(`"${selected.colKey}": ${JSON.stringify(selected.value)}`);
@@ -44,10 +32,6 @@ const TABLE_ACTIONS: TableActionDef[] = [
   },
   {
     id: 'cell.copyFieldPath',
-    keys: { shift: true, alt: true, cmd: true, key: 'c' },
-    label: 'Copy Field Path',
-    showInContextMenu: true,
-    scope: 'results',
     execute: (selected) => {
       if (!selected) return;
       navigator.clipboard.writeText(selected.colKey);
@@ -55,10 +39,6 @@ const TABLE_ACTIONS: TableActionDef[] = [
   },
   {
     id: 'cell.copyDocument',
-    keys: { shift: true, cmd: true, key: 'c' },
-    label: 'Copy Document',
-    showInContextMenu: true,
-    scope: 'results',
     execute: (selected) => {
       if (!selected) return;
       navigator.clipboard.writeText(JSON.stringify(selected.doc, null, 2));
@@ -66,10 +46,6 @@ const TABLE_ACTIONS: TableActionDef[] = [
   },
   {
     id: 'cell.viewRecord',
-    keys: { key: 'F3' },
-    label: 'View Full Record',
-    showInContextMenu: true,
-    scope: 'results',
     execute: (selected, { onViewRecord }) => {
       if (!selected) return;
       onViewRecord?.(selected.doc);
@@ -77,10 +53,6 @@ const TABLE_ACTIONS: TableActionDef[] = [
   },
   {
     id: 'cell.editRecord',
-    keys: { key: 'F4' },
-    label: 'Edit Full Record',
-    showInContextMenu: true,
-    scope: 'results',
     execute: (selected, { onEditRecord }) => {
       if (!selected) return;
       onEditRecord?.(selected.doc);
@@ -90,19 +62,24 @@ const TABLE_ACTIONS: TableActionDef[] = [
 
 interface NavActionDef {
   id: string;
-  keys: KeyCombo;
-  label: string;
-  scope?: string;
   rowDelta: number;
   colDelta: number;
 }
 
 const NAV_ACTIONS: NavActionDef[] = [
-  { id: 'cell.navigateUp', keys: { key: 'ArrowUp' }, label: 'Navigate Up', scope: 'results', rowDelta: -1, colDelta: 0 },
-  { id: 'cell.navigateDown', keys: { key: 'ArrowDown' }, label: 'Navigate Down', scope: 'results', rowDelta: 1, colDelta: 0 },
-  { id: 'cell.navigateLeft', keys: { key: 'ArrowLeft' }, label: 'Navigate Left', scope: 'results', rowDelta: 0, colDelta: -1 },
-  { id: 'cell.navigateRight', keys: { key: 'ArrowRight' }, label: 'Navigate Right', scope: 'results', rowDelta: 0, colDelta: 1 },
+  { id: 'cell.navigateUp', rowDelta: -1, colDelta: 0 },
+  { id: 'cell.navigateDown', rowDelta: 1, colDelta: 0 },
+  { id: 'cell.navigateLeft', rowDelta: 0, colDelta: -1 },
+  { id: 'cell.navigateRight', rowDelta: 0, colDelta: 1 },
 ];
+
+const RESULTS_ACTION_IDS = new Set<string>([
+  ...TABLE_ACTIONS.map((a) => a.id),
+  ...NAV_ACTIONS.map((a) => a.id),
+]);
+DEFAULT_SHORTCUTS
+  .filter((def) => RESULTS_ACTION_IDS.has(def.id))
+  .forEach((def) => keyboardService.defineShortcut(def));
 
 export function useTableActions(
   handlers: TableActionHandlers = {},
@@ -116,47 +93,34 @@ export function useTableActions(
 
   useEffect(() => {
     const unregisters = TABLE_ACTIONS.map((def) =>
-      svc.register({
-        id: def.id,
-        keys: def.keys,
-        label: def.label,
-        showInContextMenu: def.showInContextMenu,
-        scope: def.scope,
-        action: () =>
-          def.execute(stateRef.current.selected, stateRef.current.handlers),
-      })
+      svc.register(def.id, () =>
+        def.execute(stateRef.current.selected, stateRef.current.handlers),
+      ),
     );
 
     const navUnregisters = NAV_ACTIONS.map((def) =>
-      svc.register({
-        id: def.id,
-        keys: def.keys,
-        label: def.label,
-        showInContextMenu: false,
-        scope: def.scope,
-        action: () => {
-          const { selected: sel, docsRef: dRef, columnsRef: cRef, select: selectFn } = stateRef.current;
-          if (!sel || !dRef || !cRef) return;
-          const docs = dRef.current;
-          const cols = cRef.current;
-          if (docs.length === 0 || cols.length === 0) return;
-          const nextRow = Math.max(0, Math.min(docs.length - 1, sel.rowIndex + def.rowDelta));
-          const curColIdx = cols.indexOf(sel.colKey);
-          const nextColIdx = Math.max(0, Math.min(cols.length - 1, curColIdx + def.colDelta));
-          const nextColKey = cols[nextColIdx];
-          const rawRow = docs[nextRow];
-          if (rawRow === undefined) return;
-          const nextDoc: Record<string, unknown> =
-            rawRow !== null && typeof rawRow === 'object'
-              ? (rawRow as Record<string, unknown>)
-              : { value: rawRow };
-          const nextValue = nextDoc[nextColKey];
-          selectFn({ rowIndex: nextRow, colKey: nextColKey, doc: nextDoc, value: nextValue });
-          document
-            .querySelector(`[data-row="${nextRow}"][data-col="${nextColKey}"]`)
-            ?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-        },
-      })
+      svc.register(def.id, () => {
+        const { selected: sel, docsRef: dRef, columnsRef: cRef, select: selectFn } = stateRef.current;
+        if (!sel || !dRef || !cRef) return;
+        const docs = dRef.current;
+        const cols = cRef.current;
+        if (docs.length === 0 || cols.length === 0) return;
+        const nextRow = Math.max(0, Math.min(docs.length - 1, sel.rowIndex + def.rowDelta));
+        const curColIdx = cols.indexOf(sel.colKey);
+        const nextColIdx = Math.max(0, Math.min(cols.length - 1, curColIdx + def.colDelta));
+        const nextColKey = cols[nextColIdx];
+        const rawRow = docs[nextRow];
+        if (rawRow === undefined) return;
+        const nextDoc: Record<string, unknown> =
+          rawRow !== null && typeof rawRow === 'object'
+            ? (rawRow as Record<string, unknown>)
+            : { value: rawRow };
+        const nextValue = nextDoc[nextColKey];
+        selectFn({ rowIndex: nextRow, colKey: nextColKey, doc: nextDoc, value: nextValue });
+        document
+          .querySelector(`[data-row="${nextRow}"][data-col="${nextColKey}"]`)
+          ?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      }),
     );
 
     return () => {

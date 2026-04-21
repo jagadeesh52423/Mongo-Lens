@@ -5,6 +5,13 @@ import type { ReactNode } from 'react';
 import { CellSelectionProvider, useCellSelection } from '../contexts/CellSelectionContext';
 import { useTableActions } from '../hooks/useTableActions';
 import { KeyboardService, KeyboardServiceContext } from '../services/KeyboardService';
+import { DEFAULT_SHORTCUTS } from '../shortcuts/defaults';
+
+function defineResultsShortcuts(svc: KeyboardService): void {
+  DEFAULT_SHORTCUTS
+    .filter((def) => def.scope === 'results')
+    .forEach((def) => svc.defineShortcut(def));
+}
 
 function TestConsumer() {
   const { selected, select, clear } = useCellSelection();
@@ -53,6 +60,7 @@ describe('useTableActions', () => {
   });
 
   function makeWrapper(svc: KeyboardService) {
+    defineResultsShortcuts(svc);
     return ({ children }: { children: ReactNode }) => (
       <KeyboardServiceContext.Provider value={svc}>
         <CellSelectionProvider>{children}</CellSelectionProvider>

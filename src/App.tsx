@@ -13,6 +13,10 @@ import { useConnectionsStore } from './store/connections';
 import { useScriptEvents } from './hooks/useScriptEvents';
 import { checkNodeRunner, installNodeRunner } from './ipc';
 import { keyboardService } from './services/KeyboardService';
+import { DEFAULT_SHORTCUTS } from './shortcuts/defaults';
+
+const openSettingsDef = DEFAULT_SHORTCUTS.find((d) => d.id === 'open-settings');
+if (openSettingsDef) keyboardService.defineShortcut(openSettingsDef);
 
 export default function App() {
   useScriptEvents();
@@ -53,12 +57,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    return keyboardService.register({
-      id: 'open-settings',
-      keys: { cmd: true, key: ',' },
-      label: 'Open Settings',
-      action: () => setSettingsOpen((s) => !s),
-    });
+    return keyboardService.register('open-settings', () => setSettingsOpen((s) => !s));
   }, []);
 
   return (

@@ -6,10 +6,7 @@ export function useKeyboard(def: ShortcutDef, svc: KeyboardService = keyboardSer
   actionRef.current = def.action;
 
   useEffect(() => {
-    return svc.register({
-      ...def,
-      action: () => actionRef.current(),
-    });
+    return svc.register(def.id, () => actionRef.current());
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [def.id]);
+  }, [def.id, svc]);
 }

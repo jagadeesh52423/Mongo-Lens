@@ -8,6 +8,15 @@ export interface KeyCombo {
   key: string;
 }
 
+// implement this interface and call defineShortcut() to register a new shortcut
+export interface ShortcutDefinition {
+  id: string;
+  keys: KeyCombo;
+  label: string;
+  scope: string;
+  showInContextMenu?: boolean;
+}
+
 export interface ShortcutDef {
   id: string;
   keys: KeyCombo;
@@ -50,8 +59,13 @@ export function deserializeKeyCombo(s: string): KeyCombo {
   return combo;
 }
 
+const noop = (): void => {};
+
 export class KeyboardService {
-  private _registry = new Map<string, ShortcutDef>();
+  // Permanent registry — survives component unmount, source of truth for settings UI.
+  private definitions = new Map<string, ShortcutDefinition>();
+  // Ephemeral — bound to component lifecycle; dispatch fires from here only.
+  private handlers = new Map<string, () => void>();
   private _defaults = new Map<string, KeyCombo>();
   private _pendingOverrides: Record<string, string> = {};
   private _activeScope = '';
@@ -64,24 +78,28 @@ export class KeyboardService {
     return this._activeScope;
   }
 
-  register(def: ShortcutDef): () => void {
-    if (!this._defaults.has(def.id)) {
-      this._defaults.set(def.id, def.keys);
-    }
-    this._registry.set(def.id, def);
+  defineShortcut(def: ShortcutDefinition): void {
+    if (this.definitions.has(def.id)) return;
+    this._defaults.set(def.id, def.keys);
     const pending = this._pendingOverrides[def.id];
-    if (pending) {
-      this._registry.set(def.id, { ...def, keys: deserializeKeyCombo(pending) });
-    }
+    const finalDef = pending ? { ...def, keys: deserializeKeyCombo(pending) } : def;
+    this.definitions.set(def.id, finalDef);
+  }
+
+  register(id: string, handler: () => void): () => void {
+    this.handlers.set(id, handler);
     return () => {
-      this._registry.delete(def.id);
-      this._defaults.delete(def.id);
+      if (this.handlers.get(id) === handler) {
+        this.handlers.delete(id);
+      }
     };
   }
 
   dispatch(e: KeyboardEvent): void {
-    for (const def of this._registry.values()) {
-      if (def.scope && def.scope !== this._activeScope) continue;
+    for (const [id, handler] of this.handlers.entries()) {
+      const def = this.definitions.get(id);
+      if (!def) continue;
+      if (def.scope !== 'global' && def.scope !== this._activeScope) continue;
       const k = def.keys;
       if (
         e.key.toLowerCase() === k.key.toLowerCase() &&
@@ -92,28 +110,39 @@ export class KeyboardService {
       ) {
         e.preventDefault();
         e.stopPropagation();
-        def.action();
+        handler();
         return;
       }
     }
   }
 
+  getDefinitions(): ShortcutDefinition[] {
+    return Array.from(this.definitions.values());
+  }
+
   getShortcuts(): ShortcutDef[] {
-    return Array.from(this._registry.values());
+    return Array.from(this.definitions.values()).map((def) => ({
+      id: def.id,
+      keys: def.keys,
+      label: def.label,
+      scope: def.scope,
+      showInContextMenu: def.showInContextMenu,
+      action: this.handlers.get(def.id) ?? noop,
+    }));
   }
 
   applyOverrides(overrides: Record<string, string>): void {
     this._pendingOverrides = { ...overrides };
-    for (const [id, def] of this._registry.entries()) {
+    for (const [id, def] of this.definitions.entries()) {
       const defaults = this._defaults.get(id);
       if (defaults) {
-        this._registry.set(id, { ...def, keys: defaults });
+        this.definitions.set(id, { ...def, keys: defaults });
       }
     }
     for (const [id, serialized] of Object.entries(overrides)) {
-      const def = this._registry.get(id);
+      const def = this.definitions.get(id);
       if (!def) continue;
-      this._registry.set(id, { ...def, keys: deserializeKeyCombo(serialized) });
+      this.definitions.set(id, { ...def, keys: deserializeKeyCombo(serialized) });
     }
   }
 }

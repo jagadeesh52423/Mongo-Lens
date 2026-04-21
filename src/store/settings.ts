@@ -18,6 +18,7 @@ export interface SettingsState extends PersistedSettings {
   setTheme: (id: string) => void;
   setShortcutOverride: (shortcutId: string, combo: string) => void;
   resetShortcut: (shortcutId: string) => void;
+  resetAllShortcuts: () => void;
 }
 
 let storePromise: Promise<Store> | null = null;
@@ -66,6 +67,11 @@ export const useSettingsStore = create<SettingsState>()(
       const { [shortcutId]: _removed, ...rest } = s.shortcutOverrides;
       return { shortcutOverrides: rest };
     });
+    void persist(toPersisted(get()));
+  },
+
+  resetAllShortcuts: () => {
+    set({ shortcutOverrides: {} });
     void persist(toPersisted(get()));
   },
   })),

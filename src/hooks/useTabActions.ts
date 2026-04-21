@@ -1,7 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { useEditorStore } from '../store/editor';
 import type { EditorTab } from '../types';
-import { useKeyboardService, type KeyCombo } from '../services/KeyboardService';
+import { keyboardService, useKeyboardService } from '../services/KeyboardService';
+import { DEFAULT_SHORTCUTS } from '../shortcuts/defaults';
 import { newScriptTab } from '../utils/newScriptTab';
 
 interface TabActionState {
@@ -14,8 +15,6 @@ interface TabActionState {
 
 interface TabActionDef {
   id: string;
-  keys: KeyCombo;
-  label: string;
   execute: (state: TabActionState) => void;
 }
 
@@ -24,8 +23,6 @@ const TAB_INDEX_COUNT = 9;
 const ALL_ACTIONS: TabActionDef[] = [
   {
     id: 'tab.next',
-    keys: { ctrl: true, key: 'Tab' },
-    label: 'Next Tab',
     execute: ({ tabs, activeTabId, setActive }) => {
       if (tabs.length === 0 || activeTabId === null) return;
       const idx = tabs.findIndex((t) => t.id === activeTabId);
@@ -35,8 +32,6 @@ const ALL_ACTIONS: TabActionDef[] = [
   },
   {
     id: 'tab.prev',
-    keys: { ctrl: true, shift: true, key: 'Tab' },
-    label: 'Previous Tab',
     execute: ({ tabs, activeTabId, setActive }) => {
       if (tabs.length === 0 || activeTabId === null) return;
       const idx = tabs.findIndex((t) => t.id === activeTabId);
@@ -46,8 +41,6 @@ const ALL_ACTIONS: TabActionDef[] = [
   },
   {
     id: 'tab.close',
-    keys: { ctrl: true, key: 'w' },
-    label: 'Close Tab',
     execute: ({ activeTabId, closeTab }) => {
       if (activeTabId === null) return;
       closeTab(activeTabId);
@@ -55,8 +48,6 @@ const ALL_ACTIONS: TabActionDef[] = [
   },
   {
     id: 'tab.new',
-    keys: { ctrl: true, key: 't' },
-    label: 'New Tab',
     execute: ({ openTab }) => {
       openTab(newScriptTab());
     },
@@ -65,8 +56,6 @@ const ALL_ACTIONS: TabActionDef[] = [
     const n = i + 1;
     return {
       id: `tab.goTo.${n}`,
-      keys: { ctrl: true, key: String(n) },
-      label: `Go to Tab ${n}`,
       execute: ({ tabs, setActive }) => {
         const target = tabs[n - 1];
         if (target) setActive(target.id);
@@ -74,6 +63,11 @@ const ALL_ACTIONS: TabActionDef[] = [
     };
   }),
 ];
+
+const TAB_ACTION_IDS = new Set(ALL_ACTIONS.map((a) => a.id));
+DEFAULT_SHORTCUTS
+  .filter((def) => TAB_ACTION_IDS.has(def.id))
+  .forEach((def) => keyboardService.defineShortcut(def));
 
 export function useTabActions(): void {
   const svc = useKeyboardService();
@@ -88,12 +82,7 @@ export function useTabActions(): void {
 
   useEffect(() => {
     const unregisters = ALL_ACTIONS.map((def) =>
-      svc.register({
-        id: def.id,
-        keys: def.keys,
-        label: def.label,
-        action: () => def.execute(stateRef.current),
-      }),
+      svc.register(def.id, () => def.execute(stateRef.current)),
     );
     return () => unregisters.forEach((fn) => fn());
   }, [svc]);
