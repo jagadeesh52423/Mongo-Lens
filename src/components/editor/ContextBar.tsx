@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { CSSProperties, useEffect, useRef, useState } from 'react';
 import { SaveScriptDialog } from '../saved-scripts/SaveScriptDialog';
 import { useConnectionsStore } from '../../store/connections';
 import { listDatabases } from '../../ipc';
+import type { ExecutionMode } from '../../execution-modes';
 
 interface Props {
   tabId: string;
@@ -9,10 +10,30 @@ interface Props {
   database: string | undefined;
   onConnectionChange: (id: string) => void;
   onDatabaseChange: (db: string) => void;
-  onRun: () => void;
-  onRunScript?: () => void;
+  modes: readonly ExecutionMode[];
+  onExecute: (modeId: string) => void;
   onSave: (name: string, tags: string) => Promise<void>;
   isRunning: boolean;
+}
+
+function buttonStyleFor(style: ExecutionMode['buttonStyle'], canRun: boolean): CSSProperties {
+  const common: CSSProperties = {
+    opacity: canRun ? 1 : 0.5,
+    cursor: canRun ? 'pointer' : 'not-allowed',
+  };
+  if (style === 'filled') {
+    return {
+      ...common,
+      background: 'var(--accent-green)',
+      color: 'var(--bg)',
+    };
+  }
+  return {
+    ...common,
+    background: 'transparent',
+    border: '1px solid var(--accent-green)',
+    color: 'var(--accent-green)',
+  };
 }
 
 export function ContextBar({
@@ -21,8 +42,8 @@ export function ContextBar({
   database,
   onConnectionChange,
   onDatabaseChange,
-  onRun,
-  onRunScript,
+  modes,
+  onExecute,
   onSave,
   isRunning,
 }: Props) {
@@ -139,31 +160,16 @@ export function ContextBar({
       )}
       <div style={{ flex: 1 }} />
       <button onClick={() => setSaving(true)}>+ Save</button>
-      <button
-        onClick={onRun}
-        disabled={!canRun}
-        style={{
-          background: 'transparent',
-          border: '1px solid var(--accent-green)',
-          color: 'var(--accent-green)',
-          opacity: canRun ? 1 : 0.5,
-          cursor: canRun ? 'pointer' : 'not-allowed',
-        }}
-      >
-        ▶ Run
-      </button>
-      <button
-        onClick={() => onRunScript?.()}
-        disabled={!canRun}
-        style={{
-          background: 'var(--accent-green)',
-          color: 'var(--bg)',
-          opacity: canRun ? 1 : 0.5,
-          cursor: canRun ? 'pointer' : 'not-allowed',
-        }}
-      >
-        ▶▶ Run Script
-      </button>
+      {modes.map((mode) => (
+        <button
+          key={mode.id}
+          onClick={() => onExecute(mode.id)}
+          disabled={!canRun}
+          style={buttonStyleFor(mode.buttonStyle, canRun)}
+        >
+          {mode.label}
+        </button>
+      ))}
     </div>
     {saving && (
       <SaveScriptDialog

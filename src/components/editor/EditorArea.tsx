@@ -13,6 +13,7 @@ import { useActivateScope } from '../../services/KeyboardService';
 import { useTabActions } from '../../hooks/useTabActions';
 import { newScriptTab } from '../../utils/newScriptTab';
 import { getStatementAtCursor } from '../../utils/statementDetection';
+import { getExecutionMode, getExecutionModes } from '../../execution-modes';
 
 export function EditorArea() {
   const {
@@ -79,22 +80,16 @@ export function EditorArea() {
     }
   }
 
-  function resolveSmartContent(): string {
-    if (!active || active.type !== 'script') return '';
-    const sel = selections[active.id];
-    if (sel && sel.length > 0) return sel;
-    const line = cursorLines[active.id] ?? 1;
-    const stmt = getStatementAtCursor(active.content, line);
-    return stmt ? stmt.text : active.content;
-  }
-
-  async function handleRun() {
-    await executeContent(resolveSmartContent(), 0, activePageSize);
-  }
-
-  async function handleRunScript() {
-    if (!active || active.type !== 'script') return;
-    await executeContent(active.content, 0, activePageSize);
+  async function handleExecute(modeId: string) {
+    const mode = getExecutionMode(modeId);
+    if (!mode || !active || active.type !== 'script') return;
+    const content = mode.resolveContent({
+      content: active.content,
+      cursorLine: cursorLines[active.id] ?? 1,
+      selection: selections[active.id] ?? null,
+    });
+    if (content == null) return;
+    await executeContent(content, 0, activePageSize);
   }
 
   async function handlePageChange(page: number, pageSize: number) {
@@ -201,8 +196,8 @@ export function EditorArea() {
             updateTab(active.id, { connectionId: id, database: undefined })
           }
           onDatabaseChange={(db) => updateTab(active.id, { database: db })}
-          onRun={handleRun}
-          onRunScript={handleRunScript}
+          modes={getExecutionModes()}
+          onExecute={handleExecute}
           onSave={handleSave}
           isRunning={isRunning}
         />
@@ -223,8 +218,8 @@ export function EditorArea() {
                 <ScriptEditor
                   value={active.content}
                   onChange={(v) => updateContent(active.id, v)}
-                  onRun={handleRun}
-                  onRunScript={handleRunScript}
+                  modes={getExecutionModes()}
+                  onExecute={handleExecute}
                   onCursorChange={handleCursorChange}
                   onSelectionChange={handleSelectionChange}
                   highlightRange={highlightRange}

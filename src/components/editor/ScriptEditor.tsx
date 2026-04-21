@@ -1,5 +1,6 @@
 import Editor, { OnMount } from '@monaco-editor/react';
 import { useEffect, useRef } from 'react';
+import type { ExecutionMode } from '../../execution-modes';
 
 interface HighlightRange {
   startLine: number;
@@ -9,8 +10,8 @@ interface HighlightRange {
 interface Props {
   value: string;
   onChange: (value: string) => void;
-  onRun?: () => void;
-  onRunScript?: () => void;
+  modes: readonly ExecutionMode[];
+  onExecute?: (modeId: string) => void;
   onCursorChange?: (line: number) => void;
   onSelectionChange?: (text: string | null) => void;
   highlightRange?: HighlightRange | null;
@@ -35,8 +36,8 @@ type MonacoInstance = Parameters<OnMount>[1];
 export function ScriptEditor({
   value,
   onChange,
-  onRun,
-  onRunScript,
+  modes,
+  onExecute,
   onCursorChange,
   onSelectionChange,
   highlightRange,
@@ -47,8 +48,8 @@ export function ScriptEditor({
   const providerRef = useRef<{ dispose: () => void } | null>(null);
   const decorationIdsRef = useRef<string[]>([]);
 
-  const callbacksRef = useRef({ onRun, onRunScript, onCursorChange, onSelectionChange });
-  callbacksRef.current = { onRun, onRunScript, onCursorChange, onSelectionChange };
+  const callbacksRef = useRef({ onExecute, onCursorChange, onSelectionChange });
+  callbacksRef.current = { onExecute, onCursorChange, onSelectionChange };
 
   const handleMount: OnMount = (editor, monaco) => {
     monacoRef.current = monaco;
@@ -68,11 +69,12 @@ export function ScriptEditor({
     });
     monaco.editor.setTheme('mongodb-dark');
 
-    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
-      callbacksRef.current.onRun?.();
-    });
-    editor.addCommand(monaco.KeyMod.Shift | monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
-      callbacksRef.current.onRunScript?.();
+    modes.forEach((mode) => {
+      if (mode.keybind) {
+        editor.addCommand(mode.keybind(monaco), () => {
+          callbacksRef.current.onExecute?.(mode.id);
+        });
+      }
     });
 
     editor.onDidChangeCursorPosition((e) => {
