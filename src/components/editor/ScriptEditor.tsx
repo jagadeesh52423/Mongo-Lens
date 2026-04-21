@@ -1,6 +1,7 @@
 import Editor, { OnMount } from '@monaco-editor/react';
 import { useEffect, useRef } from 'react';
 import type { ExecutionMode } from '../../execution-modes';
+import { MONACO_THEME_ID } from '../../themes/applyTheme';
 
 interface HighlightRange {
   startLine: number;
@@ -26,7 +27,7 @@ function ensureHighlightStyle() {
   if (document.getElementById(HIGHLIGHT_STYLE_ID)) return;
   const style = document.createElement('style');
   style.id = HIGHLIGHT_STYLE_ID;
-  style.textContent = `.${HIGHLIGHT_CLASS} { background: #0d3a4f; }`;
+  style.textContent = `.${HIGHLIGHT_CLASS} { background: var(--bg-hover); }`;
   document.head.appendChild(style);
 }
 
@@ -55,19 +56,6 @@ export function ScriptEditor({
     monacoRef.current = monaco;
     editorRef.current = editor;
     ensureHighlightStyle();
-
-    monaco.editor.defineTheme('mongodb-dark', {
-      base: 'vs-dark',
-      inherit: true,
-      rules: [],
-      colors: {
-        'editor.background': '#001e2b',
-        'editor.lineHighlightBackground': '#0d2d3c',
-        'editorGutter.background': '#001e2b',
-        'minimap.background': '#001e2b',
-      },
-    });
-    monaco.editor.setTheme('mongodb-dark');
 
     modes.forEach((mode) => {
       if (mode.keybind) {
@@ -137,7 +125,7 @@ export function ScriptEditor({
     <Editor
       height="100%"
       language="javascript"
-      theme="mongodb-dark"
+      theme={MONACO_THEME_ID}
       value={value}
       onChange={(v) => onChange(v ?? '')}
       onMount={handleMount}
