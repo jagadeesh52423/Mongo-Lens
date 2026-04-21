@@ -16,9 +16,8 @@ export function applyMonacoTheme(themeId: string): void {
   const theme = getTheme(themeId);
   if (!theme) return;
   const vars = theme.variables;
-  const bg = vars['--bg'] ?? '#001e2b';
-  const panel = vars['--bg-panel'] ?? bg;
-  const base = isLightColor(bg) ? 'vs' : 'vs-dark';
+  const panel = vars['--bg-panel'] ?? vars['--bg'] ?? '#001e2b';
+  const base = isLightColor(panel) ? 'vs' : 'vs-dark';
 
   loader.init().then((monaco) => {
     monaco.editor.defineTheme(MONACO_THEME_ID, {
@@ -26,10 +25,10 @@ export function applyMonacoTheme(themeId: string): void {
       inherit: true,
       rules: [],
       colors: {
-        'editor.background': bg,
+        'editor.background': panel,
         'editor.lineHighlightBackground': panel,
-        'editorGutter.background': bg,
-        'minimap.background': bg,
+        'editorGutter.background': panel,
+        'minimap.background': panel,
       },
     });
     monaco.editor.setTheme(MONACO_THEME_ID);

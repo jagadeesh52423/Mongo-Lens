@@ -1,10 +1,16 @@
 import { useState } from 'react';
-import { open as openDialog } from '@tauri-apps/plugin-dialog';
-import { readTextFile } from '@tauri-apps/plugin-fs';
+import { open as openDialog, save } from '@tauri-apps/plugin-dialog';
+import { readTextFile, writeTextFile } from '@tauri-apps/plugin-fs';
 import { getThemes, registerTheme, type ThemeDefinition } from '../../themes/registry';
 import { applyTheme, applyMonacoTheme } from '../../themes/applyTheme';
 import { useSettingsStore } from '../../store/settings';
 import { register } from '../registry';
+
+interface ThemeCardAction {
+  icon: string;
+  label: string;
+  onClick: (theme: ThemeDefinition) => void;
+}
 
 export function ThemeSection() {
   const [themes, setThemes] = useState<ThemeDefinition[]>(() => getThemes());
@@ -41,6 +47,29 @@ export function ThemeSection() {
     }
   };
 
+  const handleExport = async (theme: ThemeDefinition) => {
+    setError(null);
+    try {
+      const json = JSON.stringify(
+        { id: theme.id, name: theme.name, variables: theme.variables },
+        null,
+        2,
+      );
+      const path = await save({
+        defaultPath: `${theme.name}.json`,
+        filters: [{ name: 'Theme JSON', extensions: ['json'] }],
+      });
+      if (!path) return;
+      await writeTextFile(path, json);
+    } catch (err) {
+      setError(`Failed to export theme: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
+  const actions: ThemeCardAction[] = [
+    { icon: '⬇', label: 'Export theme', onClick: handleExport },
+  ];
+
   return (
     <div style={{ padding: 24, color: 'var(--fg)' }}>
       <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>Theme</h2>
@@ -62,6 +91,7 @@ export function ThemeSection() {
             theme={theme}
             active={theme.id === activeThemeId}
             onClick={() => activate(theme.id)}
+            actions={actions}
           />
         ))}
       </div>
@@ -80,17 +110,34 @@ interface ThemeCardProps {
   theme: ThemeDefinition;
   active: boolean;
   onClick: () => void;
+  actions: ThemeCardAction[];
 }
 
-function ThemeCard({ theme, active, onClick }: ThemeCardProps) {
+function ThemeCard({ theme, active, onClick, actions }: ThemeCardProps) {
+  const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
   const bg = theme.variables['--bg'] ?? '#000';
   const panel = theme.variables['--bg-panel'] ?? bg;
   const accent = theme.variables['--accent'] ?? '#fff';
   const fg = theme.variables['--fg'] ?? '#ccc';
+  const actionsVisible = hovered || focused;
 
   return (
-    <button
+    <div
+      role="button"
+      tabIndex={0}
+      aria-pressed={active}
       onClick={onClick}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onClick();
+        }
+      }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
       style={{
         display: 'flex',
         flexDirection: 'column',
@@ -106,6 +153,7 @@ function ThemeCard({ theme, active, onClick }: ThemeCardProps) {
     >
       <div
         style={{
+          position: 'relative',
           height: 64,
           background: bg,
           display: 'flex',
@@ -119,6 +167,46 @@ function ThemeCard({ theme, active, onClick }: ThemeCardProps) {
           <Swatch color={panel} border={fg} />
           <Swatch color={accent} border={fg} />
         </div>
+        {actionsVisible && actions.length > 0 && (
+          <div
+            style={{
+              position: 'absolute',
+              top: 4,
+              right: 4,
+              display: 'flex',
+              gap: 4,
+            }}
+          >
+            {actions.map((action) => (
+              <button
+                key={action.label}
+                title={action.label}
+                aria-label={action.label}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  action.onClick(theme);
+                }}
+                style={{
+                  width: 22,
+                  height: 22,
+                  padding: 0,
+                  borderRadius: 4,
+                  border: '1px solid var(--border)',
+                  background: 'var(--bg-panel)',
+                  color: 'var(--fg)',
+                  fontSize: 12,
+                  lineHeight: 1,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                {action.icon}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
       <div
         style={{
@@ -133,7 +221,7 @@ function ThemeCard({ theme, active, onClick }: ThemeCardProps) {
           <span style={{ fontSize: 11, color: 'var(--accent)' }}>✓ Active</span>
         )}
       </div>
-    </button>
+    </div>
   );
 }
 
