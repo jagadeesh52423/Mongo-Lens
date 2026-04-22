@@ -12,10 +12,15 @@ export function detectStatements(script: string): Statement[] {
   const blocks: Statement[] = [];
   let current: { startLine: number; endLine: number; lines: string[] } | null = null;
 
+  let depth = 0;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const isBlank = line.trim().length === 0;
-    if (isBlank) {
+    for (const ch of line) {
+      if (ch === '{' || ch === '(' || ch === '[') depth++;
+      else if (ch === '}' || ch === ')' || ch === ']') depth = Math.max(0, depth - 1);
+    }
+    if (isBlank && depth === 0) {
       if (current) {
         blocks.push({
           startLine: current.startLine,
@@ -25,9 +30,9 @@ export function detectStatements(script: string): Statement[] {
         current = null;
       }
     } else {
-      if (!current) {
+      if (!current && !isBlank) {
         current = { startLine: i + 1, endLine: i + 1, lines: [line] };
-      } else {
+      } else if (current) {
         current.endLine = i + 1;
         current.lines.push(line);
       }
