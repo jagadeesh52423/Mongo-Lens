@@ -70,57 +70,84 @@ describe('KeyboardService', () => {
     expect(svc.getDefinitions()).toHaveLength(2);
   });
 
-  it('fires scoped shortcut when active scope matches', () => {
+  it('fires scoped shortcut when focused element is inside scope zone', () => {
     const action = vi.fn();
     svc.defineShortcut({ id: 'scoped', keys: { cmd: true, key: 'c' }, label: 'Copy', scope: 'results' });
     svc.register('scoped', action);
-    svc.setScope('results');
+
+    const scopeDiv = document.createElement('div');
+    scopeDiv.setAttribute('data-keyboard-scope', 'results');
+    const btn = document.createElement('button');
+    scopeDiv.appendChild(btn);
+    document.body.appendChild(scopeDiv);
+    btn.focus();
+
     svc.dispatch(makeKeyEvent({ key: 'c', metaKey: true }));
     expect(action).toHaveBeenCalledOnce();
+
+    document.body.removeChild(scopeDiv);
   });
 
-  it('does not fire scoped shortcut when active scope does not match', () => {
+  it('does not fire scoped shortcut when focused element is outside any scope zone', () => {
     const action = vi.fn();
     svc.defineShortcut({ id: 'scoped', keys: { cmd: true, key: 'c' }, label: 'Copy', scope: 'results' });
     svc.register('scoped', action);
-    svc.setScope('editor');
+
+    const btn = document.createElement('button');
+    document.body.appendChild(btn);
+    btn.focus();
+
     svc.dispatch(makeKeyEvent({ key: 'c', metaKey: true }));
     expect(action).not.toHaveBeenCalled();
+
+    document.body.removeChild(btn);
   });
 
-  it('does not fire scoped shortcut when active scope is empty', () => {
+  it('does not fire scoped shortcut when focused element is inside a different scope zone', () => {
     const action = vi.fn();
     svc.defineShortcut({ id: 'scoped', keys: { cmd: true, key: 'c' }, label: 'Copy', scope: 'results' });
     svc.register('scoped', action);
+
+    const scopeDiv = document.createElement('div');
+    scopeDiv.setAttribute('data-keyboard-scope', 'editor');
+    const btn = document.createElement('button');
+    scopeDiv.appendChild(btn);
+    document.body.appendChild(scopeDiv);
+    btn.focus();
+
     svc.dispatch(makeKeyEvent({ key: 'c', metaKey: true }));
     expect(action).not.toHaveBeenCalled();
+
+    document.body.removeChild(scopeDiv);
   });
 
-  it('fires global-scoped shortcut regardless of active scope', () => {
+  it('fires global-scoped shortcut regardless of focused element position', () => {
     const action = vi.fn();
     svc.defineShortcut({ id: 'unscoped', keys: { cmd: true, key: 'c' }, label: 'Copy', scope: 'global' });
     svc.register('unscoped', action);
-    svc.setScope('editor');
     svc.dispatch(makeKeyEvent({ key: 'c', metaKey: true }));
     expect(action).toHaveBeenCalledOnce();
   });
 
-  it('fires global-scoped shortcut when no scope is active', () => {
+  it('fires scoped shortcut for element inside nested scope zones (ancestor chain)', () => {
     const action = vi.fn();
-    svc.defineShortcut({ id: 'unscoped', keys: { cmd: true, key: 'c' }, label: 'Copy', scope: 'global' });
-    svc.register('unscoped', action);
-    svc.dispatch(makeKeyEvent({ key: 'c', metaKey: true }));
-    expect(action).toHaveBeenCalledOnce();
-  });
+    svc.defineShortcut({ id: 'results-action', keys: { key: 'F3' }, label: 'View', scope: 'results' });
+    svc.register('results-action', action);
 
-  it('setScope / getScope round-trip returns the stored scope', () => {
-    expect(svc.getScope()).toBe('');
-    svc.setScope('results');
-    expect(svc.getScope()).toBe('results');
-    svc.setScope('editor');
-    expect(svc.getScope()).toBe('editor');
-    svc.setScope('');
-    expect(svc.getScope()).toBe('');
+    const outer = document.createElement('div');
+    outer.setAttribute('data-keyboard-scope', 'results');
+    const inner = document.createElement('div');
+    inner.setAttribute('data-keyboard-scope', 'results-table');
+    const btn = document.createElement('button');
+    inner.appendChild(btn);
+    outer.appendChild(inner);
+    document.body.appendChild(outer);
+    btn.focus();
+
+    svc.dispatch(makeKeyEvent({ key: 'F3', metaKey: false }));
+    expect(action).toHaveBeenCalledOnce();
+
+    document.body.removeChild(outer);
   });
 });
 

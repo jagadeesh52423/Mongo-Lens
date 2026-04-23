@@ -28,13 +28,9 @@ export const DEFAULT_SHORTCUTS: ShortcutDefinition[] = [
   { id: 'cell.copyFieldPath', label: 'Copy Field Path', keys: { shift: true, alt: true, cmd: true, key: 'c' }, scope: 'results', showInContextMenu: true },
   { id: 'cell.copyDocument', label: 'Copy Document', keys: { shift: true, cmd: true, key: 'c' }, scope: 'results', showInContextMenu: true },
 
-  // Results — record actions
-  { id: 'cell.viewRecord', label: 'View Full Record', keys: { key: 'F3' }, scope: 'results', showInContextMenu: true },
-  { id: 'cell.editRecord', label: 'Edit Full Record', keys: { key: 'F4' }, scope: 'results', showInContextMenu: true },
-
   // Results — cell navigation
-  { id: 'cell.navigateUp', label: 'Navigate Up', keys: { key: 'ArrowUp' }, scope: 'results' },
-  { id: 'cell.navigateDown', label: 'Navigate Down', keys: { key: 'ArrowDown' }, scope: 'results' },
-  { id: 'cell.navigateLeft', label: 'Navigate Left', keys: { key: 'ArrowLeft' }, scope: 'results' },
-  { id: 'cell.navigateRight', label: 'Navigate Right', keys: { key: 'ArrowRight' }, scope: 'results' },
+  { id: 'cell.navigateUp', label: 'Navigate Up', keys: { key: 'ArrowUp' }, scope: 'results-table' },
+  { id: 'cell.navigateDown', label: 'Navigate Down', keys: { key: 'ArrowDown' }, scope: 'results-table' },
+  { id: 'cell.navigateLeft', label: 'Navigate Left', keys: { key: 'ArrowLeft' }, scope: 'results-table' },
+  { id: 'cell.navigateRight', label: 'Navigate Right', keys: { key: 'ArrowRight' }, scope: 'results-table' },
 ];

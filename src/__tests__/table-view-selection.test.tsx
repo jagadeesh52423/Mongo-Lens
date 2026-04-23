@@ -1,24 +1,31 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { TableView } from '../components/results/TableView';
 import { CellSelectionProvider } from '../contexts/CellSelectionContext';
-import { useTableActions } from '../hooks/useTableActions';
+import { useRecordActions } from '../hooks/useRecordActions';
 import { keyboardService } from '../services/KeyboardService';
+import type { RecordContext } from '../services/records/RecordContext';
+import type { RecordActionHost } from '../services/records/RecordActionHost';
 
-function ShortcutsRegistrar({
-  onViewRecord,
-  onEditRecord,
-}: {
-  onViewRecord?: (doc: Record<string, unknown>) => void;
-  onEditRecord?: (doc: Record<string, unknown>) => void;
-} = {}) {
-  useTableActions({ onViewRecord, onEditRecord });
+const noopHost: RecordActionHost = {
+  openModal: vi.fn(),
+  close: vi.fn(),
+  triggerDocUpdate: vi.fn(),
+  executeAction: vi.fn(),
+};
+
+const baseContext: RecordContext = { doc: {} as Record<string, unknown> };
+
+function ShortcutsRegistrar({ host = noopHost, context = baseContext }: { host?: RecordActionHost; context?: RecordContext } = {}) {
+  useRecordActions(context, host);
   return null;
 }
 
 const docs = [{ name: 'alice', age: 30 }, { name: 'bob', age: 25 }];
+
+let removeKeydownListener: (() => void) | null = null;
 
 beforeEach(() => {
   Object.defineProperty(navigator, 'clipboard', {
@@ -26,14 +33,25 @@ beforeEach(() => {
     writable: true,
     configurable: true,
   });
-  keyboardService.setScope('results');
+  // Mirror what App.tsx does — dispatch keydown events through keyboardService.
+  const handler = (e: KeyboardEvent) => keyboardService.dispatch(e);
+  window.addEventListener('keydown', handler);
+  removeKeydownListener = () => window.removeEventListener('keydown', handler);
+});
+
+afterEach(() => {
+  removeKeydownListener?.();
+  removeKeydownListener = null;
 });
 
 function Wrapper({ children }: { children: ReactNode }) {
   return (
     <CellSelectionProvider>
-      <ShortcutsRegistrar />
-      {children}
+      {/* scope zone mirrors KeyboardScopeZone used in ResultsPanel */}
+      <div data-keyboard-scope="results">
+        <ShortcutsRegistrar />
+        {children}
+      </div>
     </CellSelectionProvider>
   );
 }
@@ -104,43 +122,58 @@ describe('TableView cell selection', () => {
     expect(screen.queryByRole('menu')).not.toBeInTheDocument();
   });
 
-  it('F3 on selected cell calls onViewRecord', async () => {
+  it('F3 on selected cell invokes host.openModal with Full Record', async () => {
     const user = userEvent.setup();
-    const onViewRecord = vi.fn();
+    const host: RecordActionHost = {
+      openModal: vi.fn(),
+      close: vi.fn(),
+      triggerDocUpdate: vi.fn(),
+      executeAction: vi.fn(),
+    };
 
-    function WrapperWithHandlers({ children }: { children: ReactNode }) {
+    function WrapperWithHost({ children }: { children: ReactNode }) {
       return (
         <CellSelectionProvider>
-          <ShortcutsRegistrar onViewRecord={onViewRecord} />
-          {children}
+          <div data-keyboard-scope="results">
+            <ShortcutsRegistrar host={host} />
+            {children}
+          </div>
         </CellSelectionProvider>
       );
     }
 
-    render(<TableView docs={docs} sortKey={null} sortDir={1} onToggleSort={() => {}} />, { wrapper: WrapperWithHandlers });
+    render(<TableView docs={docs} sortKey={null} sortDir={1} onToggleSort={() => {}} />, { wrapper: WrapperWithHost });
     const cell = screen.getAllByRole('cell').find((c) => c.textContent === 'alice')!;
     await user.click(cell);
     await user.keyboard('{F3}');
-    expect(onViewRecord).toHaveBeenCalledWith({ name: 'alice', age: 30 });
+    expect(host.openModal).toHaveBeenCalledWith('Full Record', expect.anything(), expect.anything());
   });
 
-  it('F4 on selected cell calls onEditRecord', async () => {
+  it('F4 on selected cell with collection invokes host.openModal with Edit Record', async () => {
     const user = userEvent.setup();
-    const onEditRecord = vi.fn();
+    const host: RecordActionHost = {
+      openModal: vi.fn(),
+      close: vi.fn(),
+      triggerDocUpdate: vi.fn(),
+      executeAction: vi.fn(),
+    };
+    const ctx: RecordContext = { doc: {} as Record<string, unknown>, collection: 'users' };
 
-    function WrapperWithHandlers({ children }: { children: ReactNode }) {
+    function WrapperWithHost({ children }: { children: ReactNode }) {
       return (
         <CellSelectionProvider>
-          <ShortcutsRegistrar onEditRecord={onEditRecord} />
-          {children}
+          <div data-keyboard-scope="results">
+            <ShortcutsRegistrar host={host} context={ctx} />
+            {children}
+          </div>
         </CellSelectionProvider>
       );
     }
 
-    render(<TableView docs={docs} sortKey={null} sortDir={1} onToggleSort={() => {}} />, { wrapper: WrapperWithHandlers });
+    render(<TableView docs={docs} sortKey={null} sortDir={1} onToggleSort={() => {}} />, { wrapper: WrapperWithHost });
     const cell = screen.getAllByRole('cell').find((c) => c.textContent === 'alice')!;
     await user.click(cell);
     await user.keyboard('{F4}');
-    expect(onEditRecord).toHaveBeenCalledWith({ name: 'alice', age: 30 });
+    expect(host.openModal).toHaveBeenCalledWith('Edit Record', expect.anything(), null);
   });
 });

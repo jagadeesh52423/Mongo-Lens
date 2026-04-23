@@ -73,8 +73,6 @@ export function TableView({ docs, sortKey, sortDir, onToggleSort }: Props) {
       ref={containerRef}
       tabIndex={0}
       style={{ overflow: 'auto', flex: 1, outline: 'none' }}
-      onFocus={() => keyboardService.setScope('results')}
-      onKeyDown={(e) => keyboardService.dispatch(e.nativeEvent)}
       onMouseDown={(e) => {
         if (e.target === containerRef.current) clear();
       }}

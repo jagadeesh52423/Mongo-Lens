@@ -1,27 +1,39 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { MutableRefObject } from 'react';
+import type { MutableRefObject, ReactNode } from 'react';
 import { save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { writeTextFile } from '@tauri-apps/plugin-fs';
 import { useResultsStore } from '../../store/results';
 import { JsonView } from './JsonView';
 import { TableView, columnsOf } from './TableView';
-import { RecordModal } from './RecordModal';
+import { RecordModalShell } from './RecordModalShell';
 import { toCsv, toJsonText } from '../../utils/export';
 import { CellSelectionProvider, useCellSelection } from '../../contexts/CellSelectionContext';
-import { useTableActions } from '../../hooks/useTableActions';
+import { useRecordActions } from '../../hooks/useRecordActions';
+import { KeyboardScopeZone } from '../shared/KeyboardScopeZone';
+import { recordActionRegistry } from '../../services/records/RecordActionRegistry';
+import type { RecordContext } from '../../services/records/RecordContext';
+import type { RecordActionHost } from '../../services/records/RecordActionHost';
 
-function TableActionsRegistrar({
-  onViewRecord,
-  onEditRecord,
+interface ModalState {
+  title: string;
+  body: ReactNode;
+  footer: ReactNode;
+}
+
+function RecordActionsRegistrar({
+  context,
+  host,
+  activeContextRef,
   docsRef,
   columnsRef,
 }: {
-  onViewRecord?: (doc: Record<string, unknown>) => void;
-  onEditRecord?: (doc: Record<string, unknown>) => void;
+  context: RecordContext;
+  host: RecordActionHost;
+  activeContextRef: MutableRefObject<RecordContext>;
   docsRef: MutableRefObject<unknown[]>;
   columnsRef: MutableRefObject<string[]>;
 }) {
-  useTableActions({ onViewRecord, onEditRecord }, docsRef, columnsRef);
+  useRecordActions(context, host, activeContextRef, docsRef, columnsRef);
   return null;
 }
 
@@ -50,10 +62,41 @@ export function ResultsPanel({
 }: Props) {
   const res = useResultsStore((s) => s.byTab[tabId]);
   const [view, setView] = useState<'json' | 'table'>('table');
-  const [recordModal, setRecordModal] = useState<{
-    doc: Record<string, unknown>;
-    mode: 'view' | 'edit';
-  } | null>(null);
+  const [modal, setModal] = useState<ModalState | null>(null);
+  const onDocUpdatedRef = useRef(onDocUpdated);
+  onDocUpdatedRef.current = onDocUpdated;
+
+  const recordContext = useMemo<RecordContext>(
+    () => ({ doc: {}, connectionId, database, collection }),
+    [connectionId, database, collection],
+  );
+
+  // Tracks the context of the currently-active action so executeAction (e.g., view → edit handoff)
+  // can re-dispatch with the same doc without the caller threading it through.
+  const activeContextRef = useRef<RecordContext>(recordContext);
+
+  const host = useMemo<RecordActionHost>(() => {
+    const h: RecordActionHost = {
+      openModal(title, body, footer) {
+        setModal({ title, body, footer });
+      },
+      close() {
+        setModal(null);
+      },
+      triggerDocUpdate() {
+        onDocUpdatedRef.current?.();
+      },
+      executeAction(id) {
+        const action = recordActionRegistry.getById(id);
+        if (!action) return;
+        const ctx = activeContextRef.current;
+        if (!action.canExecute(ctx)) return;
+        action.execute(ctx, h);
+      },
+    };
+    return h;
+  }, []);
+
   const pagination = res?.pagination;
   const totalPages = pagination && pagination.total >= 0
     ? Math.max(1, Math.ceil(pagination.total / pageSize))
@@ -136,28 +179,24 @@ export function ResultsPanel({
   if (!res || (res.groups.length === 0 && !res.isRunning && !res.lastError && !res.pagination)) {
     return (
       <CellSelectionProvider>
-        <TableActionsRegistrar
-          onViewRecord={connectionId && database && collection
-            ? (doc) => setRecordModal({ doc, mode: 'view' })
-            : undefined}
-          onEditRecord={connectionId && database && collection
-            ? (doc) => setRecordModal({ doc, mode: 'edit' })
-            : undefined}
+        <RecordActionsRegistrar
+          context={recordContext}
+          host={host}
+          activeContextRef={activeContextRef}
           docsRef={docsRef}
           columnsRef={columnsRef}
         />
-        <div style={{ padding: 12, color: 'var(--fg-dim)' }}>
-          Run a script to see results.
-        </div>
-        {recordModal && connectionId && database && collection && (
-          <RecordModal
-            doc={recordModal.doc}
-            initialMode={recordModal.mode}
-            connectionId={connectionId}
-            database={database}
-            collection={collection}
-            onClose={() => setRecordModal(null)}
-            onSaved={() => { setRecordModal(null); onDocUpdated?.(); }}
+        <KeyboardScopeZone scope="results">
+          <div style={{ padding: 12, color: 'var(--fg-dim)' }}>
+            Run a script to see results.
+          </div>
+        </KeyboardScopeZone>
+        {modal && (
+          <RecordModalShell
+            title={modal.title}
+            body={modal.body}
+            footer={modal.footer}
+            onClose={() => setModal(null)}
           />
         )}
       </CellSelectionProvider>
@@ -167,17 +206,14 @@ export function ResultsPanel({
   return (
     <CellSelectionProvider>
       <SelectionClearer tabId={tabId} isRunning={!!res?.isRunning} />
-      <TableActionsRegistrar
-        onViewRecord={connectionId && database && collection
-          ? (doc) => setRecordModal({ doc, mode: 'view' })
-          : undefined}
-        onEditRecord={connectionId && database && collection
-          ? (doc) => setRecordModal({ doc, mode: 'edit' })
-          : undefined}
+      <RecordActionsRegistrar
+        context={recordContext}
+        host={host}
+        activeContextRef={activeContextRef}
         docsRef={docsRef}
         columnsRef={columnsRef}
       />
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+      <KeyboardScopeZone scope="results" style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
       <div
         style={{
           display: 'flex',
@@ -244,12 +280,14 @@ export function ResultsPanel({
         {view === 'json' ? (
           <JsonView docs={allDocs} />
         ) : (
-          <TableView
-            docs={sortedDocs}
-            sortKey={sortKey}
-            sortDir={sortDir}
-            onToggleSort={handleToggleSort}
-          />
+          <KeyboardScopeZone scope="results-table" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+            <TableView
+              docs={sortedDocs}
+              sortKey={sortKey}
+              sortDir={sortDir}
+              onToggleSort={handleToggleSort}
+            />
+          </KeyboardScopeZone>
         )}
       </div>
       {pagination && (
@@ -308,16 +346,13 @@ export function ResultsPanel({
           <span>per page</span>
         </div>
       )}
-    </div>
-    {recordModal && connectionId && database && collection && (
-      <RecordModal
-        doc={recordModal.doc}
-        initialMode={recordModal.mode}
-        connectionId={connectionId}
-        database={database}
-        collection={collection}
-        onClose={() => setRecordModal(null)}
-        onSaved={() => { setRecordModal(null); onDocUpdated?.(); }}
+    </KeyboardScopeZone>
+    {modal && (
+      <RecordModalShell
+        title={modal.title}
+        body={modal.body}
+        footer={modal.footer}
+        onClose={() => setModal(null)}
       />
     )}
     </CellSelectionProvider>

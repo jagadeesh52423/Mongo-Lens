@@ -1,4 +1,4 @@
-import { createContext, createElement, useCallback, useContext, useMemo, type ReactNode } from 'react';
+import { createContext, createElement, useContext, useMemo, type ReactNode } from 'react';
 import type { Logger } from './logger';
 import { NoopLogger } from './logger/NoopLogger';
 
@@ -70,19 +70,21 @@ export class KeyboardService {
   private handlers = new Map<string, () => void>();
   private _defaults = new Map<string, KeyCombo>();
   private _pendingOverrides: Record<string, string> = {};
-  private _activeScope = '';
   private logger: Logger = new NoopLogger();
 
   setLogger(logger: Logger): void {
     this.logger = logger;
   }
 
-  setScope(scope: string): void {
-    this._activeScope = scope;
-  }
-
-  getScope(): string {
-    return this._activeScope;
+  private resolveScopes(el: Element | null): string[] {
+    const scopes: string[] = [];
+    let node: Element | null = el;
+    while (node) {
+      const s = node.getAttribute('data-keyboard-scope');
+      if (s) scopes.push(s);
+      node = node.parentElement;
+    }
+    return scopes;
   }
 
   defineShortcut(def: ShortcutDefinition): void {
@@ -104,10 +106,11 @@ export class KeyboardService {
   }
 
   dispatch(e: KeyboardEvent): void {
+    const scopes = this.resolveScopes(document.activeElement);
     for (const [id, handler] of this.handlers.entries()) {
       const def = this.definitions.get(id);
       if (!def) continue;
-      if (def.scope !== 'global' && def.scope !== this._activeScope) continue;
+      if (def.scope !== 'global' && !scopes.includes(def.scope)) continue;
       const k = def.keys;
       if (
         e.key.toLowerCase() === k.key.toLowerCase() &&
@@ -172,9 +175,4 @@ export function KeyboardServiceProvider({
 
 export function useKeyboardService(): KeyboardService {
   return useContext(KeyboardServiceContext);
-}
-
-export function useActivateScope(scope: string): () => void {
-  const svc = useKeyboardService();
-  return useCallback(() => svc.setScope(scope), [svc, scope]);
 }

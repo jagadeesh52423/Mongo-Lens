@@ -9,7 +9,6 @@ import { useResultsStore } from '../../store/results';
 import { ResultsPanel } from '../results/ResultsPanel';
 import { useCollectionCompletions } from '../../hooks/useCollectionCompletions';
 import { SplitHandle } from '../shared/SplitHandle';
-import { useActivateScope } from '../../services/KeyboardService';
 import { useTabActions } from '../../hooks/useTabActions';
 import { newScriptTab } from '../../utils/newScriptTab';
 import { getStatementAtCursor } from '../../utils/statementDetection';
@@ -41,8 +40,6 @@ export function EditorArea() {
   const [pageSizes, setPageSizes] = useState<Record<string, number>>({});
   const activePageSize = active ? (pageSizes[active.id] ?? 50) : 50;
   const isRunning = useResultsStore((s) => (active ? !!s.byTab[active.id]?.isRunning : false));
-  const activateEditor = useActivateScope('editor');
-  const activateResults = useActivateScope('results');
   const log = useLogger('components.EditorArea');
   useTabActions();
 
@@ -223,7 +220,7 @@ export function EditorArea() {
             style={{ flex: 1, minHeight: 0 }}
           >
             <Panel minSize={20} defaultSize={editorDefault}>
-              <div style={{ height: '100%' }} onMouseDown={activateEditor}>
+              <div style={{ height: '100%' }}>
                 <ScriptEditor
                   value={active.content}
                   onChange={(v) => updateContent(active.id, v)}
@@ -238,7 +235,7 @@ export function EditorArea() {
             </Panel>
             <SplitHandle direction="vertical" />
             <Panel minSize={20} defaultSize={resultsDefault}>
-              <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }} onMouseDown={activateResults}>
+              <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
                 <ResultsPanel
                   tabId={active.id}
                   pageSize={activePageSize}

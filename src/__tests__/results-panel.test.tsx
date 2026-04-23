@@ -1,13 +1,23 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ResultsPanel } from '../components/results/ResultsPanel';
 import { useResultsStore } from '../store/results';
 import { keyboardService } from '../services/KeyboardService';
 
+let removeKeydownListener: (() => void) | null = null;
+
 beforeEach(() => {
   useResultsStore.setState({ byTab: {} });
-  keyboardService.setScope('results');
+  // Mirror App.tsx global dispatch so keyboard shortcuts fire in tests.
+  const handler = (e: KeyboardEvent) => keyboardService.dispatch(e);
+  window.addEventListener('keydown', handler);
+  removeKeydownListener = () => window.removeEventListener('keydown', handler);
+});
+
+afterEach(() => {
+  removeKeydownListener?.();
+  removeKeydownListener = null;
 });
 
 describe('ResultsPanel', () => {
@@ -271,13 +281,24 @@ describe('ResultsPanel record modal', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
-  it('does not open modal when connectionId is absent', async () => {
+  it('F3 opens view modal even without connectionId (view is always available)', async () => {
     const user = userEvent.setup();
     render(<ResultsPanel tabId="t1" pageSize={50} />);
     await user.click(screen.getByText('Table'));
     const cell = screen.getAllByRole('cell').find((c) => c.textContent === 'Tokyo')!;
     await user.click(cell);
     await user.keyboard('{F3}');
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.getByText('Full Record')).toBeInTheDocument();
+  });
+
+  it('F4 does not open edit modal when collection is absent', async () => {
+    const user = userEvent.setup();
+    render(<ResultsPanel tabId="t1" pageSize={50} connectionId="conn1" database="mydb" />);
+    await user.click(screen.getByText('Table'));
+    const cell = screen.getAllByRole('cell').find((c) => c.textContent === 'Tokyo')!;
+    await user.click(cell);
+    await user.keyboard('{F4}');
+    expect(screen.queryByText('Edit Record')).not.toBeInTheDocument();
   });
 });

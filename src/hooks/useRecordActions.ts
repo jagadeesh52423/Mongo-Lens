@@ -4,58 +4,41 @@ import { useCellSelection } from '../contexts/CellSelectionContext';
 import type { SelectedCell } from '../contexts/CellSelectionContext';
 import { keyboardService, useKeyboardService } from '../services/KeyboardService';
 import { DEFAULT_SHORTCUTS } from '../shortcuts/defaults';
+import { recordActionRegistry } from '../services/records/RecordActionRegistry';
+import type { RecordContext } from '../services/records/RecordContext';
+import type { RecordActionHost } from '../services/records/RecordActionHost';
+// side-effect imports — register built-in actions with the registry at module load
+import '../services/records/actions/viewRecordAction';
+import '../services/records/actions/editRecordAction';
 
-export interface TableActionHandlers {
-  onViewRecord?: (doc: Record<string, unknown>) => void;
-  onEditRecord?: (doc: Record<string, unknown>) => void;
-}
-
-interface TableActionDef {
+interface CopyActionDef {
   id: string;
-  execute: (selected: SelectedCell | null, handlers: TableActionHandlers) => void;
+  execute: (selected: SelectedCell) => void;
 }
 
-const TABLE_ACTIONS: TableActionDef[] = [
+const COPY_ACTIONS: CopyActionDef[] = [
   {
     id: 'cell.copyValue',
     execute: (selected) => {
-      if (!selected) return;
       navigator.clipboard.writeText(String(selected.value));
     },
   },
   {
     id: 'cell.copyField',
     execute: (selected) => {
-      if (!selected) return;
       navigator.clipboard.writeText(`"${selected.colKey}": ${JSON.stringify(selected.value)}`);
     },
   },
   {
     id: 'cell.copyFieldPath',
     execute: (selected) => {
-      if (!selected) return;
       navigator.clipboard.writeText(selected.colKey);
     },
   },
   {
     id: 'cell.copyDocument',
     execute: (selected) => {
-      if (!selected) return;
       navigator.clipboard.writeText(JSON.stringify(selected.doc, null, 2));
-    },
-  },
-  {
-    id: 'cell.viewRecord',
-    execute: (selected, { onViewRecord }) => {
-      if (!selected) return;
-      onViewRecord?.(selected.doc);
-    },
-  },
-  {
-    id: 'cell.editRecord',
-    execute: (selected, { onEditRecord }) => {
-      if (!selected) return;
-      onEditRecord?.(selected.doc);
     },
   },
 ];
@@ -73,29 +56,47 @@ const NAV_ACTIONS: NavActionDef[] = [
   { id: 'cell.navigateRight', rowDelta: 0, colDelta: 1 },
 ];
 
-const RESULTS_ACTION_IDS = new Set<string>([
-  ...TABLE_ACTIONS.map((a) => a.id),
+// Define copy + nav shortcuts from defaults.ts (record actions self-register via registry).
+const HOOK_OWNED_IDS = new Set<string>([
+  ...COPY_ACTIONS.map((a) => a.id),
   ...NAV_ACTIONS.map((a) => a.id),
 ]);
 DEFAULT_SHORTCUTS
-  .filter((def) => RESULTS_ACTION_IDS.has(def.id))
+  .filter((def) => HOOK_OWNED_IDS.has(def.id))
   .forEach((def) => keyboardService.defineShortcut(def));
 
-export function useTableActions(
-  handlers: TableActionHandlers = {},
+export function useRecordActions(
+  context: RecordContext,
+  host: RecordActionHost,
+  activeContextRef?: MutableRefObject<RecordContext>,
   docsRef?: MutableRefObject<unknown[]>,
   columnsRef?: MutableRefObject<string[]>,
 ): void {
   const svc = useKeyboardService();
   const { selected, select } = useCellSelection();
-  const stateRef = useRef({ selected, handlers, select, docsRef, columnsRef });
-  stateRef.current = { selected, handlers, select, docsRef, columnsRef };
+  const stateRef = useRef({ selected, context, host, select, docsRef, columnsRef, activeContextRef });
+  stateRef.current = { selected, context, host, select, docsRef, columnsRef, activeContextRef };
 
   useEffect(() => {
-    const unregisters = TABLE_ACTIONS.map((def) =>
-      svc.register(def.id, () =>
-        def.execute(stateRef.current.selected, stateRef.current.handlers),
-      ),
+    const copyUnregisters = COPY_ACTIONS.map((def) =>
+      svc.register(def.id, () => {
+        const { selected: sel } = stateRef.current;
+        if (!sel) return;
+        def.execute(sel);
+      }),
+    );
+
+    const recordActions = recordActionRegistry.getAll().filter((a) => a.keyBinding);
+    const recordUnregisters = recordActions.map((action) =>
+      svc.register(action.id, () => {
+        const { selected: sel, context: ctx, host: h, activeContextRef: ctxRef } = stateRef.current;
+        if (!sel) return;
+        const ctx2 = { ...ctx, doc: sel.doc };
+        if (action.canExecute(ctx2)) {
+          if (ctxRef) ctxRef.current = ctx2;
+          action.execute(ctx2, h);
+        }
+      }),
     );
 
     const navUnregisters = NAV_ACTIONS.map((def) =>
@@ -124,7 +125,8 @@ export function useTableActions(
     );
 
     return () => {
-      unregisters.forEach((fn) => fn());
+      copyUnregisters.forEach((fn) => fn());
+      recordUnregisters.forEach((fn) => fn());
       navUnregisters.forEach((fn) => fn());
     };
   }, [svc]);

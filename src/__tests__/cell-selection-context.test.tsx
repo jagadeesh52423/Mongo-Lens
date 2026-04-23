@@ -1,17 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, act, renderHook } from '@testing-library/react';
+import { describe, it, expect } from 'vitest';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { ReactNode } from 'react';
 import { CellSelectionProvider, useCellSelection } from '../contexts/CellSelectionContext';
-import { useTableActions } from '../hooks/useTableActions';
-import { KeyboardService, KeyboardServiceContext } from '../services/KeyboardService';
-import { DEFAULT_SHORTCUTS } from '../shortcuts/defaults';
-
-function defineResultsShortcuts(svc: KeyboardService): void {
-  DEFAULT_SHORTCUTS
-    .filter((def) => def.scope === 'results')
-    .forEach((def) => svc.defineShortcut(def));
-}
 
 function TestConsumer() {
   const { selected, select, clear } = useCellSelection();
@@ -47,106 +37,5 @@ describe('CellSelectionContext', () => {
     await user.click(screen.getByText('Select'));
     await user.click(screen.getByText('Clear'));
     expect(screen.getByTestId('col').textContent).toBe('none');
-  });
-});
-
-describe('useTableActions', () => {
-  beforeEach(() => {
-    Object.defineProperty(navigator, 'clipboard', {
-      value: { writeText: vi.fn().mockResolvedValue(undefined) },
-      writable: true,
-      configurable: true,
-    });
-  });
-
-  function makeWrapper(svc: KeyboardService) {
-    defineResultsShortcuts(svc);
-    return ({ children }: { children: ReactNode }) => (
-      <KeyboardServiceContext.Provider value={svc}>
-        <CellSelectionProvider>{children}</CellSelectionProvider>
-      </KeyboardServiceContext.Provider>
-    );
-  }
-
-  it('registers 10 actions (6 table + 4 nav)', () => {
-    const svc = new KeyboardService();
-    renderHook(() => useTableActions(), { wrapper: makeWrapper(svc) });
-    expect(svc.getShortcuts()).toHaveLength(10);
-  });
-
-  it('all table actions are scoped to "results"', () => {
-    const svc = new KeyboardService();
-    renderHook(() => useTableActions(), { wrapper: makeWrapper(svc) });
-    const shortcuts = svc.getShortcuts();
-    expect(shortcuts.every((s) => s.scope === 'results')).toBe(true);
-  });
-
-  it('cell.viewRecord has showInContextMenu: true always', () => {
-    const svc = new KeyboardService();
-    renderHook(() => useTableActions(), { wrapper: makeWrapper(svc) });
-    const s = svc.getShortcuts().find((s) => s.id === 'cell.viewRecord')!;
-    expect(s.showInContextMenu).toBe(true);
-  });
-
-  it('cell.editRecord has showInContextMenu: true', () => {
-    const svc = new KeyboardService();
-    renderHook(() => useTableActions(), { wrapper: makeWrapper(svc) });
-    const s = svc.getShortcuts().find((s) => s.id === 'cell.editRecord')!;
-    expect(s.showInContextMenu).toBe(true);
-  });
-
-  it('F3 calls onViewRecord with selected doc', () => {
-    const svc = new KeyboardService();
-    const onViewRecord = vi.fn();
-    const doc = { name: 'alice' };
-    const { result } = renderHook(
-      () => ({ actions: useTableActions({ onViewRecord }), selection: useCellSelection() }),
-      { wrapper: makeWrapper(svc) }
-    );
-    act(() => {
-      result.current.selection.select({ rowIndex: 0, colKey: 'name', doc, value: 'alice' });
-    });
-    const viewAction = svc.getShortcuts().find((s) => s.id === 'cell.viewRecord')!;
-    act(() => { viewAction.action(); });
-    expect(onViewRecord).toHaveBeenCalledWith(doc);
-  });
-
-  it('F4 calls onEditRecord with selected doc', () => {
-    const svc = new KeyboardService();
-    const onEditRecord = vi.fn();
-    const doc = { name: 'alice' };
-    const { result } = renderHook(
-      () => ({ actions: useTableActions({ onEditRecord }), selection: useCellSelection() }),
-      { wrapper: makeWrapper(svc) }
-    );
-    act(() => {
-      result.current.selection.select({ rowIndex: 0, colKey: 'name', doc, value: 'alice' });
-    });
-    const editAction = svc.getShortcuts().find((s) => s.id === 'cell.editRecord')!;
-    act(() => { editAction.action(); });
-    expect(onEditRecord).toHaveBeenCalledWith(doc);
-  });
-
-  it('F3 does nothing when no cell is selected', () => {
-    const svc = new KeyboardService();
-    const onViewRecord = vi.fn();
-    renderHook(() => useTableActions({ onViewRecord }), { wrapper: makeWrapper(svc) });
-    const viewAction = svc.getShortcuts().find((s) => s.id === 'cell.viewRecord')!;
-    act(() => { viewAction.action(); });
-    expect(onViewRecord).not.toHaveBeenCalled();
-  });
-
-  it('cmd+c copies value to clipboard', async () => {
-    const svc = new KeyboardService();
-    const { result } = renderHook(
-      () => ({ actions: useTableActions(), selection: useCellSelection() }),
-      { wrapper: makeWrapper(svc) }
-    );
-    act(() => {
-      result.current.selection.select({ rowIndex: 0, colKey: 'name', doc: { name: 'alice' }, value: 'alice' });
-    });
-    const copyValue = svc.getShortcuts().find((s) => s.id === 'cell.copyValue')!;
-    await act(async () => { copyValue.action(); });
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('alice');
   });
 });

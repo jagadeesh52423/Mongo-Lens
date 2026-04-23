@@ -1,0 +1,98 @@
+import { createElement, useState, useRef } from 'react';
+import { recordActionRegistry } from '../RecordActionRegistry';
+import { updateDocument } from '../../../ipc';
+
+recordActionRegistry.register({
+  id: 'cell.editRecord',
+  label: 'Edit Full Record',
+  keyBinding: { key: 'F4' },
+  scope: 'results',
+  showInContextMenu: true,
+  canExecute: (ctx) => !!ctx.collection,
+  execute(context, host) {
+    const { doc, connectionId, database, collection } = context;
+    const { _id: _removed, ...docWithoutId } = doc;
+    const originalJson = JSON.stringify(docWithoutId, null, 2);
+    const idStr = String(doc._id ?? '');
+
+    function EditBody() {
+      const [editedJson, setEditedJson] = useState(originalJson);
+      const [error, setError] = useState<string | null>(null);
+      const [saving, setSaving] = useState(false);
+      const editedJsonRef = useRef(editedJson);
+      editedJsonRef.current = editedJson;
+
+      async function handleSubmit() {
+        let parsed: Record<string, unknown>;
+        try {
+          parsed = JSON.parse(editedJsonRef.current);
+        } catch (e) {
+          setError((e as Error).message);
+          return;
+        }
+        if ('_id' in parsed && String(parsed._id) !== idStr) {
+          setError(`_id cannot be changed. Original: ${idStr}`);
+          return;
+        }
+        const { _id: _drop, ...parsedWithoutId } = parsed;
+        if (JSON.stringify(parsedWithoutId) === JSON.stringify(docWithoutId)) {
+          host.close();
+          return;
+        }
+        setSaving(true);
+        setError(null);
+        try {
+          await updateDocument(connectionId!, database!, collection!, idStr, JSON.stringify(parsedWithoutId));
+          host.triggerDocUpdate();
+          host.close();
+        } catch (e) {
+          setError(String(e));
+        } finally {
+          setSaving(false);
+        }
+      }
+
+      return createElement('div', { style: { display: 'flex', flexDirection: 'column', flex: 1, gap: 8 } },
+        createElement('textarea', {
+          key: 'textarea',
+          style: {
+            flex: 1, resize: 'none',
+            background: 'var(--bg-code, #0d1117)',
+            border: `1px solid ${error ? 'var(--accent-red, #fc8181)' : 'var(--accent-blue, #63b3ed)'}`,
+            borderRadius: 4, padding: 10,
+            fontFamily: 'var(--font-mono)', fontSize: 12,
+            color: 'var(--fg)', minHeight: 200,
+          },
+          value: editedJson,
+          onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+            setEditedJson(e.target.value);
+            setError(null);
+          },
+          spellCheck: false,
+        }),
+        error ? createElement('div', {
+          key: 'error',
+          style: {
+            background: 'var(--accent-red-dim, #742a2a)',
+            border: '1px solid var(--accent-red, #fc8181)',
+            borderRadius: 4, padding: '4px 8px',
+            color: 'var(--accent-red, #fc8181)', fontSize: 12,
+          },
+        }, `✕ ${error}`) : null,
+        createElement('div', {
+          key: 'footer',
+          style: { display: 'flex', justifyContent: 'flex-end', gap: 8, alignItems: 'center' },
+        },
+          createElement('span', {
+            key: 'hint',
+            style: { marginRight: 'auto', color: 'var(--fg-dim)', fontSize: 11 },
+          }, 'No changes → submit is a no-op'),
+          createElement('button', { key: 'cancel', onClick: host.close, disabled: saving }, 'Cancel'),
+          createElement('button', { key: 'submit', onClick: handleSubmit, disabled: saving }, saving ? 'Saving…' : 'Submit'),
+        ),
+      );
+    }
+
+    host.openModal('Edit Record', createElement(EditBody, null), null);
+  },
+});
