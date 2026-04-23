@@ -1,15 +1,18 @@
-import { type CSSProperties, type ReactNode } from 'react';
+import { forwardRef, type CSSProperties, type ReactNode } from 'react';
 
 interface Props {
   scope: string;
   children: ReactNode;
   style?: CSSProperties;
+  tabIndex?: number;
 }
 
-export function KeyboardScopeZone({ scope, children, style }: Props) {
-  return (
-    <div style={style} data-keyboard-scope={scope}>
-      {children}
-    </div>
-  );
-}
+export const KeyboardScopeZone = forwardRef<HTMLDivElement, Props>(
+  function KeyboardScopeZone({ scope, children, style, tabIndex }, ref) {
+    return (
+      <div ref={ref} style={style} data-keyboard-scope={scope} tabIndex={tabIndex}>
+        {children}
+      </div>
+    );
+  },
+);

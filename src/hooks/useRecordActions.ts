@@ -89,9 +89,17 @@ export function useRecordActions(
     const recordActions = recordActionRegistry.getAll().filter((a) => a.keyBinding);
     const recordUnregisters = recordActions.map((action) =>
       svc.register(action.id, () => {
-        const { selected: sel, context: ctx, host: h, activeContextRef: ctxRef } = stateRef.current;
-        if (!sel) return;
-        const ctx2 = { ...ctx, doc: sel.doc };
+        const { selected: sel, context: ctx, host: h, activeContextRef: ctxRef, docsRef: dRef, columnsRef: cRef } = stateRef.current;
+        let effectiveSel = sel;
+        if (!effectiveSel && dRef?.current.length && cRef?.current.length) {
+          const rawDoc = dRef.current[0];
+          const doc = rawDoc !== null && typeof rawDoc === 'object'
+            ? (rawDoc as Record<string, unknown>)
+            : { value: rawDoc };
+          effectiveSel = { rowIndex: 0, colKey: cRef.current[0], doc, value: doc[cRef.current[0]] };
+        }
+        if (!effectiveSel) return;
+        const ctx2 = { ...ctx, doc: effectiveSel.doc };
         if (action.canExecute(ctx2)) {
           if (ctxRef) ctxRef.current = ctx2;
           action.execute(ctx2, h);
