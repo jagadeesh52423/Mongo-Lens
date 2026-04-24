@@ -108,8 +108,9 @@ pub async fn run_script(
     })?;
     log.debug("script written", logctx! { "path" => script_path.display().to_string() });
 
+    let run_id_str = run_id.clone().unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let tab_id_arc: Arc<String> = Arc::new(tab_id.clone());
-    let run_id_arc: Arc<Option<String>> = Arc::new(run_id);
+    let run_id_arc: Arc<Option<String>> = Arc::new(Some(run_id_str.clone()));
     let app_handle = app.clone();
     let start = Instant::now();
 
@@ -123,10 +124,22 @@ pub async fn run_script(
         scripts.insert((*tab_id_arc).clone(), cancel_flag.clone());
     }
 
+    let level = std::env::var("MONGOMACAPP_LOG_LEVEL").unwrap_or_else(|_| "info".into());
+
     // Wrap the body so the temp script file is always cleaned up,
     // even if spawn_script or stdout/stderr take fail with `?`.
     let result: Result<(), String> = async {
-        let mut child = spawn_script(&uri, &database, &script_path, page, page_size)?;
+        let mut child = spawn_script(
+            &uri,
+            &database,
+            &script_path,
+            page,
+            page_size,
+            &run_id_str,
+            &state.logs_dir,
+            &level,
+            state.logger.clone(),
+        )?;
         log.info("child spawned", logctx! { "pid" => child.id() });
         let stdout = child.stdout.take().ok_or_else(|| {
             log.error("no stdout", logctx! {});

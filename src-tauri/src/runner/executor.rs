@@ -1,9 +1,11 @@
+use crate::logctx;
+use crate::logger::Logger;
 use crate::runner::{harness_path, node_modules_dir, runner_dir};
 use serde::Serialize;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 static NODE_PATH: OnceLock<String> = OnceLock::new();
 
@@ -83,12 +85,23 @@ pub fn install_runner(bundled_harness: &str) -> Result<(), String> {
 pub fn spawn_script(
     uri: &str,
     database: &str,
-    script_path: &PathBuf,
+    script_path: &Path,
     page: u32,
     page_size: u32,
+    run_id: &str,
+    logs_dir: &Path,
+    level: &str,
+    logger: Arc<dyn Logger>,
 ) -> Result<std::process::Child, String> {
     let node = resolve_node().ok_or("Node.js not found — check node installation")?;
-    println!("[spawn_script] node={node} harness={:?} db={database} page={page} page_size={page_size}", harness_path());
+    logger.info("spawn runner", logctx! {
+        "node" => node,
+        "harness" => harness_path().display().to_string(),
+        "db" => database,
+        "page" => page,
+        "pageSize" => page_size,
+        "runId" => run_id,
+    });
     // Spawn node directly (not via shell) to avoid login-shell startup noise on stderr
     Command::new(node)
         .arg(harness_path())
@@ -97,10 +110,16 @@ pub fn spawn_script(
         .env("MONGO_URI", uri)
         .env("MONGO_PAGE", page.to_string())
         .env("MONGO_PAGE_SIZE", page_size.to_string())
+        .env("MONGOMACAPP_RUN_ID", run_id)
+        .env("MONGOMACAPP_LOGS_DIR", logs_dir.display().to_string())
+        .env("MONGOMACAPP_LOG_LEVEL", level)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
-        .map_err(|e| { println!("[spawn_script] failed: {e}"); e.to_string() })
+        .map_err(|e| {
+            logger.error("spawn failed", logctx! { "err" => e.to_string() });
+            e.to_string()
+        })
 }
 
 #[tauri::command]
