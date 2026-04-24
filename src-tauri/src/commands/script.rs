@@ -34,6 +34,10 @@ pub struct ScriptEvent {
     pub execution_ms: Option<u128>,
     pub pagination: Option<PaginationInfo>,
     pub run_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub collection: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
 }
 
 #[tauri::command]
@@ -177,6 +181,8 @@ pub async fn run_script(
                                         page_size: page_size_val as u32,
                                     }),
                                     run_id: (*rid).clone(),
+                                    collection: None,
+                                    category: None,
                                 };
                                 let _ = ah.emit("script-event", evt);
                             }
@@ -184,6 +190,14 @@ pub async fn run_script(
                             v.get("__group").and_then(|x| x.as_i64()),
                             v.get("docs"),
                         ) {
+                            let collection = v
+                                .get("collection")
+                                .and_then(|x| x.as_str())
+                                .map(|s| s.to_string());
+                            let category = v
+                                .get("category")
+                                .and_then(|x| x.as_str())
+                                .map(|s| s.to_string());
                             let evt = ScriptEvent {
                                 tab_id: (*tab).clone(),
                                 kind: "group".into(),
@@ -193,6 +207,8 @@ pub async fn run_script(
                                 execution_ms: None,
                                 pagination: None,
                                 run_id: (*rid).clone(),
+                                collection,
+                                category,
                             };
                             let _ = ah.emit("script-event", evt);
                         }
@@ -227,6 +243,8 @@ pub async fn run_script(
                         execution_ms: None,
                         pagination: None,
                         run_id: (*rid).clone(),
+                        collection: None,
+                        category: None,
                     };
                     let _ = ah.emit("script-event", evt);
                 }
@@ -270,6 +288,8 @@ pub async fn run_script(
                     execution_ms: Some(elapsed),
                     pagination: None,
                     run_id: (*run_id_arc).clone(),
+                    collection: None,
+                    category: None,
                 };
                 let _ = app_handle.emit("script-event", done);
                 Ok(())
@@ -305,6 +325,8 @@ pub async fn run_script(
                     execution_ms: None,
                     pagination: None,
                     run_id: (*run_id_arc).clone(),
+                    collection: None,
+                    category: None,
                 };
                 let _ = app_handle.emit("script-event", evt);
                 Ok(())

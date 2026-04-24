@@ -8,7 +8,11 @@ recordActionRegistry.register({
   keyBinding: { key: 'F4' },
   scope: 'results',
   showInContextMenu: true,
-  canExecute: (ctx) => !!ctx.collection,
+  // F4 requires a known target collection AND that the result came from a
+  // read-only query (find/findOne). Aggregations, mutations, maintenance ops,
+  // and cursor streams must not be edited from the results grid — even if a
+  // collection name is extractable. See QueryTypeRegistry for classification.
+  canExecute: (ctx) => !!ctx.collection && ctx.category === 'query',
   execute(context, host) {
     const { doc, connectionId, database, collection } = context;
     const { _id: _removed, ...docWithoutId } = doc;

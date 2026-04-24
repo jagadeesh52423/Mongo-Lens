@@ -5,6 +5,12 @@ export interface SelectedCell {
   colKey: string;
   doc: Record<string, unknown>;
   value: unknown;
+  /**
+   * Index of the ResultGroup this cell belongs to. Enables downstream actions
+   * (edit/view) to resolve per-group collection metadata (see
+   * useRecordActions + ResultsPanel). Defaults to 0 for single-group results.
+   */
+  groupIndex: number;
 }
 
 interface CellSelectionContextValue {

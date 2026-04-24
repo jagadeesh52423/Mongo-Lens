@@ -48,10 +48,21 @@ export interface EditorTab {
   collection?: string;
 }
 
+export type QueryCategory =
+  | 'query'
+  | 'mutation'
+  | 'transform'
+  | 'maintenance'
+  | 'stream';
+
 export interface ResultGroup {
   groupIndex: number;
   docs: unknown[];
   error?: string;
+  /** Target collection resolved from the statement that produced this group, if statically extractable. */
+  collection?: string;
+  /** Operation category resolved from the statement that produced this group. */
+  category?: QueryCategory;
 }
 
 export interface ExecutionResult {
@@ -89,4 +100,8 @@ export interface ScriptEvent {
   executionMs?: number;
   pagination?: PaginationState;
   runId?: string;
+  /** Target collection resolved by the runner for this group's statement. */
+  collection?: string;
+  /** Operation category resolved by the runner for this group's statement. */
+  category?: QueryCategory;
 }

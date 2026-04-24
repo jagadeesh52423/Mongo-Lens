@@ -9,6 +9,12 @@ interface Props {
   sortKey: string | null;
   sortDir: 1 | -1;
   onToggleSort: (colKey: string) => void;
+  /**
+   * Which ResultGroup this TableView is rendering. Threaded into SelectedCell
+   * so record actions can resolve the group-specific collection/category.
+   * Defaults to 0 so existing callers and tests work without change.
+   */
+  groupIndex?: number;
 }
 
 export function columnsOf(docs: unknown[]): string[] {
@@ -35,7 +41,7 @@ interface ContextMenuState {
   y: number;
 }
 
-export function TableView({ docs, sortKey, sortDir, onToggleSort }: Props) {
+export function TableView({ docs, sortKey, sortDir, onToggleSort, groupIndex = 0 }: Props) {
   const columns = useMemo(() => columnsOf(docs), [docs]);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -43,19 +49,19 @@ export function TableView({ docs, sortKey, sortDir, onToggleSort }: Props) {
 
   const handleCellClick = useCallback(
     (rowIndex: number, colKey: string, doc: Record<string, unknown>) => {
-      select({ rowIndex, colKey, doc, value: doc[colKey] });
+      select({ rowIndex, colKey, doc, value: doc[colKey], groupIndex });
       containerRef.current?.focus();
     },
-    [select]
+    [select, groupIndex]
   );
 
   const handleCellContextMenu = useCallback(
     (e: React.MouseEvent, rowIndex: number, colKey: string, doc: Record<string, unknown>) => {
       e.preventDefault();
-      select({ rowIndex, colKey, doc, value: doc[colKey] });
+      select({ rowIndex, colKey, doc, value: doc[colKey], groupIndex });
       setContextMenu({ x: e.clientX, y: e.clientY });
     },
-    [select]
+    [select, groupIndex]
   );
 
   const contextMenuItems: ContextMenuItem[] = keyboardService

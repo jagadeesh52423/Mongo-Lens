@@ -22,6 +22,8 @@ export function useScriptEvents() {
         appendGroup(p.tabId, {
           groupIndex: p.groupIndex,
           docs: Array.isArray(p.docs) ? p.docs : [p.docs],
+          collection: p.collection,
+          category: p.category,
         });
       } else if (p.kind === 'pagination' && p.pagination) {
         setPagination(p.tabId, p.pagination);

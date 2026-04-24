@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { useRef } from 'react';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
@@ -8,6 +9,7 @@ import { useRecordActions } from '../hooks/useRecordActions';
 import { keyboardService } from '../services/KeyboardService';
 import type { RecordContext } from '../services/records/RecordContext';
 import type { RecordActionHost } from '../services/records/RecordActionHost';
+import type { ResultGroup } from '../types';
 
 const noopHost: RecordActionHost = {
   openModal: vi.fn(),
@@ -18,8 +20,20 @@ const noopHost: RecordActionHost = {
 
 const baseContext: RecordContext = { doc: {} as Record<string, unknown> };
 
-function ShortcutsRegistrar({ host = noopHost, context = baseContext }: { host?: RecordActionHost; context?: RecordContext } = {}) {
-  useRecordActions(context, host);
+function ShortcutsRegistrar({
+  host = noopHost,
+  context = baseContext,
+  groups,
+}: {
+  host?: RecordActionHost;
+  context?: RecordContext;
+  groups?: ResultGroup[];
+} = {}) {
+  // Mirror ResultsPanel: keep a ref to the groups array so record actions can
+  // look up per-group collection/category.
+  const groupsRef = useRef<ResultGroup[]>(groups ?? []);
+  groupsRef.current = groups ?? [];
+  useRecordActions(context, host, undefined, undefined, undefined, groupsRef);
   return null;
 }
 
@@ -149,7 +163,7 @@ describe('TableView cell selection', () => {
     expect(host.openModal).toHaveBeenCalledWith('Full Record', expect.anything(), expect.anything());
   });
 
-  it('F4 on selected cell with collection invokes host.openModal with Edit Record', async () => {
+  it('F4 on selected cell with group collection/category invokes host.openModal with Edit Record', async () => {
     const user = userEvent.setup();
     const host: RecordActionHost = {
       openModal: vi.fn(),
@@ -157,13 +171,17 @@ describe('TableView cell selection', () => {
       triggerDocUpdate: vi.fn(),
       executeAction: vi.fn(),
     };
-    const ctx: RecordContext = { doc: {} as Record<string, unknown>, collection: 'users' };
+    // F4 availability now derives from per-group metadata, not a static ctx
+    // prop — mirror the runtime model in the test.
+    const groups: ResultGroup[] = [
+      { groupIndex: 0, docs, collection: 'users', category: 'query' },
+    ];
 
     function WrapperWithHost({ children }: { children: ReactNode }) {
       return (
         <CellSelectionProvider>
           <div data-keyboard-scope="results">
-            <ShortcutsRegistrar host={host} context={ctx} />
+            <ShortcutsRegistrar host={host} groups={groups} />
             {children}
           </div>
         </CellSelectionProvider>
@@ -175,5 +193,35 @@ describe('TableView cell selection', () => {
     await user.click(cell);
     await user.keyboard('{F4}');
     expect(host.openModal).toHaveBeenCalledWith('Edit Record', expect.anything(), null);
+  });
+
+  it('F4 stays disabled when the group category is not `query` (e.g. aggregate)', async () => {
+    const user = userEvent.setup();
+    const host: RecordActionHost = {
+      openModal: vi.fn(),
+      close: vi.fn(),
+      triggerDocUpdate: vi.fn(),
+      executeAction: vi.fn(),
+    };
+    const groups: ResultGroup[] = [
+      { groupIndex: 0, docs, collection: 'orders', category: 'transform' },
+    ];
+
+    function WrapperWithHost({ children }: { children: ReactNode }) {
+      return (
+        <CellSelectionProvider>
+          <div data-keyboard-scope="results">
+            <ShortcutsRegistrar host={host} groups={groups} />
+            {children}
+          </div>
+        </CellSelectionProvider>
+      );
+    }
+
+    render(<TableView docs={docs} sortKey={null} sortDir={1} onToggleSort={() => {}} />, { wrapper: WrapperWithHost });
+    const cell = screen.getAllByRole('cell').find((c) => c.textContent === 'alice')!;
+    await user.click(cell);
+    await user.keyboard('{F4}');
+    expect(host.openModal).not.toHaveBeenCalled();
   });
 });

@@ -9,7 +9,7 @@ function TestConsumer() {
     <div>
       <span data-testid="col">{selected?.colKey ?? 'none'}</span>
       <span data-testid="value">{selected ? String(selected.value) : 'none'}</span>
-      <button onClick={() => select({ rowIndex: 0, colKey: 'name', doc: { name: 'alice' }, value: 'alice' })}>
+      <button onClick={() => select({ rowIndex: 0, colKey: 'name', doc: { name: 'alice' }, value: 'alice', groupIndex: 0 })}>
         Select
       </button>
       <button onClick={clear}>Clear</button>

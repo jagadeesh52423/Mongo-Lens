@@ -212,10 +212,18 @@ describe('ResultsPanel cell shortcuts integration', () => {
 
 describe('ResultsPanel record modal', () => {
   beforeEach(() => {
+    // F4 availability now derives from per-group metadata (collection +
+    // category) emitted by the runner, not from a tab prop. Seed a group
+    // that looks like a successful `find()` on `users`.
     useResultsStore.setState({
       byTab: {
         t1: {
-          groups: [{ groupIndex: 0, docs: [{ _id: 'abc123', city: 'Tokyo' }] }],
+          groups: [{
+            groupIndex: 0,
+            docs: [{ _id: 'abc123', city: 'Tokyo' }],
+            collection: 'users',
+            category: 'query',
+          }],
           isRunning: false,
           executionMs: 5,
         },
@@ -231,7 +239,6 @@ describe('ResultsPanel record modal', () => {
         pageSize={50}
         connectionId="conn1"
         database="mydb"
-        collection="users"
       />
     );
     await user.click(screen.getByText('Table'));
@@ -250,7 +257,6 @@ describe('ResultsPanel record modal', () => {
         pageSize={50}
         connectionId="conn1"
         database="mydb"
-        collection="users"
       />
     );
     await user.click(screen.getByText('Table'));
@@ -269,7 +275,6 @@ describe('ResultsPanel record modal', () => {
         pageSize={50}
         connectionId="conn1"
         database="mydb"
-        collection="users"
       />
     );
     await user.click(screen.getByText('Table'));
@@ -293,6 +298,22 @@ describe('ResultsPanel record modal', () => {
   });
 
   it('F4 does not open edit modal when collection is absent', async () => {
+    // Override the beforeEach seed with a group whose classifier could not
+    // resolve a target collection (e.g. `db[dynamic].find({})`). F4 must
+    // remain disabled even though the doc is selected.
+    useResultsStore.setState({
+      byTab: {
+        t1: {
+          groups: [{
+            groupIndex: 0,
+            docs: [{ _id: 'abc123', city: 'Tokyo' }],
+            category: 'query',
+          }],
+          isRunning: false,
+          executionMs: 5,
+        },
+      },
+    });
     const user = userEvent.setup();
     render(<ResultsPanel tabId="t1" pageSize={50} connectionId="conn1" database="mydb" />);
     await user.click(screen.getByText('Table'));
@@ -300,5 +321,145 @@ describe('ResultsPanel record modal', () => {
     await user.click(cell);
     await user.keyboard('{F4}');
     expect(screen.queryByText('Edit Record')).not.toBeInTheDocument();
+  });
+});
+
+describe('ResultsPanel F4 category gating', () => {
+  // Table-driven: F4 must stay disabled for every non-`query` category even
+  // when a collection is cleanly extracted. Spec §"Edit Availability Logic".
+  const disabledCategories = ['mutation', 'transform', 'maintenance', 'stream'] as const;
+
+  for (const category of disabledCategories) {
+    it(`F4 does not open edit modal when category is '${category}'`, async () => {
+      useResultsStore.setState({
+        byTab: {
+          t1: {
+            groups: [{
+              groupIndex: 0,
+              docs: [{ _id: 'abc123', city: 'Tokyo' }],
+              collection: 'targetColl',
+              category,
+            }],
+            isRunning: false,
+            executionMs: 5,
+          },
+        },
+      });
+      const user = userEvent.setup();
+      render(<ResultsPanel tabId="t1" pageSize={50} connectionId="conn1" database="mydb" />);
+      await user.click(screen.getByText('Table'));
+      const cell = screen.getAllByRole('cell').find((c) => c.textContent === 'Tokyo')!;
+      await user.click(cell);
+      await user.keyboard('{F4}');
+      expect(screen.queryByText('Edit Record')).not.toBeInTheDocument();
+    });
+  }
+});
+
+describe('ResultsPanel multi-group F4 targeting', () => {
+  // Seed two groups: a query on `users` (F4 should work) and an aggregate on
+  // `orders` (F4 should stay disabled). Switching group tabs must flip F4
+  // availability without remounting the panel.
+  beforeEach(() => {
+    useResultsStore.setState({
+      byTab: {
+        t1: {
+          groups: [
+            {
+              groupIndex: 0,
+              docs: [{ _id: 'u1', name: 'Alice' }],
+              collection: 'users',
+              category: 'query',
+            },
+            {
+              groupIndex: 1,
+              docs: [{ _id: 'agg1', total: 42 }],
+              collection: 'orders',
+              category: 'transform',
+            },
+          ],
+          isRunning: false,
+          executionMs: 5,
+        },
+      },
+    });
+  });
+
+  it('F4 is enabled on the `query` group tab (users)', async () => {
+    const user = userEvent.setup();
+    render(<ResultsPanel tabId="t1" pageSize={50} connectionId="conn1" database="mydb" />);
+    await user.click(screen.getByText('Table'));
+    const cell = screen.getAllByRole('cell').find((c) => c.textContent === 'Alice')!;
+    await user.click(cell);
+    await user.keyboard('{F4}');
+    expect(screen.getByText('Edit Record')).toBeInTheDocument();
+  });
+
+  it('switching to the `transform` group tab disables F4', async () => {
+    const user = userEvent.setup();
+    render(<ResultsPanel tabId="t1" pageSize={50} connectionId="conn1" database="mydb" />);
+    await user.click(screen.getByText('Table'));
+    // Jump to Query 2 (the aggregation on orders)
+    await user.click(screen.getByRole('tab', { name: 'Query 2' }));
+    const cell = screen.getAllByRole('cell').find((c) => c.textContent === '42')!;
+    await user.click(cell);
+    await user.keyboard('{F4}');
+    expect(screen.queryByText('Edit Record')).not.toBeInTheDocument();
+  });
+
+  it('F3 works on both groups regardless of category', async () => {
+    const user = userEvent.setup();
+    render(<ResultsPanel tabId="t1" pageSize={50} connectionId="conn1" database="mydb" />);
+    await user.click(screen.getByText('Table'));
+
+    // Group 0: query on users — F3 works
+    const aliceCell = screen.getAllByRole('cell').find((c) => c.textContent === 'Alice')!;
+    await user.click(aliceCell);
+    await user.keyboard('{F3}');
+    expect(screen.getByText('Full Record')).toBeInTheDocument();
+    await user.keyboard('{Escape}');
+
+    // Group 1: aggregate on orders — F3 still works (view is category-agnostic)
+    await user.click(screen.getByRole('tab', { name: 'Query 2' }));
+    const aggCell = screen.getAllByRole('cell').find((c) => c.textContent === '42')!;
+    await user.click(aggCell);
+    await user.keyboard('{F3}');
+    expect(screen.getByText('Full Record')).toBeInTheDocument();
+  });
+});
+
+describe('useScriptEvents → store forwarding', () => {
+  // Integration coverage for the event-pipeline invariant: when the harness
+  // emits a `group` event carrying collection + category, those fields land
+  // in the ResultsStore entry via appendGroup (mirroring the `useScriptEvents`
+  // payload-shape → appendGroup mapping). This is the same contract
+  // ResultsPanel relies on downstream for F4 gating.
+  it('appendGroup persists collection and category on the stored group', () => {
+    const { startRun, appendGroup } = useResultsStore.getState();
+    startRun('tForward', 'run-1');
+    appendGroup('tForward', {
+      groupIndex: 0,
+      docs: [{ _id: '1' }],
+      collection: 'users',
+      category: 'query',
+    });
+    const stored = useResultsStore.getState().byTab['tForward'];
+    expect(stored).toBeDefined();
+    expect(stored!.groups[0].collection).toBe('users');
+    expect(stored!.groups[0].category).toBe('query');
+  });
+
+  it('appendGroup preserves undefined collection/category when classifier returned null', () => {
+    const { startRun, appendGroup } = useResultsStore.getState();
+    startRun('tForward2', 'run-2');
+    appendGroup('tForward2', {
+      groupIndex: 0,
+      docs: [{ _id: '2' }],
+      // collection and category intentionally omitted (e.g. dynamic collection)
+    });
+    const stored = useResultsStore.getState().byTab['tForward2'];
+    expect(stored).toBeDefined();
+    expect(stored!.groups[0].collection).toBeUndefined();
+    expect(stored!.groups[0].category).toBeUndefined();
   });
 });

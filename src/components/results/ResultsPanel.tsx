@@ -13,6 +13,7 @@ import { KeyboardScopeZone } from '../shared/KeyboardScopeZone';
 import { recordActionRegistry } from '../../services/records/RecordActionRegistry';
 import type { RecordContext } from '../../services/records/RecordContext';
 import type { RecordActionHost } from '../../services/records/RecordActionHost';
+import type { ResultGroup } from '../../types';
 
 interface ModalState {
   title: string;
@@ -26,14 +27,16 @@ function RecordActionsRegistrar({
   activeContextRef,
   docsRef,
   columnsRef,
+  groupsRef,
 }: {
   context: RecordContext;
   host: RecordActionHost;
   activeContextRef: MutableRefObject<RecordContext>;
   docsRef: MutableRefObject<unknown[]>;
   columnsRef: MutableRefObject<string[]>;
+  groupsRef: MutableRefObject<ResultGroup[]>;
 }) {
-  useRecordActions(context, host, activeContextRef, docsRef, columnsRef);
+  useRecordActions(context, host, activeContextRef, docsRef, columnsRef, groupsRef);
   return null;
 }
 
@@ -52,13 +55,12 @@ interface Props {
   onPageSizeChange?: (pageSize: number) => void;
   connectionId?: string;
   database?: string;
-  collection?: string;
   onDocUpdated?: () => void;
 }
 
 export function ResultsPanel({
   tabId, pageSize, onPageChange, onPageSizeChange,
-  connectionId, database, collection, onDocUpdated,
+  connectionId, database, onDocUpdated,
 }: Props) {
   const res = useResultsStore((s) => s.byTab[tabId]);
   const [view, setView] = useState<'json' | 'table'>('table');
@@ -66,9 +68,42 @@ export function ResultsPanel({
   const onDocUpdatedRef = useRef(onDocUpdated);
   onDocUpdatedRef.current = onDocUpdated;
 
+  const pagination = res?.pagination;
+  const totalPages = pagination && pagination.total >= 0
+    ? Math.max(1, Math.ceil(pagination.total / pageSize))
+    : -1;
+
+  // 1-indexed input synced to pagination.page
+  const [inputPage, setInputPage] = useState(1);
+  useEffect(() => {
+    if (pagination) setInputPage(pagination.page + 1);
+  }, [pagination?.page]);
+
+  const groupCount = res?.groups.length ?? 0;
+  const runId = res?.runId;
+  const [activeGroupIndex, setActiveGroupIndex] = useState(0);
+  // Reset to first tab only when a new run starts (tabId or runId change),
+  // not on every streaming group append.
+  useEffect(() => { setActiveGroupIndex(0); }, [tabId, runId]);
+  const safeActiveIndex = activeGroupIndex < groupCount ? activeGroupIndex : 0;
+
+  const activeGroup = res?.groups[safeActiveIndex];
+
+  // Collection + category come exclusively from the active result group's
+  // runtime-resolved metadata (QueryTypeRegistry classification). No fallback
+  // to tab-creation-time provenance: if the classifier couldn't extract a
+  // collection, F4 must stay disabled — falling back would re-introduce the
+  // exact stale-collection bug this refactor fixes. Category gates
+  // availability of actions like F4 (see editRecordAction.canExecute).
   const recordContext = useMemo<RecordContext>(
-    () => ({ doc: {}, connectionId, database, collection }),
-    [connectionId, database, collection],
+    () => ({
+      doc: {},
+      connectionId,
+      database,
+      collection: activeGroup?.collection,
+      category: activeGroup?.category,
+    }),
+    [connectionId, database, activeGroup?.collection, activeGroup?.category],
   );
 
   // Tracks the context of the currently-active action so executeAction (e.g., view → edit handoff)
@@ -96,25 +131,6 @@ export function ResultsPanel({
     };
     return h;
   }, []);
-
-  const pagination = res?.pagination;
-  const totalPages = pagination && pagination.total >= 0
-    ? Math.max(1, Math.ceil(pagination.total / pageSize))
-    : -1;
-
-  // 1-indexed input synced to pagination.page
-  const [inputPage, setInputPage] = useState(1);
-  useEffect(() => {
-    if (pagination) setInputPage(pagination.page + 1);
-  }, [pagination?.page]);
-
-  const groupCount = res?.groups.length ?? 0;
-  const runId = res?.runId;
-  const [activeGroupIndex, setActiveGroupIndex] = useState(0);
-  // Reset to first tab only when a new run starts (tabId or runId change),
-  // not on every streaming group append.
-  useEffect(() => { setActiveGroupIndex(0); }, [tabId, runId]);
-  const safeActiveIndex = activeGroupIndex < groupCount ? activeGroupIndex : 0;
 
   const allDocs = useMemo(() => {
     if (!res) return [];
@@ -156,8 +172,10 @@ export function ResultsPanel({
 
   const docsRef = useRef<unknown[]>(sortedDocs);
   const columnsRef = useRef<string[]>(columns);
+  const groupsRef = useRef<ResultGroup[]>(res?.groups ?? []);
   useEffect(() => { docsRef.current = sortedDocs; }, [sortedDocs]);
   useEffect(() => { columnsRef.current = columns; }, [columns]);
+  useEffect(() => { groupsRef.current = res?.groups ?? []; }, [res?.groups]);
 
   async function exportAs(kind: 'csv' | 'json') {
     const suggested = kind === 'csv' ? 'results.csv' : 'results.json';
@@ -185,6 +203,7 @@ export function ResultsPanel({
           activeContextRef={activeContextRef}
           docsRef={docsRef}
           columnsRef={columnsRef}
+          groupsRef={groupsRef}
         />
         <KeyboardScopeZone scope="results">
           <div style={{ padding: 12, color: 'var(--fg-dim)' }}>
@@ -212,6 +231,7 @@ export function ResultsPanel({
         activeContextRef={activeContextRef}
         docsRef={docsRef}
         columnsRef={columnsRef}
+        groupsRef={groupsRef}
       />
       <KeyboardScopeZone scope="results" style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
       <div
@@ -286,6 +306,7 @@ export function ResultsPanel({
               sortKey={sortKey}
               sortDir={sortDir}
               onToggleSort={handleToggleSort}
+              groupIndex={safeActiveIndex}
             />
           </KeyboardScopeZone>
         )}

@@ -1,6 +1,7 @@
 const { MongoClient } = require('mongodb');
 const fs = require('fs');
 const { createLogger } = require('./logger');
+const { classify, splitStatements } = require('./query-classifier');
 
 const uri = process.env.MONGO_URI;
 if (!uri) {
@@ -42,6 +43,21 @@ let groupIndex = 0;
 const PAGE = parseInt(process.env.MONGO_PAGE ?? '0', 10);
 const PAGE_SIZE = parseInt(process.env.MONGO_PAGE_SIZE ?? '50', 10);
 
+// Pre-classify every top-level statement. The harness emits groups in
+// statement order (one emitGroup call per MongoDB op, 1:1 with classified
+// statements); `groupClassifications` is consumed by index as groups emit.
+//
+// We drop two kinds of classifications to keep that 1:1 alignment:
+//   - category === null: statement isn't a MongoDB op (pure JS, etc.)
+//   - category === 'stream': watch() returns an infinite ChangeStream and
+//     has no terminal value to emit. Including it would shift every later
+//     group's classification by one.
+// (listIndexes is handled by materialising in makeCollectionProxy, so it
+// stays in the array.)
+const groupClassifications = splitStatements(rawScript)
+  .map((stmt) => classify(stmt))
+  .filter((c) => c.category !== null && c.category !== 'stream');
+
 function emitPagination(total, page, pageSize) {
   process.stdout.write(
     JSON.stringify({ __pagination: { total, page, pageSize } }) + '\n',
@@ -55,11 +71,18 @@ function emitGroup(docs, log = emitLogger) {
     if (v && v._bsontype === 'ObjectId') return v.toString();
     return v;
   }));
-  const index = groupIndex++;
-  if (log) log.debug('emitGroup', { count: arr.length, index });
-  process.stdout.write(
-    JSON.stringify({ __group: index, docs: safe }) + '\n',
-  );
+  const idx = groupIndex++;
+  const classification = groupClassifications[idx] ?? { category: null, collection: null };
+  const payload = { __group: idx, docs: safe };
+  if (classification.category) payload.category = classification.category;
+  if (classification.collection) payload.collection = classification.collection;
+  if (log) log.debug('emitGroup', {
+    count: arr.length,
+    index: idx,
+    category: classification.category,
+    collection: classification.collection,
+  });
+  process.stdout.write(JSON.stringify(payload) + '\n');
 }
 
 // Transform Mongo shell-style script: add await before db. expressions so the
@@ -176,6 +199,18 @@ function makeCollectionProxy(col) {
       if (prop === 'getIndexes') {
         return () =>
           target.indexes().then((docs) => {
+            emitGroup(docs);
+            return docs;
+          });
+      }
+
+      // listIndexes returns a cursor, not a promise — materialize and emit
+      // so the single call produces exactly one group (matches classifier
+      // expectation). Without this wrap, groupClassifications[idx] would
+      // skew for any subsequent emitted statement.
+      if (prop === 'listIndexes') {
+        return (...args) =>
+          target.listIndexes(...args).toArray().then((docs) => {
             emitGroup(docs);
             return docs;
           });

@@ -7,6 +7,7 @@ import { DEFAULT_SHORTCUTS } from '../shortcuts/defaults';
 import { recordActionRegistry } from '../services/records/RecordActionRegistry';
 import type { RecordContext } from '../services/records/RecordContext';
 import type { RecordActionHost } from '../services/records/RecordActionHost';
+import type { ResultGroup } from '../types';
 // side-effect imports — register built-in actions with the registry at module load
 import '../services/records/actions/viewRecordAction';
 import '../services/records/actions/editRecordAction';
@@ -71,11 +72,18 @@ export function useRecordActions(
   activeContextRef?: MutableRefObject<RecordContext>,
   docsRef?: MutableRefObject<unknown[]>,
   columnsRef?: MutableRefObject<string[]>,
+  /**
+   * Optional ref to the current ResultGroup[]. When provided, record actions
+   * resolve the target collection from the group matching selected.groupIndex
+   * instead of using the static collection on `context`. This lets F4/F3
+   * availability derive from per-group query metadata (see QueryTypeRegistry).
+   */
+  groupsRef?: MutableRefObject<ResultGroup[]>,
 ): void {
   const svc = useKeyboardService();
   const { selected, select } = useCellSelection();
-  const stateRef = useRef({ selected, context, host, select, docsRef, columnsRef, activeContextRef });
-  stateRef.current = { selected, context, host, select, docsRef, columnsRef, activeContextRef };
+  const stateRef = useRef({ selected, context, host, select, docsRef, columnsRef, activeContextRef, groupsRef });
+  stateRef.current = { selected, context, host, select, docsRef, columnsRef, activeContextRef, groupsRef };
 
   useEffect(() => {
     const copyUnregisters = COPY_ACTIONS.map((def) =>
@@ -89,17 +97,37 @@ export function useRecordActions(
     const recordActions = recordActionRegistry.getAll().filter((a) => a.keyBinding);
     const recordUnregisters = recordActions.map((action) =>
       svc.register(action.id, () => {
-        const { selected: sel, context: ctx, host: h, activeContextRef: ctxRef, docsRef: dRef, columnsRef: cRef } = stateRef.current;
+        const {
+          selected: sel,
+          context: ctx,
+          host: h,
+          activeContextRef: ctxRef,
+          docsRef: dRef,
+          columnsRef: cRef,
+          groupsRef: gRef,
+        } = stateRef.current;
         let effectiveSel = sel;
         if (!effectiveSel && dRef?.current.length && cRef?.current.length) {
           const rawDoc = dRef.current[0];
           const doc = rawDoc !== null && typeof rawDoc === 'object'
             ? (rawDoc as Record<string, unknown>)
             : { value: rawDoc };
-          effectiveSel = { rowIndex: 0, colKey: cRef.current[0], doc, value: doc[cRef.current[0]] };
+          effectiveSel = { rowIndex: 0, colKey: cRef.current[0], doc, value: doc[cRef.current[0]], groupIndex: 0 };
         }
         if (!effectiveSel) return;
-        const ctx2 = { ...ctx, doc: effectiveSel.doc };
+        // Resolve collection + category exclusively from the ResultGroup the
+        // selected cell belongs to. No fallback to ctx.collection — if the
+        // classifier couldn't resolve a target collection for this group,
+        // canExecute must see `undefined` so category-sensitive actions (F4)
+        // stay disabled. Falling back would defeat the point of per-group
+        // classification (see QueryTypeRegistry + editRecordAction.canExecute).
+        const group = gRef?.current?.[effectiveSel.groupIndex];
+        const ctx2: RecordContext = {
+          ...ctx,
+          doc: effectiveSel.doc,
+          collection: group?.collection,
+          category: group?.category,
+        };
         if (action.canExecute(ctx2)) {
           if (ctxRef) ctxRef.current = ctx2;
           action.execute(ctx2, h);
@@ -125,7 +153,7 @@ export function useRecordActions(
             ? (rawRow as Record<string, unknown>)
             : { value: rawRow };
         const nextValue = nextDoc[nextColKey];
-        selectFn({ rowIndex: nextRow, colKey: nextColKey, doc: nextDoc, value: nextValue });
+        selectFn({ rowIndex: nextRow, colKey: nextColKey, doc: nextDoc, value: nextValue, groupIndex: sel.groupIndex });
         document
           .querySelector(`[data-row="${nextRow}"][data-col="${nextColKey}"]`)
           ?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
