@@ -41,21 +41,24 @@ function emitPagination(total, page, pageSize) {
   );
 }
 
-function emitGroup(docs) {
+function emitGroup(docs, log = logger) {
   const arr = Array.isArray(docs) ? docs : [docs];
   const safe = JSON.parse(JSON.stringify(arr, (_k, v) => {
     if (typeof v === 'bigint') return v.toString();
     if (v && v._bsontype === 'ObjectId') return v.toString();
     return v;
   }));
+  const index = groupIndex++;
+  if (log) log.debug('emitGroup', { count: arr.length, index });
   process.stdout.write(
-    JSON.stringify({ __group: groupIndex++, docs: safe }) + '\n',
+    JSON.stringify({ __group: index, docs: safe }) + '\n',
   );
 }
 
 // Transform Mongo shell-style script: add await before db. expressions so the
 // user never needs to write await in their queries (Studio 3T / mongosh style).
-function transformScript(script) {
+function transformScript(script, log = logger) {
+  if (log) log.debug('transform', { lines: script.split('\n').length });
   return script
     .split('\n')
     .map((line) => {
@@ -90,7 +93,7 @@ function transformScript(script) {
 // Wrap a Mongo cursor so users can chain modifiers (sort, limit, skip, ...)
 // and also await/then the cursor directly to materialize results. emitGroup is
 // invoked exactly once when the cursor is materialized.
-function makeCursorProxy(cursor, countPromise) {
+function makeCursorProxy(cursor, countPromise, log = logger) {
   const modifiers = ['sort', 'limit', 'skip', 'project', 'hint', 'maxTimeMS', 'batchSize'];
 
   let userLimit = null;
@@ -102,13 +105,15 @@ function makeCursorProxy(cursor, countPromise) {
         // Only apply pagination when the user did not explicitly chain .limit() or .skip()
         cursor = cursor.skip(PAGE * PAGE_SIZE).limit(PAGE_SIZE);
         promise = Promise.all([cursor.toArray(), countPromise]).then(([docs, total]) => {
-          emitGroup(docs);
+          if (log) log.debug('cursor materialize', { count: docs.length, total, paginated: true });
+          emitGroup(docs, log);
           emitPagination(total, PAGE, PAGE_SIZE);
           return docs;
         });
       } else {
         promise = cursor.toArray().then((docs) => {
-          emitGroup(docs);
+          if (log) log.debug('cursor materialize', { count: docs.length, paginated: false });
+          emitGroup(docs, log);
           return docs;
         });
       }
@@ -234,28 +239,44 @@ function extractLine(err) {
 
 async function run() {
   process.stderr.write(JSON.stringify({ __debug: `[harness] connecting to db=${dbName}` }) + '\n');
+  logger.info('mongo connect start');
   const client = new MongoClient(uri);
-  await client.connect();
+  try {
+    await client.connect();
+  } catch (err) {
+    logger.error('mongo connect failed', { err: String(err), stack: err && err.stack });
+    process.stderr.write(JSON.stringify({ __error: err.message }) + '\n');
+    process.exitCode = 1;
+    return;
+  }
+  logger.info('mongo connect ok');
   process.stderr.write(JSON.stringify({ __debug: `[harness] connected, running script` }) + '\n');
   const db = wrapDb(client.db(dbName));
   try {
-    const userScript = transformScript(rawScript);
+    const userScript = transformScript(rawScript, logger);
     const AsyncFn = Object.getPrototypeOf(async function () {}).constructor;
     const fn = new AsyncFn('db', 'print', userScript);
-    const print = (v) => emitGroup(v);
+    const print = (v) => emitGroup(v, logger);
     await fn(db, print);
+    logger.info('script complete', { groups: groupIndex });
     process.stderr.write(JSON.stringify({ __debug: `[harness] script complete, groups=${groupIndex}` }) + '\n');
   } catch (err) {
+    logger.error('script failure', {
+      err: String(err),
+      stack: err && err.stack,
+      line: extractLine(err),
+    });
     process.stderr.write(
       JSON.stringify({ __error: err.message, line: extractLine(err) }) + '\n',
     );
     process.exitCode = 1;
   } finally {
-    await client.close();
+    try { await client.close(); } catch (_e) {}
   }
 }
 
 run().catch((err) => {
+  logger.error('harness fatal', { err: String(err), stack: err && err.stack });
   process.stderr.write(JSON.stringify({ __error: err.message }) + '\n');
   process.exit(1);
 });
