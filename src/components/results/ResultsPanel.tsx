@@ -177,6 +177,20 @@ export function ResultsPanel({
   useEffect(() => { columnsRef.current = columns; }, [columns]);
   useEffect(() => { groupsRef.current = res?.groups ?? []; }, [res?.groups]);
 
+  // After a run completes with results, focus the results scope zone so F3/F4
+  // work even when the editor previously had focus. Sticky scope alone can't
+  // help here — for a freshly-loaded script the user may have never been in
+  // the results scope, so there's nothing to fall back to.
+  const resultsScopeRef = useRef<HTMLDivElement>(null);
+  const prevIsRunningRef = useRef(false);
+  const isRunning = !!res?.isRunning;
+  useEffect(() => {
+    if (prevIsRunningRef.current && !isRunning && allDocs.length > 0 && view === 'table') {
+      resultsScopeRef.current?.focus();
+    }
+    prevIsRunningRef.current = isRunning;
+  }, [isRunning, allDocs.length, view]);
+
   async function exportAs(kind: 'csv' | 'json') {
     const suggested = kind === 'csv' ? 'results.csv' : 'results.json';
     const path = await saveDialog({ defaultPath: suggested });
@@ -233,7 +247,7 @@ export function ResultsPanel({
         columnsRef={columnsRef}
         groupsRef={groupsRef}
       />
-      <KeyboardScopeZone scope="results" style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+      <KeyboardScopeZone ref={resultsScopeRef} scope="results" tabIndex={-1} style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, outline: 'none' }}>
       <div
         style={{
           display: 'flex',
