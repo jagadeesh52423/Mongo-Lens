@@ -38,41 +38,30 @@ class Logger {
 
   _write(level, msg, ctx = {}) {
     if (!this._enabled(level)) return;
-    const merged = redactCtx({ ...this.bindings, ...ctx });
-    const record = {
-      ts: new Date().toISOString(),
-      level,
-      layer: 'runner',
-      logger: merged.logger || this.bindings.logger || 'runner',
-      runId: typeof merged.runId === 'string' ? merged.runId : undefined,
-      msg,
-      ctx: merged,
-    };
+    // Spec §Error handling: "Logger failures must never crash the app." Wrap
+    // the entire record-assembly path so a circular ref / BigInt / throwing
+    // toJSON / throwing getter on bindings drops the record instead of
+    // bubbling. Emit one stderr warn per process so the failure isn't
+    // invisible, then keep the runner alive.
     let line;
     try {
+      const merged = redactCtx({ ...this.bindings, ...ctx });
+      const record = {
+        ts: new Date().toISOString(),
+        level,
+        layer: 'runner',
+        logger: merged.logger || this.bindings.logger || 'runner',
+        runId: typeof merged.runId === 'string' ? merged.runId : undefined,
+        msg,
+        ctx: merged,
+      };
       line = JSON.stringify(record);
     } catch (e) {
-      // Logger failures must not crash the runner. JSON.stringify can throw on
-      // circular references, BigInt values, or a thrown toJSON. Drop the bad
-      // ctx and emit a minimal fallback record so the run continues and the
-      // failure is grep-able.
-      const fallback = {
-        ts: record.ts,
-        level: record.level,
-        layer: record.layer,
-        logger: record.logger,
-        runId: record.runId,
-        msg: record.msg,
-        stringifyError: String(e && e.message || e),
-      };
-      try {
-        line = JSON.stringify(fallback);
-      } catch (_e2) {
-        // Fallback is built from primitives only, so this branch is
-        // theoretically unreachable — but defend anyway: anything we write
-        // must be a single line of valid JSON.
-        line = '{"level":"error","layer":"runner","msg":"logger stringify failed"}';
+      if (!Logger._crashWarned) {
+        Logger._crashWarned = true;
+        process.stderr.write(`[logger] record assembly failed: ${e && e.message || e}\n`);
       }
+      return;
     }
     this.writer.write(line);
   }
@@ -86,6 +75,10 @@ class Logger {
     return new Logger(this.writer, { ...this.bindings, ...bindings }, this.threshold);
   }
 }
+
+// One-shot guard so we warn once per process about a stringify/redact failure
+// and stay quiet thereafter. Static, not instance — shared across child loggers.
+Logger._crashWarned = false;
 
 function createLogger({ runId, logsDir, level = 'info' }) {
   let writer;

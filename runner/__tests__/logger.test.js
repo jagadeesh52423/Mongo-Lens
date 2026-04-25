@@ -71,37 +71,42 @@ describe('Logger with FileWriter', () => {
   });
 
   // M-1: a ctx that JSON.stringify cannot serialize (circular ref, BigInt,
-  // throwing toJSON) must NOT crash the runner. The logger swallows the
-  // failure and emits a fallback record so the rest of the run continues.
-  it('does not throw on a circular reference in ctx', () => {
+  // throwing toJSON) must NOT crash the runner. Spec §Error handling: drop
+  // the record and emit one stderr warn per process. No log line is written
+  // because there is nothing safe to write.
+  it('does not throw on a circular reference in ctx and emits zero lines', () => {
     const log = createLogger({ runId: 'circ', logsDir: dir, level: 'info' });
     const a = { name: 'a' };
     a.self = a;
     expect(() => log.info('cycle', { a })).not.toThrow();
     const file = path.join(dir, 'runner-circ.log');
+    // FileWriter creates the file on construction (open 'a'), so file exists
+    // but the bad record never reached writer.write — file is empty.
     expect(fs.existsSync(file)).toBe(true);
-    const lines = fs.readFileSync(file, 'utf8').trim().split('\n').filter(Boolean);
-    // At least one line emitted (the fallback). Each line must be parseable JSON.
-    expect(lines.length).toBeGreaterThan(0);
-    for (const line of lines) {
-      expect(() => JSON.parse(line)).not.toThrow();
-    }
-    // The fallback record marks the failure so it's grep-able.
-    const last = JSON.parse(lines[lines.length - 1]);
-    expect(last.msg).toBe('cycle');
-    expect(last.stringifyError).toBeDefined();
+    expect(fs.readFileSync(file, 'utf8')).toBe('');
   });
 
   it('does not throw on a BigInt in ctx', () => {
     const log = createLogger({ runId: 'bi', logsDir: dir, level: 'info' });
     expect(() => log.info('big', { n: 9007199254740993n })).not.toThrow();
-    const file = path.join(dir, 'runner-bi.log');
-    expect(fs.existsSync(file)).toBe(true);
+    expect(fs.readFileSync(path.join(dir, 'runner-bi.log'), 'utf8')).toBe('');
   });
 
   it('does not throw when toJSON throws', () => {
     const log = createLogger({ runId: 'tj', logsDir: dir, level: 'info' });
     const bad = { toJSON() { throw new Error('boom'); } };
     expect(() => log.info('thrower', { bad })).not.toThrow();
+    expect(fs.readFileSync(path.join(dir, 'runner-tj.log'), 'utf8')).toBe('');
+  });
+
+  it('subsequent valid records still write after a stringify failure', () => {
+    const log = createLogger({ runId: 'mix', logsDir: dir, level: 'info' });
+    const a = {};
+    a.self = a;
+    expect(() => log.info('bad', { a })).not.toThrow();
+    expect(() => log.info('good', { ok: 1 })).not.toThrow();
+    const lines = fs.readFileSync(path.join(dir, 'runner-mix.log'), 'utf8').trim().split('\n').filter(Boolean);
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse(lines[0]).msg).toBe('good');
   });
 });
