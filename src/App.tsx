@@ -147,9 +147,15 @@ export default function App() {
   const active = connections.find((c) => c.id === activeConnectionId);
 
   useEffect(() => {
+    // Capture phase: we need to see keys BEFORE Monaco's internal keymap
+    // consumes them. Monaco binds F3 ("find next") and Cmd+F ("find") on its
+    // own editor instance and stops propagation, so a bubble-phase listener
+    // never receives those keys when Monaco has focus. With capture, we see
+    // every key first; dispatch() only stopPropagation()s on an actual match,
+    // so unmatched keys flow through to Monaco as normal.
     const handler = (e: KeyboardEvent) => keyboardService.dispatch(e);
-    window.addEventListener('keydown', handler, false);
-    return () => window.removeEventListener('keydown', handler, false);
+    window.addEventListener('keydown', handler, true);
+    return () => window.removeEventListener('keydown', handler, true);
   }, []);
 
   useEffect(() => {
