@@ -40,6 +40,15 @@ pub fn authorize_keychain_access(log: &dyn Logger) -> Result<(), String> {
     // Probe for existing app items. Requesting kSecReturnData via
     // `load_data(true)` forces macOS to check the item's ACL before
     // returning data — this is what triggers the access prompt.
+    //
+    // We intentionally limit to 1 item. Legacy keychain items (created via
+    // SecKeychainAddGenericPassword) have per-item ACLs: "Always Allow"
+    // grants the current binary access to that specific item only.  If the
+    // user has N saved connections and the binary changed (update or dev
+    // rebuild), probing all items would show N sequential dialogs at
+    // startup — terrible UX.  With limit(1) the user sees at most one
+    // prompt here; remaining items are prompted on-demand when each
+    // connection is actually used, which is contextually appropriate.
     let mut search = ItemSearchOptions::new();
     search
         .class(ItemClass::generic_password())
@@ -168,6 +177,32 @@ mod tests {
     #[test]
     fn account_format() {
         assert_eq!(account_for("abc"), "mongomacapp.abc");
+    }
+
+    #[test]
+    fn authorize_keychain_access_succeeds() {
+        // Suppress keychain UI dialogs so the test doesn't hang when
+        // existing items have ACLs that don't include this binary.
+        // The _lock RAII guard re-enables interaction on drop.
+        let _lock = SecKeychain::disable_user_interaction()
+            .expect("disable_user_interaction");
+
+        let log = MemoryLogger::new("test");
+        // Must return Ok regardless of whether items exist or the probe
+        // is denied — the function only fails if the keychain subsystem
+        // itself is unreachable.
+        let result = authorize_keychain_access(log.as_ref());
+        assert!(result.is_ok(), "authorize_keychain_access failed: {:?}", result);
+
+        let records = log.records();
+        assert!(records.iter().any(|r| r.msg == "keychain pre-auth starting"));
+        assert!(records.iter().any(|r| r.msg == "keychain pre-auth complete"));
+        // No errors should have been logged (warnings are fine).
+        assert!(
+            !records.iter().any(|r| r.level == crate::logger::Level::Error),
+            "unexpected error log: {:?}",
+            records.iter().filter(|r| r.level == crate::logger::Level::Error).collect::<Vec<_>>(),
+        );
     }
 
     #[test]
