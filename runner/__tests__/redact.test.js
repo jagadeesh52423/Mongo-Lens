@@ -31,4 +31,19 @@ describe('runner redactCtx', () => {
   it('passes through unrelated fields', () => {
     expect(redactCtx({ connId: 'c', page: 3 })).toEqual({ connId: 'c', page: 3 });
   });
+
+  // MINOR-6: redactScript truncates by code points, not UTF-16 units, so a
+  // surrogate-paired emoji at the boundary is not split into a lone surrogate.
+  it('does not split surrogate pairs when truncating script', () => {
+    // 199 ASCII chars then a 4-byte (surrogate-paired) emoji at index 199-200.
+    // Naive .slice(0, 200) would keep the high surrogate but drop the low.
+    const script = 'a'.repeat(199) + '😀' + 'b'.repeat(300);
+    const out = redactCtx({ script }).script;
+    // No lone surrogates in the truncated head (validates as well-formed UTF-16).
+    expect(out).toMatch(/hash:[0-9a-f]{64}/);
+    // Encoding round-trip would replace lone surrogates with U+FFFD; verify
+    // the head stays clean.
+    const head = out.split(' hash:')[0].replace(/…$/, '');
+    expect(Buffer.from(head, 'utf8').toString('utf8')).toBe(head);
+  });
 });

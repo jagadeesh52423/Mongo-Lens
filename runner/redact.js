@@ -24,7 +24,17 @@ function redactUri(raw) {
 
 function redactScript(raw) {
   const hash = crypto.createHash('sha256').update(raw).digest('hex');
-  const head = raw.length > 200 ? raw.slice(0, 200) + '…' : raw;
+  // Slice by Unicode code points (Array.from), not UTF-16 code units, so a
+  // surrogate pair (e.g. an emoji) at the boundary isn't split into a lone
+  // high surrogate. .length is still cheap and safe for the gate check —
+  // only the slice path needs to be code-point aware.
+  let head;
+  if (raw.length > 200) {
+    const points = Array.from(raw);
+    head = (points.length > 200 ? points.slice(0, 200).join('') : raw) + '…';
+  } else {
+    head = raw;
+  }
   return `${head} hash:${hash}`;
 }
 

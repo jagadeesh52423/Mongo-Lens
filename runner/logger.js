@@ -48,7 +48,33 @@ class Logger {
       msg,
       ctx: merged,
     };
-    this.writer.write(JSON.stringify(record));
+    let line;
+    try {
+      line = JSON.stringify(record);
+    } catch (e) {
+      // Logger failures must not crash the runner. JSON.stringify can throw on
+      // circular references, BigInt values, or a thrown toJSON. Drop the bad
+      // ctx and emit a minimal fallback record so the run continues and the
+      // failure is grep-able.
+      const fallback = {
+        ts: record.ts,
+        level: record.level,
+        layer: record.layer,
+        logger: record.logger,
+        runId: record.runId,
+        msg: record.msg,
+        stringifyError: String(e && e.message || e),
+      };
+      try {
+        line = JSON.stringify(fallback);
+      } catch (_e2) {
+        // Fallback is built from primitives only, so this branch is
+        // theoretically unreachable — but defend anyway: anything we write
+        // must be a single line of valid JSON.
+        line = '{"level":"error","layer":"runner","msg":"logger stringify failed"}';
+      }
+    }
+    this.writer.write(line);
   }
 
   error(msg, ctx) { this._write('error', msg, ctx); }
