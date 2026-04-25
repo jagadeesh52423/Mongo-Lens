@@ -152,7 +152,10 @@ export default function App() {
     // own editor instance and stops propagation, so a bubble-phase listener
     // never receives those keys when Monaco has focus. With capture, we see
     // every key first; dispatch() only stopPropagation()s on an actual match,
-    // so unmatched keys flow through to Monaco as normal.
+    // so unmatched keys flow through to Monaco as normal. Scope is resolved
+    // strictly from the focused element's ancestor chain — panel shortcuts
+    // only fire when focus is actually inside the panel (ResultsPanel
+    // auto-focuses itself after a run so F3/F4 work without an extra click).
     const handler = (e: KeyboardEvent) => keyboardService.dispatch(e);
     window.addEventListener('keydown', handler, true);
     return () => window.removeEventListener('keydown', handler, true);

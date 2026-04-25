@@ -70,9 +70,6 @@ export class KeyboardService {
   private handlers = new Map<string, () => void>();
   private _defaults = new Map<string, KeyCombo>();
   private _pendingOverrides: Record<string, string> = {};
-  // Last non-empty scope set seen — used as fallback when focus is on an unscoped element
-  // (e.g. CodeMirror, toolbar) so panel shortcuts stay active after the user leaves the panel.
-  private _lastActiveScopes: string[] = [];
   private logger: Logger = new NoopLogger();
 
   setLogger(logger: Logger): void {
@@ -109,9 +106,7 @@ export class KeyboardService {
   }
 
   dispatch(e: KeyboardEvent): void {
-    const resolved = this.resolveScopes(document.activeElement);
-    if (resolved.length > 0) this._lastActiveScopes = resolved;
-    const scopes = resolved.length > 0 ? resolved : this._lastActiveScopes;
+    const scopes = this.resolveScopes(document.activeElement);
     for (const [id, handler] of this.handlers.entries()) {
       const def = this.definitions.get(id);
       if (!def) continue;

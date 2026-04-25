@@ -178,9 +178,10 @@ export function ResultsPanel({
   useEffect(() => { groupsRef.current = res?.groups ?? []; }, [res?.groups]);
 
   // After a run completes with results, focus the results scope zone so F3/F4
-  // work even when the editor previously had focus. Sticky scope alone can't
-  // help here — for a freshly-loaded script the user may have never been in
-  // the results scope, so there's nothing to fall back to.
+  // work even when the editor previously had focus. Shortcut dispatch matches
+  // strictly against the focused element's scope chain (no sticky fallback),
+  // so without this auto-focus a freshly-loaded script's results would not
+  // receive any panel shortcuts until the user clicked into the panel.
   const resultsScopeRef = useRef<HTMLDivElement>(null);
   const prevIsRunningRef = useRef(false);
   const isRunning = !!res?.isRunning;

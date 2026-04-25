@@ -129,6 +129,59 @@ describe('KeyboardService', () => {
     expect(action).toHaveBeenCalledOnce();
   });
 
+  it('does not retain prior scope after focus moves out of the scope zone (no sticky fallback)', () => {
+    const navAction = vi.fn();
+    const findAction = vi.fn();
+    const copyAction = vi.fn();
+    svc.defineShortcut({ id: 'cell.navigateRight', keys: { key: 'ArrowRight' }, label: 'Nav', scope: 'results-table' });
+    svc.defineShortcut({ id: 'results.findNext', keys: { key: 'F3' }, label: 'Find', scope: 'results' });
+    svc.defineShortcut({ id: 'cell.copyValue', keys: { cmd: true, key: 'c' }, label: 'Copy', scope: 'results' });
+    svc.register('cell.navigateRight', navAction);
+    svc.register('results.findNext', findAction);
+    svc.register('cell.copyValue', copyAction);
+
+    // First, fire each shortcut from inside its scope to prove the registration works.
+    const tableDiv = document.createElement('div');
+    tableDiv.setAttribute('data-keyboard-scope', 'results');
+    const innerTable = document.createElement('div');
+    innerTable.setAttribute('data-keyboard-scope', 'results-table');
+    const cell = document.createElement('button');
+    innerTable.appendChild(cell);
+    tableDiv.appendChild(innerTable);
+    document.body.appendChild(tableDiv);
+    cell.focus();
+    svc.dispatch(makeKeyEvent({ key: 'ArrowRight' }));
+    svc.dispatch(makeKeyEvent({ key: 'F3' }));
+    svc.dispatch(makeKeyEvent({ key: 'c', metaKey: true }));
+    expect(navAction).toHaveBeenCalledOnce();
+    expect(findAction).toHaveBeenCalledOnce();
+    expect(copyAction).toHaveBeenCalledOnce();
+    navAction.mockClear();
+    findAction.mockClear();
+    copyAction.mockClear();
+
+    // Move focus to a textarea outside any scope — simulating Monaco. None of
+    // the panel-scoped shortcuts should fire, regardless of key type.
+    const textarea = document.createElement('textarea');
+    document.body.appendChild(textarea);
+    textarea.focus();
+    const e1 = makeKeyEvent({ key: 'ArrowRight' });
+    const e2 = makeKeyEvent({ key: 'F3' });
+    const e3 = makeKeyEvent({ key: 'c', metaKey: true });
+    svc.dispatch(e1);
+    svc.dispatch(e2);
+    svc.dispatch(e3);
+    expect(navAction).not.toHaveBeenCalled();
+    expect(findAction).not.toHaveBeenCalled();
+    expect(copyAction).not.toHaveBeenCalled();
+    expect(e1.preventDefault).not.toHaveBeenCalled();
+    expect(e2.preventDefault).not.toHaveBeenCalled();
+    expect(e3.preventDefault).not.toHaveBeenCalled();
+
+    document.body.removeChild(tableDiv);
+    document.body.removeChild(textarea);
+  });
+
   it('fires scoped shortcut for element inside nested scope zones (ancestor chain)', () => {
     const action = vi.fn();
     svc.defineShortcut({ id: 'results-action', keys: { key: 'F3' }, label: 'View', scope: 'results' });
