@@ -1,5 +1,7 @@
 use crate::logctx;
 use crate::logger::Logger;
+use security_framework::item::{ItemClass, ItemSearchOptions};
+use security_framework::os::macos::keychain::SecKeychain;
 use security_framework::passwords::{
     delete_generic_password, get_generic_password, set_generic_password,
 };
@@ -8,6 +10,73 @@ const SERVICE: &str = "com.mongomacapp.app";
 
 pub fn account_for(connection_id: &str) -> String {
     format!("mongomacapp.{}", connection_id)
+}
+
+/// Pre-authorizes keychain access at app startup.
+///
+/// Verifies the default keychain is reachable, then performs a non-destructive
+/// probe of any existing items owned by this app (service = [`SERVICE`]).
+/// Requesting item data (`load_data`) forces macOS to evaluate the item's
+/// access-control list, which triggers the "allow / always allow" dialog if
+/// the current binary is not yet trusted.
+///
+/// Once the user clicks **Always Allow**, macOS adds the binary to the item's
+/// ACL and subsequent accesses proceed silently.
+///
+/// Returns `Ok(())` even if no items exist yet (nothing to pre-authorize).
+/// Returns `Err` only if the keychain subsystem is entirely inaccessible.
+pub fn authorize_keychain_access(log: &dyn Logger) -> Result<(), String> {
+    log.info("keychain pre-auth starting", logctx! {});
+
+    // Verify the default (login) keychain is reachable. This confirms the
+    // Security framework is functional and the keychain was unlocked at login.
+    let _keychain = SecKeychain::default().map_err(|e| {
+        log.error("default keychain inaccessible", logctx! {
+            "err" => e.to_string(),
+        });
+        e.to_string()
+    })?;
+
+    // Probe for existing app items. Requesting kSecReturnData via
+    // `load_data(true)` forces macOS to check the item's ACL before
+    // returning data — this is what triggers the access prompt.
+    let mut search = ItemSearchOptions::new();
+    search
+        .class(ItemClass::generic_password())
+        .service(SERVICE)
+        .load_data(true)
+        .limit(1);
+
+    match search.search() {
+        Ok(results) => {
+            log.info("keychain pre-auth: items accessible", logctx! {
+                "count" => results.len(),
+            });
+        }
+        Err(e) => {
+            let msg = e.to_string();
+            // errSecItemNotFound (-25300): no items exist yet — expected on
+            // first run, nothing to pre-authorize.
+            if msg.contains("-25300")
+                || msg.contains("not found")
+                || msg.contains("could not be found")
+            {
+                log.info("keychain pre-auth: no existing items", logctx! {});
+            } else if msg.contains("-25293") || msg.contains("denied") {
+                // errSecAuthFailed: user denied access in the dialog.
+                log.warn("keychain pre-auth: access denied by user", logctx! {
+                    "err" => msg,
+                });
+            } else {
+                log.warn("keychain pre-auth: probe returned error", logctx! {
+                    "err" => msg,
+                });
+            }
+        }
+    }
+
+    log.info("keychain pre-auth complete", logctx! {});
+    Ok(())
 }
 
 pub fn set_password(connection_id: &str, password: &str, log: &dyn Logger) -> Result<(), String> {
