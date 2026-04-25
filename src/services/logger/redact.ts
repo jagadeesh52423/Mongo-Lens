@@ -52,7 +52,15 @@ function stableHash(input: string): string {
 }
 
 function redactScript(raw: string): string {
-  const head = raw.length > SCRIPT_HEAD_LIMIT ? raw.slice(0, SCRIPT_HEAD_LIMIT) + '…' : raw;
+  // Slice on Unicode scalars (Array.from), not UTF-16 code units. A naive
+  // `String.prototype.slice` can split a non-BMP surrogate pair (e.g., an
+  // emoji at the boundary), producing a lone surrogate that corrupts the
+  // record downstream. See review finding MINOR-6.
+  const scalars = Array.from(raw);
+  const head =
+    scalars.length > SCRIPT_HEAD_LIMIT
+      ? scalars.slice(0, SCRIPT_HEAD_LIMIT).join('') + '…'
+      : raw;
   return `${head} hash:${stableHash(raw)}`;
 }
 

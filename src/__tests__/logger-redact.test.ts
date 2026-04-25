@@ -36,4 +36,22 @@ describe('redactCtx', () => {
     const out = redactCtx({ connId: 'c_1', page: 3, nested: { ok: true } });
     expect(out).toEqual({ connId: 'c_1', page: 3, nested: { ok: true } });
   });
+
+  // Regression for review MINOR-6: a UTF-16 `slice(0, 200)` can split a
+  // surrogate pair if the 200th unit lands inside a non-BMP character (e.g.,
+  // an emoji). Slice on Unicode scalars instead.
+  it('truncates script on Unicode scalars, not UTF-16 code units', () => {
+    // 199 ASCII chars + emoji (1 scalar = 2 UTF-16 units) + tail. With a
+    // naive `slice(0, 200)`, head would end with a LONE high surrogate.
+    const padding = 'a'.repeat(199);
+    const emoji = '😀'; // U+1F600
+    const script = padding + emoji + 'tail';
+    const out = redactCtx({ script });
+    const s = out.script as string;
+    const head = s.replace(/…? hash:[0-9a-f]+$/, '');
+    // No lone surrogate at the slice boundary.
+    const lastUnit = head.charCodeAt(head.length - 1);
+    const isLoneHighSurrogate = lastUnit >= 0xd800 && lastUnit <= 0xdbff;
+    expect(isLoneHighSurrogate).toBe(false);
+  });
 });
