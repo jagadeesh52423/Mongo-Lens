@@ -32,6 +32,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             let logs_dir = base.join("logs");
             fs::create_dir_all(&logs_dir)
                 .map_err(|e| format!("failed to create logs dir {}: {}", logs_dir.display(), e))?;
+            // Spec §File layout: logs dir must be 0700 so other local users can't
+            // read another user's potentially-sensitive log entries. Unix-only —
+            // Windows has its own ACL model and is not a target platform here.
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(&logs_dir, fs::Permissions::from_mode(0o700)).map_err(|e| {
+                    format!("failed to set 0700 on logs dir {}: {}", logs_dir.display(), e)
+                })?;
+            }
 
             let level = std::env::var("MONGOMACAPP_LOG_LEVEL")
                 .ok()
