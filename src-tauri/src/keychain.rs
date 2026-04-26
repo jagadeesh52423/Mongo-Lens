@@ -1,12 +1,136 @@
 use crate::logctx;
 use crate::logger::Logger;
+use core_foundation::base::TCFType;
+use core_foundation::string::CFString;
+use rand::rngs::OsRng;
+use rand::RngCore;
 use security_framework::item::{ItemClass, ItemSearchOptions};
 use security_framework::os::macos::keychain::SecKeychain;
+use security_framework::os::macos::keychain_item::SecKeychainItem;
 use security_framework::passwords::{
     delete_generic_password, get_generic_password, set_generic_password,
 };
+use security_framework_sys::base::{errSecSuccess, SecKeychainItemRef};
+use security_framework_sys::keychain::SecKeychainAddGenericPassword;
+use std::ptr;
 
 const SERVICE: &str = "com.mongomacapp.app";
+const MASTER_KEY_ACCOUNT: &str = "mongomacapp.master-encryption-key";
+const MASTER_KEY_SIZE: usize = 32; // 256 bits for AES-256
+
+/// FFI declarations for macOS Security framework functions not exposed
+/// by the `security-framework-sys` crate (ACL and trusted application APIs).
+mod ffi {
+    use core_foundation_sys::base::OSStatus;
+    use core_foundation_sys::string::CFStringRef;
+    use core_foundation_sys::array::CFArrayRef;
+    use security_framework_sys::base::{SecAccessRef, SecKeychainItemRef};
+    use std::os::raw::c_char;
+
+    /// Opaque type for SecTrustedApplicationRef (not in security-framework-sys).
+    pub type SecTrustedApplicationRef = *mut std::ffi::c_void;
+
+    extern "C" {
+        /// Creates a trusted application reference from a path.
+        /// Pass NULL for `path` to mean "the current application".
+        pub fn SecTrustedApplicationCreateFromPath(
+            path: *const c_char,
+            app: *mut SecTrustedApplicationRef,
+        ) -> OSStatus;
+
+        /// Creates a new access object with the given descriptor and trusted apps.
+        pub fn SecAccessCreate(
+            descriptor: CFStringRef,
+            trusted_list: CFArrayRef,
+            access_ref: *mut SecAccessRef,
+        ) -> OSStatus;
+
+        /// Sets the access control on a keychain item.
+        pub fn SecKeychainItemSetAccess(
+            item_ref: SecKeychainItemRef,
+            access_ref: SecAccessRef,
+        ) -> OSStatus;
+    }
+}
+
+/// Creates a macOS Security "access" object that trusts only the current binary.
+///
+/// When applied to a keychain item, this ACL allows the current application
+/// to read the item without triggering a password prompt. Other applications
+/// (or the same app after a binary change) will still see the standard macOS
+/// "allow / always allow" dialog.
+///
+/// Returns the raw `SecAccessRef` on success, or `None` on failure (logged).
+fn create_self_trusted_access(label: &str, log: &dyn Logger) -> Option<security_framework_sys::base::SecAccessRef> {
+    use core_foundation_sys::array::CFArrayCreate;
+    use core_foundation_sys::base::CFTypeRef;
+
+    unsafe {
+        // Create a trusted application ref for the current binary (path = NULL).
+        let mut trusted_app: ffi::SecTrustedApplicationRef = ptr::null_mut();
+        let status = ffi::SecTrustedApplicationCreateFromPath(ptr::null(), &mut trusted_app);
+        if status != errSecSuccess {
+            log.warn("SecTrustedApplicationCreateFromPath failed", logctx! {
+                "label" => label,
+                "status" => status,
+            });
+            return None;
+        }
+
+        // Build a CFArray containing just the current app using raw CoreFoundation API.
+        let apps_array = [trusted_app as CFTypeRef];
+        let trusted_list = CFArrayCreate(
+            ptr::null(),                // default allocator
+            apps_array.as_ptr(),        // values
+            1,                          // count
+            ptr::null(),                // callbacks (NULL = no retain/release)
+        );
+
+        // Create an access object with that trusted app list.
+        let descriptor = CFString::new(label);
+        let mut access_ref: security_framework_sys::base::SecAccessRef = ptr::null_mut();
+        let status = ffi::SecAccessCreate(
+            descriptor.as_concrete_TypeRef(),
+            trusted_list,
+            &mut access_ref,
+        );
+        if status != errSecSuccess {
+            log.warn("SecAccessCreate failed", logctx! {
+                "label" => label,
+                "status" => status,
+            });
+            return None;
+        }
+
+        Some(access_ref)
+    }
+}
+
+/// Applies a self-trusted ACL to an existing keychain item.
+///
+/// After this call, the current binary can access the item silently.
+/// If ACL application fails, a warning is logged but the item remains usable
+/// (it just may prompt the user on next access).
+fn apply_self_trusted_acl(item: &SecKeychainItem, label: &str, log: &dyn Logger) {
+    if let Some(access_ref) = create_self_trusted_access(label, log) {
+        let status = unsafe {
+            ffi::SecKeychainItemSetAccess(
+                item.as_concrete_TypeRef(),
+                access_ref,
+            )
+        };
+        if status != errSecSuccess {
+            log.warn("SecKeychainItemSetAccess failed", logctx! {
+                "label" => label,
+                "status" => status,
+            });
+        } else {
+            log.debug("self-trusted ACL applied", logctx! {
+                "label" => label,
+            });
+        }
+    }
+}
 
 pub fn account_for(connection_id: &str) -> String {
     format!("mongomacapp.{}", connection_id)
@@ -86,6 +210,102 @@ pub fn authorize_keychain_access(log: &dyn Logger) -> Result<(), String> {
 
     log.info("keychain pre-auth complete", logctx! {});
     Ok(())
+}
+
+/// Gets the master encryption key from Keychain, or creates one if missing.
+///
+/// The master key is a 256-bit (32-byte) random key used to encrypt all
+/// connection passwords. It's stored in Keychain with account
+/// `mongomacapp.master-encryption-key` and a self-trusted ACL so that
+/// future accesses from this binary don't trigger password prompts.
+///
+/// If the key doesn't exist, a new one is generated, stored, and returned.
+/// If generation/storage fails, returns Err.
+fn get_or_create_master_key(log: &dyn Logger) -> Result<Vec<u8>, String> {
+    // Try to retrieve existing master key from Keychain
+    match get_generic_password(SERVICE, MASTER_KEY_ACCOUNT) {
+        Ok(key_bytes) => {
+            if key_bytes.len() == MASTER_KEY_SIZE {
+                log.debug("master key retrieved", logctx! {
+                    "size" => key_bytes.len(),
+                });
+                return Ok(key_bytes);
+            } else {
+                log.warn("master key wrong size, regenerating", logctx! {
+                    "got" => key_bytes.len(),
+                    "expected" => MASTER_KEY_SIZE,
+                });
+                // Delete the malformed key before regenerating
+                delete_generic_password(SERVICE, MASTER_KEY_ACCOUNT).ok();
+                // Fall through to regenerate
+            }
+        }
+        Err(e) => {
+            let msg = format!("{}", e);
+            if msg.contains("-25300") || msg.contains("not found") || msg.contains("could not be found") {
+                log.info("master key not found, creating new", logctx! {});
+                // Fall through to create new key
+            } else {
+                log.error("keychain access failed", logctx! {
+                    "err" => e.to_string(),
+                });
+                return Err(format!("Failed to access keychain: {}", e));
+            }
+        }
+    }
+
+    // Generate a new 256-bit master key
+    let mut key = vec![0u8; MASTER_KEY_SIZE];
+    OsRng.fill_bytes(&mut key);
+
+    log.info("generated new master key", logctx! {
+        "size" => key.len(),
+    });
+
+    // Store the master key in Keychain
+    let keychain = SecKeychain::default().map_err(|e| {
+        log.error("keychain default failed", logctx! {
+            "err" => e.to_string(),
+        });
+        e.to_string()
+    })?;
+
+    // Use legacy API to capture item ref and apply self-trusted ACL
+    let (status, item_ref) = unsafe {
+        let mut item_ref: SecKeychainItemRef = ptr::null_mut();
+        let status = SecKeychainAddGenericPassword(
+            keychain.as_concrete_TypeRef() as *mut _,
+            SERVICE.len() as u32,
+            SERVICE.as_ptr().cast(),
+            MASTER_KEY_ACCOUNT.len() as u32,
+            MASTER_KEY_ACCOUNT.as_ptr().cast(),
+            key.len() as u32,
+            key.as_ptr().cast(),
+            &mut item_ref,
+        );
+        (status, item_ref)
+    };
+
+    if status == errSecSuccess {
+        // Apply self-trusted ACL so future accesses don't prompt
+        if !item_ref.is_null() {
+            let item = unsafe { SecKeychainItem::wrap_under_create_rule(item_ref) };
+            apply_self_trusted_acl(&item, "master-key", log);
+        }
+        log.info("master key stored successfully", logctx! {});
+        Ok(key)
+    } else if status == -25299 {
+        // errSecDuplicateItem: another process/thread created the key
+        // between our check and store. Retrieve the existing one.
+        log.info("master key already exists (concurrent create), retrieving", logctx! {});
+        get_generic_password(SERVICE, MASTER_KEY_ACCOUNT)
+            .map_err(|e| format!("Failed to retrieve master key after duplicate: {}", e))
+    } else {
+        log.error("master key storage failed", logctx! {
+            "status" => status,
+        });
+        Err(format!("Failed to store master key: OSStatus {}", status))
+    }
 }
 
 pub fn set_password(connection_id: &str, password: &str, log: &dyn Logger) -> Result<(), String> {
@@ -173,6 +393,11 @@ pub fn delete_password(connection_id: &str, log: &dyn Logger) -> Result<(), Stri
 mod tests {
     use super::*;
     use crate::logger::MemoryLogger;
+    use std::sync::Mutex;
+
+    /// Serializes master key tests that share the same keychain item.
+    /// Parallel keychain access to the same item causes macOS ACL races.
+    static MASTER_KEY_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn account_format() {
@@ -203,6 +428,35 @@ mod tests {
             "unexpected error log: {:?}",
             records.iter().filter(|r| r.level == crate::logger::Level::Error).collect::<Vec<_>>(),
         );
+    }
+
+    #[test]
+    fn get_or_create_master_key_generates_32_bytes() {
+        let _lock = MASTER_KEY_LOCK.lock().unwrap();
+        // Clean slate: remove any leftover master key from prior test runs
+        delete_generic_password(SERVICE, MASTER_KEY_ACCOUNT).ok();
+
+        let log = MemoryLogger::new("test");
+        let key = get_or_create_master_key(log.as_ref()).unwrap();
+        assert_eq!(key.len(), 32);
+
+        // Cleanup
+        delete_generic_password(SERVICE, MASTER_KEY_ACCOUNT).ok();
+    }
+
+    #[test]
+    fn get_or_create_master_key_returns_same_key_twice() {
+        let _lock = MASTER_KEY_LOCK.lock().unwrap();
+        // Clean slate: remove any leftover master key from prior test runs
+        delete_generic_password(SERVICE, MASTER_KEY_ACCOUNT).ok();
+
+        let log = MemoryLogger::new("test");
+        let key1 = get_or_create_master_key(log.as_ref()).unwrap();
+        let key2 = get_or_create_master_key(log.as_ref()).unwrap();
+        assert_eq!(key1, key2, "master key should persist across calls");
+
+        // Cleanup
+        delete_generic_password(SERVICE, MASTER_KEY_ACCOUNT).ok();
     }
 
     #[test]

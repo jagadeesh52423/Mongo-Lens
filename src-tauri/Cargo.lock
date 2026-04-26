@@ -2238,6 +2238,8 @@ name = "mongo-lens"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "core-foundation 0.9.4",
+ "core-foundation-sys",
  "filetime",
  "futures-util",
  "hex",
@@ -2246,6 +2248,7 @@ dependencies = [
  "ring",
  "rusqlite",
  "security-framework",
+ "security-framework-sys",
  "serde",
  "serde_json",
  "sha2",
