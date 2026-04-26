@@ -63,7 +63,7 @@ mod ffi {
 /// Returns the raw `SecAccessRef` on success, or `None` on failure (logged).
 fn create_self_trusted_access(label: &str, log: &dyn Logger) -> Option<security_framework_sys::base::SecAccessRef> {
     use core_foundation_sys::array::CFArrayCreate;
-    use core_foundation_sys::base::CFTypeRef;
+    use core_foundation_sys::base::{CFRelease, CFTypeRef};
 
     unsafe {
         // Create a trusted application ref for the current binary (path = NULL).
@@ -94,6 +94,13 @@ fn create_self_trusted_access(label: &str, log: &dyn Logger) -> Option<security_
             trusted_list,
             &mut access_ref,
         );
+
+        // Release intermediate CF objects now that SecAccessCreate is done.
+        // trusted_list was created with NULL callbacks (no retain on insert),
+        // so trusted_app must outlive the array -- release it after the array.
+        CFRelease(trusted_list as CFTypeRef);
+        CFRelease(trusted_app as CFTypeRef);
+
         if status != errSecSuccess {
             log.warn("SecAccessCreate failed", logctx! {
                 "label" => label,
@@ -119,6 +126,13 @@ fn apply_self_trusted_acl(item: &SecKeychainItem, label: &str, log: &dyn Logger)
                 access_ref,
             )
         };
+
+        // Release the access object now that it has been applied (or failed).
+        unsafe {
+            use core_foundation_sys::base::{CFRelease, CFTypeRef};
+            CFRelease(access_ref as CFTypeRef);
+        }
+
         if status != errSecSuccess {
             log.warn("SecKeychainItemSetAccess failed", logctx! {
                 "label" => label,
