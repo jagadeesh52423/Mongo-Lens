@@ -156,7 +156,7 @@ describe('EditorArea Save/Save As handlers', () => {
     });
 
     render(<EditorArea />);
-    await waitFor(() => screen.getByText('Existing Script'));
+    await waitFor(() => screen.getByText(/Existing Script/));
 
     const saveButton = screen.getByRole('button', { name: /^Save$/i });
     await userEvent.click(saveButton);
@@ -197,7 +197,7 @@ describe('EditorArea Save/Save As handlers', () => {
     });
 
     render(<EditorArea />);
-    await waitFor(() => screen.getByText('Untitled'));
+    await waitFor(() => screen.getByText(/Untitled/));
 
     const saveAsButton = screen.getByRole('button', { name: /Save As/i });
     await userEvent.click(saveAsButton);
@@ -205,7 +205,8 @@ describe('EditorArea Save/Save As handlers', () => {
     // Dialog should appear
     await waitFor(() => screen.getByRole('dialog'));
 
-    const nameInput = screen.getByLabelText(/Name/i);
+    const inputs = screen.getAllByRole('textbox');
+    const nameInput = inputs[0];
     await userEvent.clear(nameInput);
     await userEvent.type(nameInput, 'New Script Name');
 

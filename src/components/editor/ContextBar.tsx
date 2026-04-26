@@ -46,9 +46,9 @@ export function ContextBar({
   onDatabaseChange,
   modes,
   onExecute,
-  onSave: _onSave,
+  onSave,
   onSaveAs,
-  hasSavedScript: _hasSavedScript,
+  hasSavedScript,
   isRunning,
 }: Props) {
   const connections = useConnectionsStore((s) => s.connections);
@@ -163,7 +163,10 @@ export function ContextBar({
         </>
       )}
       <div style={{ flex: 1 }} />
-      <button onClick={() => setSaving(true)}>+ Save</button>
+      {hasSavedScript && (
+        <button onClick={async () => { await onSave(); }}>Save</button>
+      )}
+      <button onClick={() => setSaving(true)}>Save As</button>
       {modes.map((mode) => (
         <button
           key={mode.id}
