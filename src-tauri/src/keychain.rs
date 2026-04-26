@@ -678,6 +678,9 @@ mod tests {
 
     #[test]
     fn get_password_handles_corrupted_file() {
+        let _lock = MASTER_KEY_LOCK.lock().unwrap();
+        let _ui_lock = SecKeychain::disable_user_interaction()
+            .expect("disable_user_interaction");
         let log = MemoryLogger::new("test");
         let test_id = format!("test-{}", uuid::Uuid::new_v4());
 
@@ -692,6 +695,7 @@ mod tests {
 
         // Cleanup
         fs::remove_file(&file_path).ok();
+        delete_generic_password(SERVICE, MASTER_KEY_ACCOUNT).ok();
     }
 
     #[test]
