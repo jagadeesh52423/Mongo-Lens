@@ -81,6 +81,8 @@ export function SavedScriptsPanel() {
       content: s.content,
       isDirty: false,
       type: 'script',
+      savedScriptId: s.id,
+      savedScriptTags: s.tags,
     };
     openTab(tab);
   }

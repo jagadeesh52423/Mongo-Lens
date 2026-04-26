@@ -24,6 +24,23 @@ describe('SavedScriptsPanel', () => {
     expect(useEditorStore.getState().tabs[0].content).toBe('db.users.find({})');
   });
 
+  it('should set savedScriptId and savedScriptTags when opening a script', async () => {
+    invokeMock.mockResolvedValueOnce([
+      { id: 'script-1', name: 'Test Script', content: 'db.test.find({})', tags: 'test', createdAt: 't' },
+    ]);
+    const user = userEvent.setup();
+    render(<SavedScriptsPanel />);
+    await waitFor(() => expect(screen.getByText('Test Script')).toBeInTheDocument());
+
+    await user.click(screen.getByText('Test Script'));
+
+    const tabs = useEditorStore.getState().tabs;
+    expect(tabs).toHaveLength(1);
+    expect(tabs[0].savedScriptId).toBe('script-1');
+    expect(tabs[0].savedScriptTags).toBe('test');
+    expect(tabs[0].isDirty).toBe(false);
+  });
+
   it('filters by search query', async () => {
     invokeMock.mockResolvedValueOnce([
       { id: '1', name: 'alpha', content: '', tags: '', createdAt: 't' },
