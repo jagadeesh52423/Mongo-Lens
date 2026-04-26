@@ -71,17 +71,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             use crate::logger::{LogCtx, Logger as _};
             tracing_logger.info("app boot", LogCtx::new());
 
-            // Pre-authorize keychain access early so macOS prompts the user
-            // once at startup rather than on the first connection attempt.
-            // Errors are logged but never block app startup.
-            if let Err(e) = keychain::authorize_keychain_access(tracing_logger.as_ref()) {
-                tracing_logger.warn("keychain pre-auth failed (non-fatal)", {
-                    let mut ctx = LogCtx::new();
-                    ctx.insert("err".into(), serde_json::json!(e));
-                    ctx
-                });
-            }
-
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
