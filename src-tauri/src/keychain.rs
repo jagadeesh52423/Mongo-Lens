@@ -14,6 +14,11 @@ use security_framework::passwords::{
 };
 use security_framework_sys::base::{errSecSuccess, SecKeychainItemRef};
 use security_framework_sys::keychain::SecKeychainAddGenericPassword;
+use std::fs;
+use std::io::Write;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
 use std::ptr;
 
 const SERVICE: &str = "com.mongomacapp.app";
@@ -413,6 +418,73 @@ fn decrypt_password(encrypted: &[u8], master_key: &[u8]) -> Result<String, Strin
         .map_err(|e| format!("Decrypted data is not valid UTF-8: {}", e))
 }
 
+/// Ensures the encrypted password directory exists and returns its path.
+///
+/// Creates `~/.mongomacapp/encrypted/` with permissions 0700 (owner rwx only).
+/// Returns the absolute path to the directory.
+fn ensure_encrypted_dir() -> Result<PathBuf, String> {
+    let home = std::env::var("HOME")
+        .map_err(|_| "HOME environment variable not set".to_string())?;
+
+    let dir = Path::new(&home).join(".mongomacapp").join("encrypted");
+
+    if !dir.exists() {
+        fs::create_dir_all(&dir)
+            .map_err(|e| format!("Failed to create encrypted directory: {}", e))?;
+
+        // Set directory permissions to 0700 (owner rwx only)
+        #[cfg(unix)]
+        {
+            let metadata = fs::metadata(&dir)
+                .map_err(|e| format!("Failed to read directory metadata: {}", e))?;
+            let mut perms = metadata.permissions();
+            perms.set_mode(0o700);
+            fs::set_permissions(&dir, perms)
+                .map_err(|e| format!("Failed to set directory permissions: {}", e))?;
+        }
+    }
+
+    Ok(dir)
+}
+
+/// Atomically writes data to a file using temp file + rename.
+///
+/// Writes to `{path}.tmp`, fsyncs, then renames to `{path}` atomically.
+/// Sets file permissions to 0600 (owner rw only) after creation.
+fn atomic_write_file(path: &Path, data: &[u8]) -> Result<(), String> {
+    let tmp_path = path.with_extension("tmp");
+
+    // Write to temp file
+    let mut file = fs::File::create(&tmp_path)
+        .map_err(|e| format!("Failed to create temp file: {}", e))?;
+
+    file.write_all(data)
+        .map_err(|e| format!("Failed to write data: {}", e))?;
+
+    // Ensure data is written to disk before rename
+    file.sync_all()
+        .map_err(|e| format!("Failed to sync file: {}", e))?;
+
+    drop(file); // Close file before rename
+
+    // Set permissions to 0600 (owner rw only)
+    #[cfg(unix)]
+    {
+        let metadata = fs::metadata(&tmp_path)
+            .map_err(|e| format!("Failed to read file metadata: {}", e))?;
+        let mut perms = metadata.permissions();
+        perms.set_mode(0o600);
+        fs::set_permissions(&tmp_path, perms)
+            .map_err(|e| format!("Failed to set file permissions: {}", e))?;
+    }
+
+    // Atomic rename
+    fs::rename(&tmp_path, path)
+        .map_err(|e| format!("Failed to rename temp file: {}", e))?;
+
+    Ok(())
+}
+
 pub fn set_password(connection_id: &str, password: &str, log: &dyn Logger) -> Result<(), String> {
     let account = account_for(connection_id);
     // NEVER log `password` — only log that a set happened.
@@ -585,6 +657,35 @@ mod tests {
         let encrypted2 = encrypt_password(password, &key).unwrap();
 
         assert_ne!(encrypted1, encrypted2, "each encryption should use unique nonce");
+    }
+
+    #[test]
+    fn ensure_encrypted_dir_creates_directory() {
+        let test_dir = std::env::temp_dir().join(format!("mongomacapp-test-{}", uuid::Uuid::new_v4()));
+        std::env::set_var("HOME", test_dir.to_str().unwrap());
+
+        let dir = ensure_encrypted_dir().unwrap();
+        assert!(dir.exists());
+        assert!(dir.is_dir());
+
+        // Cleanup
+        fs::remove_dir_all(&test_dir).ok();
+        std::env::remove_var("HOME");
+    }
+
+    #[test]
+    fn atomic_write_file_creates_file() {
+        let test_dir = std::env::temp_dir();
+        let test_file = test_dir.join(format!("test-{}.bin", uuid::Uuid::new_v4()));
+        let data = b"test data";
+
+        atomic_write_file(&test_file, data).unwrap();
+
+        let read_data = fs::read(&test_file).unwrap();
+        assert_eq!(read_data, data);
+
+        // Cleanup
+        fs::remove_file(&test_file).ok();
     }
 
     #[test]
