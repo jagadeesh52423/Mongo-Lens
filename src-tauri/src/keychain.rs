@@ -9,9 +9,7 @@ use ring::error::Unspecified;
 use security_framework::item::{ItemClass, ItemSearchOptions};
 use security_framework::os::macos::keychain::SecKeychain;
 use security_framework::os::macos::keychain_item::SecKeychainItem;
-use security_framework::passwords::{
-    delete_generic_password, get_generic_password, set_generic_password,
-};
+use security_framework::passwords::{delete_generic_password, get_generic_password};
 use security_framework_sys::base::{errSecSuccess, SecKeychainItemRef};
 use security_framework_sys::keychain::SecKeychainAddGenericPassword;
 use std::fs;
@@ -486,82 +484,80 @@ fn atomic_write_file(path: &Path, data: &[u8]) -> Result<(), String> {
 }
 
 pub fn set_password(connection_id: &str, password: &str, log: &dyn Logger) -> Result<(), String> {
-    let account = account_for(connection_id);
     // NEVER log `password` — only log that a set happened.
-    match set_generic_password(SERVICE, &account, password.as_bytes()) {
-        Ok(()) => {
-            log.info("keychain set", logctx! { "connId" => connection_id });
-            Ok(())
-        }
-        Err(e) => {
-            log.error("keychain set failed", logctx! {
-                "connId" => connection_id,
-                "err" => e.to_string(),
-            });
-            Err(e.to_string())
-        }
-    }
+
+    // Get or create master key
+    let master_key = get_or_create_master_key(log)?;
+
+    // Encrypt password
+    let encrypted = encrypt_password(password, &master_key)?;
+
+    // Ensure encrypted directory exists
+    let dir = ensure_encrypted_dir()?;
+    let file_path = dir.join(format!("{}.bin", connection_id));
+
+    // Write encrypted data atomically
+    atomic_write_file(&file_path, &encrypted)?;
+
+    log.info("password set", logctx! { "connId" => connection_id });
+    Ok(())
 }
 
 pub fn get_password(connection_id: &str, log: &dyn Logger) -> Result<Option<String>, String> {
-    let account = account_for(connection_id);
-    match get_generic_password(SERVICE, &account) {
-        Ok(bytes) => {
-            // NEVER log the returned secret — only its presence.
-            let s = String::from_utf8(bytes).map_err(|e| {
-                log.error("keychain utf8 decode failed", logctx! {
-                    "connId" => connection_id,
-                    "err" => e.to_string(),
-                });
-                e.to_string()
-            })?;
-            log.info("keychain get", logctx! {
+    let dir = ensure_encrypted_dir()?;
+    let file_path = dir.join(format!("{}.bin", connection_id));
+
+    // Read encrypted file
+    let encrypted = match fs::read(&file_path) {
+        Ok(data) => data,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            log.info("password get", logctx! {
                 "connId" => connection_id,
-                "found" => true,
+                "found" => false,
             });
-            Ok(Some(s))
+            return Ok(None);
         }
         Err(e) => {
-            // errSecItemNotFound = -25300
-            let msg = format!("{}", e);
-            if msg.contains("-25300") || msg.contains("not found") || msg.contains("could not be found") {
-                log.info("keychain get", logctx! {
-                    "connId" => connection_id,
-                    "found" => false,
-                });
-                Ok(None)
-            } else {
-                log.error("keychain get failed", logctx! {
-                    "connId" => connection_id,
-                    "err" => e.to_string(),
-                });
-                Err(e.to_string())
-            }
+            log.error("password file read failed", logctx! {
+                "connId" => connection_id,
+                "err" => e.to_string(),
+            });
+            return Err(format!("Failed to read password file: {}", e));
         }
-    }
+    };
+
+    // Get master key and decrypt
+    let master_key = get_or_create_master_key(log)?;
+    let password = decrypt_password(&encrypted, &master_key)?;
+
+    log.info("password get", logctx! {
+        "connId" => connection_id,
+        "found" => true,
+    });
+    Ok(Some(password))
 }
 
 pub fn delete_password(connection_id: &str, log: &dyn Logger) -> Result<(), String> {
-    let account = account_for(connection_id);
-    match delete_generic_password(SERVICE, &account) {
+    let dir = ensure_encrypted_dir()?;
+    let file_path = dir.join(format!("{}.bin", connection_id));
+
+    match fs::remove_file(&file_path) {
         Ok(()) => {
-            log.info("keychain delete", logctx! { "connId" => connection_id });
+            log.info("password delete", logctx! { "connId" => connection_id });
+            Ok(())
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            log.debug("password delete noop (not found)", logctx! {
+                "connId" => connection_id,
+            });
             Ok(())
         }
         Err(e) => {
-            let msg = format!("{}", e);
-            if msg.contains("-25300") || msg.contains("not found") || msg.contains("could not be found") {
-                log.debug("keychain delete noop (not found)", logctx! {
-                    "connId" => connection_id,
-                });
-                Ok(())
-            } else {
-                log.error("keychain delete failed", logctx! {
-                    "connId" => connection_id,
-                    "err" => e.to_string(),
-                });
-                Err(e.to_string())
-            }
+            log.error("password delete failed", logctx! {
+                "connId" => connection_id,
+                "err" => e.to_string(),
+            });
+            Err(format!("Failed to delete password file: {}", e))
         }
     }
 }
@@ -610,6 +606,8 @@ mod tests {
     #[test]
     fn get_or_create_master_key_generates_32_bytes() {
         let _lock = MASTER_KEY_LOCK.lock().unwrap();
+        let _ui_lock = SecKeychain::disable_user_interaction()
+            .expect("disable_user_interaction");
         // Clean slate: remove any leftover master key from prior test runs
         delete_generic_password(SERVICE, MASTER_KEY_ACCOUNT).ok();
 
@@ -624,6 +622,8 @@ mod tests {
     #[test]
     fn get_or_create_master_key_returns_same_key_twice() {
         let _lock = MASTER_KEY_LOCK.lock().unwrap();
+        let _ui_lock = SecKeychain::disable_user_interaction()
+            .expect("disable_user_interaction");
         // Clean slate: remove any leftover master key from prior test runs
         delete_generic_password(SERVICE, MASTER_KEY_ACCOUNT).ok();
 
@@ -661,6 +661,7 @@ mod tests {
 
     #[test]
     fn ensure_encrypted_dir_creates_directory() {
+        let original_home = std::env::var("HOME").ok();
         let test_dir = std::env::temp_dir().join(format!("mongomacapp-test-{}", uuid::Uuid::new_v4()));
         std::env::set_var("HOME", test_dir.to_str().unwrap());
 
@@ -668,9 +669,12 @@ mod tests {
         assert!(dir.exists());
         assert!(dir.is_dir());
 
-        // Cleanup
+        // Cleanup: restore original HOME to avoid poisoning parallel tests
         fs::remove_dir_all(&test_dir).ok();
-        std::env::remove_var("HOME");
+        match original_home {
+            Some(h) => std::env::set_var("HOME", h),
+            None => std::env::remove_var("HOME"),
+        }
     }
 
     #[test]
@@ -689,7 +693,79 @@ mod tests {
     }
 
     #[test]
+    fn set_password_new_impl_creates_encrypted_file() {
+        let _lock = MASTER_KEY_LOCK.lock().unwrap();
+        let _ui_lock = SecKeychain::disable_user_interaction()
+            .expect("disable_user_interaction");
+        let log = MemoryLogger::new("test");
+        let test_id = format!("test-{}", uuid::Uuid::new_v4());
+
+        set_password(&test_id, "test-password", log.as_ref()).unwrap();
+
+        // Verify encrypted file exists
+        let dir = ensure_encrypted_dir().unwrap();
+        let file_path = dir.join(format!("{}.bin", test_id));
+        assert!(file_path.exists());
+
+        // Cleanup
+        delete_password(&test_id, log.as_ref()).ok();
+        delete_generic_password(SERVICE, MASTER_KEY_ACCOUNT).ok();
+    }
+
+    #[test]
+    fn get_password_new_impl_returns_decrypted() {
+        let _lock = MASTER_KEY_LOCK.lock().unwrap();
+        let _ui_lock = SecKeychain::disable_user_interaction()
+            .expect("disable_user_interaction");
+        let log = MemoryLogger::new("test");
+        let test_id = format!("test-{}", uuid::Uuid::new_v4());
+        let password = "my-test-password";
+
+        set_password(&test_id, password, log.as_ref()).unwrap();
+        let retrieved = get_password(&test_id, log.as_ref()).unwrap();
+
+        assert_eq!(retrieved, Some(password.to_string()));
+
+        // Cleanup
+        delete_password(&test_id, log.as_ref()).ok();
+        delete_generic_password(SERVICE, MASTER_KEY_ACCOUNT).ok();
+    }
+
+    #[test]
+    fn delete_password_removes_encrypted_file() {
+        let _lock = MASTER_KEY_LOCK.lock().unwrap();
+        let _ui_lock = SecKeychain::disable_user_interaction()
+            .expect("disable_user_interaction");
+        let log = MemoryLogger::new("test");
+        let test_id = format!("test-{}", uuid::Uuid::new_v4());
+
+        set_password(&test_id, "test", log.as_ref()).unwrap();
+
+        let dir = ensure_encrypted_dir().unwrap();
+        let file_path = dir.join(format!("{}.bin", test_id));
+        assert!(file_path.exists());
+
+        delete_password(&test_id, log.as_ref()).unwrap();
+        assert!(!file_path.exists());
+
+        // Cleanup
+        delete_generic_password(SERVICE, MASTER_KEY_ACCOUNT).ok();
+    }
+
+    #[test]
+    fn get_password_returns_none_for_missing_file() {
+        let log = MemoryLogger::new("test");
+        let test_id = format!("nonexistent-{}", uuid::Uuid::new_v4());
+
+        let result = get_password(&test_id, log.as_ref()).unwrap();
+        assert_eq!(result, None);
+    }
+
+    #[test]
     fn set_get_delete_roundtrip() {
+        let _lock = MASTER_KEY_LOCK.lock().unwrap();
+        let _ui_lock = SecKeychain::disable_user_interaction()
+            .expect("disable_user_interaction");
         let log = MemoryLogger::new("test");
         let id = format!("test-{}", uuid::Uuid::new_v4());
         set_password(&id, "hunter2", log.as_ref()).unwrap();
@@ -698,5 +774,8 @@ mod tests {
         delete_password(&id, log.as_ref()).unwrap();
         let after = get_password(&id, log.as_ref()).unwrap();
         assert!(after.is_none());
+
+        // Cleanup
+        delete_generic_password(SERVICE, MASTER_KEY_ACCOUNT).ok();
     }
 }
