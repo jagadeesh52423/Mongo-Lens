@@ -4,6 +4,8 @@ use core_foundation::base::TCFType;
 use core_foundation::string::CFString;
 use rand::rngs::OsRng;
 use rand::RngCore;
+use ring::aead::{Aad, BoundKey, Nonce, NonceSequence, OpeningKey, SealingKey, UnboundKey, AES_256_GCM};
+use ring::error::Unspecified;
 use security_framework::item::{ItemClass, ItemSearchOptions};
 use security_framework::os::macos::keychain::SecKeychain;
 use security_framework::os::macos::keychain_item::SecKeychainItem;
@@ -17,6 +19,7 @@ use std::ptr;
 const SERVICE: &str = "com.mongomacapp.app";
 const MASTER_KEY_ACCOUNT: &str = "mongomacapp.master-encryption-key";
 const MASTER_KEY_SIZE: usize = 32; // 256 bits for AES-256
+const NONCE_SIZE: usize = 12; // 96 bits for GCM
 
 /// FFI declarations for macOS Security framework functions not exposed
 /// by the `security-framework-sys` crate (ACL and trusted application APIs).
@@ -226,6 +229,27 @@ pub fn authorize_keychain_access(log: &dyn Logger) -> Result<(), String> {
     Ok(())
 }
 
+/// A NonceSequence that returns a single nonce then errors.
+/// Used for one-shot encryption/decryption operations.
+struct OneNonceSequence {
+    nonce: Option<[u8; NONCE_SIZE]>,
+}
+
+impl OneNonceSequence {
+    fn new(nonce: [u8; NONCE_SIZE]) -> Self {
+        Self { nonce: Some(nonce) }
+    }
+}
+
+impl NonceSequence for OneNonceSequence {
+    fn advance(&mut self) -> Result<Nonce, Unspecified> {
+        self.nonce
+            .take()
+            .map(|n| Nonce::assume_unique_for_key(n))
+            .ok_or(Unspecified)
+    }
+}
+
 /// Gets the master encryption key from Keychain, or creates one if missing.
 ///
 /// The master key is a 256-bit (32-byte) random key used to encrypt all
@@ -320,6 +344,73 @@ fn get_or_create_master_key(log: &dyn Logger) -> Result<Vec<u8>, String> {
         });
         Err(format!("Failed to store master key: OSStatus {}", status))
     }
+}
+
+/// Encrypts a password using AES-256-GCM with a random nonce.
+///
+/// Returns a byte vector with format: [12-byte nonce][ciphertext + 16-byte auth tag]
+fn encrypt_password(password: &str, master_key: &[u8]) -> Result<Vec<u8>, String> {
+    if master_key.len() != MASTER_KEY_SIZE {
+        return Err(format!("Invalid master key size: {} (expected {})", master_key.len(), MASTER_KEY_SIZE));
+    }
+
+    // Generate random nonce
+    let mut nonce_bytes = [0u8; NONCE_SIZE];
+    OsRng.fill_bytes(&mut nonce_bytes);
+
+    // Create sealing key
+    let unbound_key = UnboundKey::new(&AES_256_GCM, master_key)
+        .map_err(|_| "Failed to create encryption key".to_string())?;
+    let nonce_sequence = OneNonceSequence::new(nonce_bytes);
+    let mut sealing_key = SealingKey::new(unbound_key, nonce_sequence);
+
+    // Encrypt password
+    let mut in_out = password.as_bytes().to_vec();
+    sealing_key
+        .seal_in_place_append_tag(Aad::empty(), &mut in_out)
+        .map_err(|_| "Encryption failed".to_string())?;
+
+    // Prepend nonce to ciphertext
+    let mut result = Vec::with_capacity(NONCE_SIZE + in_out.len());
+    result.extend_from_slice(&nonce_bytes);
+    result.extend_from_slice(&in_out);
+
+    Ok(result)
+}
+
+/// Decrypts a password encrypted by encrypt_password.
+///
+/// Expects input format: [12-byte nonce][ciphertext + 16-byte auth tag]
+fn decrypt_password(encrypted: &[u8], master_key: &[u8]) -> Result<String, String> {
+    if master_key.len() != MASTER_KEY_SIZE {
+        return Err(format!("Invalid master key size: {} (expected {})", master_key.len(), MASTER_KEY_SIZE));
+    }
+
+    if encrypted.len() < NONCE_SIZE + 16 {
+        return Err(format!("Encrypted data too short: {} bytes (expected at least {})", encrypted.len(), NONCE_SIZE + 16));
+    }
+
+    // Extract nonce and ciphertext
+    let nonce_bytes: [u8; NONCE_SIZE] = encrypted[..NONCE_SIZE]
+        .try_into()
+        .map_err(|_| "Failed to extract nonce".to_string())?;
+    let ciphertext = &encrypted[NONCE_SIZE..];
+
+    // Create opening key
+    let unbound_key = UnboundKey::new(&AES_256_GCM, master_key)
+        .map_err(|_| "Failed to create decryption key".to_string())?;
+    let nonce_sequence = OneNonceSequence::new(nonce_bytes);
+    let mut opening_key = OpeningKey::new(unbound_key, nonce_sequence);
+
+    // Decrypt
+    let mut in_out = ciphertext.to_vec();
+    let plaintext = opening_key
+        .open_in_place(Aad::empty(), &mut in_out)
+        .map_err(|_| "Decryption failed (corrupted data or wrong key)".to_string())?;
+
+    // Convert to UTF-8 string
+    String::from_utf8(plaintext.to_vec())
+        .map_err(|e| format!("Decrypted data is not valid UTF-8: {}", e))
 }
 
 pub fn set_password(connection_id: &str, password: &str, log: &dyn Logger) -> Result<(), String> {
@@ -471,6 +562,29 @@ mod tests {
 
         // Cleanup
         delete_generic_password(SERVICE, MASTER_KEY_ACCOUNT).ok();
+    }
+
+    #[test]
+    fn encrypt_decrypt_password_roundtrip() {
+        let key = vec![42u8; 32]; // Dummy 256-bit key
+        let password = "my-secret-password";
+
+        let encrypted = encrypt_password(password, &key).unwrap();
+        assert!(encrypted.len() > password.len(), "encrypted should be larger (nonce + tag)");
+
+        let decrypted = decrypt_password(&encrypted, &key).unwrap();
+        assert_eq!(decrypted, password);
+    }
+
+    #[test]
+    fn encrypt_password_produces_unique_ciphertexts() {
+        let key = vec![42u8; 32];
+        let password = "same-password";
+
+        let encrypted1 = encrypt_password(password, &key).unwrap();
+        let encrypted2 = encrypt_password(password, &key).unwrap();
+
+        assert_ne!(encrypted1, encrypted2, "each encryption should use unique nonce");
     }
 
     #[test]
