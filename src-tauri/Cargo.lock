@@ -2242,6 +2242,8 @@ dependencies = [
  "futures-util",
  "hex",
  "mongodb",
+ "rand 0.8.6",
+ "ring",
  "rusqlite",
  "security-framework",
  "serde",
