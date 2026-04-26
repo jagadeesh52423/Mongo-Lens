@@ -675,4 +675,63 @@ mod tests {
         // Cleanup
         delete_generic_password(SERVICE, MASTER_KEY_ACCOUNT).ok();
     }
+
+    #[test]
+    fn get_password_handles_corrupted_file() {
+        let log = MemoryLogger::new("test");
+        let test_id = format!("test-{}", uuid::Uuid::new_v4());
+
+        // Write corrupted data (too short)
+        let dir = ensure_encrypted_dir().unwrap();
+        let file_path = dir.join(format!("{}.bin", test_id));
+        fs::write(&file_path, b"corrupted").unwrap();
+
+        let result = get_password(&test_id, log.as_ref());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("too short"));
+
+        // Cleanup
+        fs::remove_file(&file_path).ok();
+    }
+
+    #[test]
+    fn decrypt_password_fails_with_wrong_key() {
+        let key1 = vec![1u8; 32];
+        let key2 = vec![2u8; 32];
+        let password = "secret";
+
+        let encrypted = encrypt_password(password, &key1).unwrap();
+        let result = decrypt_password(&encrypted, &key2);
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Decryption failed"));
+    }
+
+    #[test]
+    fn get_password_gracefully_handles_master_key_recreation() {
+        let _lock = MASTER_KEY_LOCK.lock().unwrap();
+        let _ui_lock = SecKeychain::disable_user_interaction()
+            .expect("disable_user_interaction");
+        let log = MemoryLogger::new("test");
+        let test_id = format!("test-{}", uuid::Uuid::new_v4());
+
+        // Set password with initial master key
+        set_password(&test_id, "password1", log.as_ref()).unwrap();
+
+        // Delete master key (simulating loss)
+        delete_generic_password(SERVICE, MASTER_KEY_ACCOUNT).ok();
+
+        // Getting password should fail (old key gone, file encrypted with it)
+        let result = get_password(&test_id, log.as_ref());
+        assert!(result.is_err(), "should fail to decrypt with recreated key");
+
+        // But setting a new password should work (creates new master key)
+        set_password(&test_id, "password2", log.as_ref()).unwrap();
+        let retrieved = get_password(&test_id, log.as_ref()).unwrap();
+        assert_eq!(retrieved, Some("password2".to_string()));
+
+        // Cleanup
+        delete_password(&test_id, log.as_ref()).ok();
+        delete_generic_password(SERVICE, MASTER_KEY_ACCOUNT).ok();
+    }
 }
