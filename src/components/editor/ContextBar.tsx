@@ -12,7 +12,9 @@ interface Props {
   onDatabaseChange: (db: string) => void;
   modes: readonly ExecutionMode[];
   onExecute: (modeId: string) => void;
-  onSave: (name: string, tags: string) => Promise<void>;
+  onSave: () => Promise<void>;
+  onSaveAs: (name: string, tags: string) => Promise<void>;
+  hasSavedScript: boolean;
   isRunning: boolean;
 }
 
@@ -44,7 +46,9 @@ export function ContextBar({
   onDatabaseChange,
   modes,
   onExecute,
-  onSave,
+  onSave: _onSave,
+  onSaveAs,
+  hasSavedScript: _hasSavedScript,
   isRunning,
 }: Props) {
   const connections = useConnectionsStore((s) => s.connections);
@@ -173,7 +177,7 @@ export function ContextBar({
     </div>
     {saving && (
       <SaveScriptDialog
-        onSave={async (name, tags) => { await onSave(name, tags); setSaving(false); }}
+        onSave={async (name, tags) => { await onSaveAs(name, tags); setSaving(false); }}
         onCancel={() => setSaving(false)}
       />
     )}
