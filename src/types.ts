@@ -46,6 +46,8 @@ export interface EditorTab {
   connectionId?: string;
   database?: string;
   collection?: string;
+  savedScriptId?: string;
+  savedScriptTags?: string;
 }
 
 export type QueryCategory =
