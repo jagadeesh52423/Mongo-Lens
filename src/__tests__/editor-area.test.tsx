@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, cleanup } from '@testing-library/react';
+import { render, screen, cleanup, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { EditorArea } from '../components/editor/EditorArea';
+import * as ipc from '../ipc';
 import { useEditorStore } from '../store/editor';
 import { useConnectionsStore } from '../store/connections';
 import { useResultsStore } from '../store/results';
@@ -21,6 +22,8 @@ vi.mock('../ipc', () => ({
   cancelScript: vi.fn().mockResolvedValue(undefined),
   listCollections: vi.fn().mockResolvedValue([]),
   listDatabases: vi.fn().mockResolvedValue(['mydb']),
+  createScript: vi.fn().mockResolvedValue({ id: 'new-id', name: 'test', content: '', tags: '', createdAt: '' }),
+  updateScript: vi.fn().mockResolvedValue({ id: 'id', name: 'test', content: '', tags: '', createdAt: '' }),
 }));
 
 const mockConn = { id: 'conn1', name: 'Test Connection', createdAt: new Date().toISOString() };
@@ -112,5 +115,115 @@ describe('EditorArea', () => {
     await new Promise((r) => setTimeout(r, 0));
     const state = useResultsStore.getState().byTab['t1'];
     expect(state?.lastError).toBeUndefined();
+  });
+});
+
+describe('EditorArea Save/Save As handlers', () => {
+  beforeEach(() => {
+    useEditorStore.setState({ tabs: [], activeTabId: null, savedScriptsVersion: 0 });
+    useConnectionsStore.setState({
+      connections: [{ id: 'conn-1', name: 'Test', createdAt: '2026-01-01' }],
+      connectedIds: new Set(['conn-1']),
+      activeConnectionId: 'conn-1',
+      activeDatabase: 'testdb',
+    });
+    vi.mocked(ipc.listDatabases).mockResolvedValue(['testdb']);
+  });
+
+  it('handleSave should call updateScript with existing metadata', async () => {
+    const updateScriptMock = vi.mocked(ipc.updateScript).mockResolvedValue({
+      id: 'script-1',
+      name: 'Existing Script',
+      content: 'db.test.find({updated: true})',
+      tags: 'original,tags',
+      connectionId: 'conn-1',
+      createdAt: '2026-04-27T00:00:00Z',
+    });
+
+    useEditorStore.setState({
+      tabs: [{
+        id: 'tab-1',
+        title: 'Existing Script',
+        content: 'db.test.find({updated: true})',
+        isDirty: true,
+        type: 'script',
+        connectionId: 'conn-1',
+        database: 'testdb',
+        savedScriptId: 'script-1',
+        savedScriptTags: 'original,tags',
+      }],
+      activeTabId: 'tab-1',
+    });
+
+    render(<EditorArea />);
+    await waitFor(() => screen.getByText('Existing Script'));
+
+    const saveButton = screen.getByRole('button', { name: /^Save$/i });
+    await userEvent.click(saveButton);
+
+    expect(updateScriptMock).toHaveBeenCalledWith(
+      'script-1',
+      'Existing Script',
+      'db.test.find({updated: true})',
+      'original,tags',
+      'conn-1'
+    );
+
+    const tab = useEditorStore.getState().tabs[0];
+    expect(tab.isDirty).toBe(false);
+  });
+
+  it('handleSaveAs should prompt, create script, and update tab', async () => {
+    vi.mocked(ipc.createScript).mockResolvedValue({
+      id: 'new-script-id',
+      name: 'New Script Name',
+      content: 'db.test.find({})',
+      tags: '',
+      connectionId: 'conn-1',
+      createdAt: '2026-04-27T01:00:00Z',
+    });
+
+    useEditorStore.setState({
+      tabs: [{
+        id: 'tab-2',
+        title: 'Untitled',
+        content: 'db.test.find({})',
+        isDirty: true,
+        type: 'script',
+        connectionId: 'conn-1',
+        database: 'testdb',
+      }],
+      activeTabId: 'tab-2',
+    });
+
+    render(<EditorArea />);
+    await waitFor(() => screen.getByText('Untitled'));
+
+    const saveAsButton = screen.getByRole('button', { name: /Save As/i });
+    await userEvent.click(saveAsButton);
+
+    // Dialog should appear
+    await waitFor(() => screen.getByRole('dialog'));
+
+    const nameInput = screen.getByLabelText(/Name/i);
+    await userEvent.clear(nameInput);
+    await userEvent.type(nameInput, 'New Script Name');
+
+    const saveDialogButton = screen.getByRole('button', { name: /^Save$/i });
+    await userEvent.click(saveDialogButton);
+
+    await waitFor(() => {
+      expect(vi.mocked(ipc.createScript)).toHaveBeenCalledWith(
+        'New Script Name',
+        'db.test.find({})',
+        '',
+        'conn-1'
+      );
+    });
+
+    const tab = useEditorStore.getState().tabs[0];
+    expect(tab.savedScriptId).toBe('new-script-id');
+    expect(tab.title).toBe('New Script Name');
+    expect(tab.isDirty).toBe(false);
   });
 });

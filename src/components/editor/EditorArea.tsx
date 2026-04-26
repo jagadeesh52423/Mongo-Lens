@@ -4,7 +4,7 @@ import { useEditorStore, DEFAULT_PANEL_SIZES } from '../../store/editor';
 import { useConnectionsStore } from '../../store/connections';
 import { ScriptEditor } from './ScriptEditor';
 import { ContextBar } from './ContextBar';
-import { runScript, cancelScript, createScript } from '../../ipc';
+import { runScript, cancelScript, createScript, updateScript } from '../../ipc';
 import { useResultsStore } from '../../store/results';
 import { ResultsPanel } from '../results/ResultsPanel';
 import { useCollectionCompletions } from '../../hooks/useCollectionCompletions';
@@ -116,9 +116,36 @@ export function EditorArea() {
     finishRun(active.id, 0);
   }
 
-  async function handleSave(name: string, tags: string) {
+  async function handleSave() {
+    if (!active || active.type !== 'script' || !active.savedScriptId) return;
+    try {
+      const updated = await updateScript(
+        active.savedScriptId,
+        active.title,
+        active.content,
+        active.savedScriptTags ?? '',
+        active.connectionId
+      );
+      updateTab(active.id, {
+        isDirty: false,
+        savedScriptTags: updated.tags,
+      });
+      bumpScriptsVersion();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      alert(`Failed to save: ${msg}\n\nTry "Save As" to create a new script instead.`);
+    }
+  }
+
+  async function handleSaveAs(name: string, tags: string) {
     if (!active || active.type !== 'script') return;
-    await createScript(name, active.content, tags);
+    const created = await createScript(name, active.content, tags, active.connectionId);
+    updateTab(active.id, {
+      title: name,
+      savedScriptId: created.id,
+      savedScriptTags: created.tags,
+      isDirty: false,
+    });
     bumpScriptsVersion();
   }
 
@@ -205,6 +232,8 @@ export function EditorArea() {
           modes={getExecutionModes()}
           onExecute={handleExecute}
           onSave={handleSave}
+          onSaveAs={handleSaveAs}
+          hasSavedScript={!!active.savedScriptId}
           isRunning={isRunning}
         />
       )}
