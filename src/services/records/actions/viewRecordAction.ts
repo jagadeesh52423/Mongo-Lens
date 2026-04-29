@@ -1,5 +1,6 @@
 import { createElement } from 'react';
 import { recordActionRegistry } from '../RecordActionRegistry';
+import { JsonRecordEditor } from '../../../components/editor/JsonRecordEditor';
 
 recordActionRegistry.register({
   id: 'cell.viewRecord',
@@ -13,16 +14,7 @@ recordActionRegistry.register({
     const json = JSON.stringify(doc, null, 2);
     const idStr = String(doc._id ?? '');
 
-    const body = createElement('pre', {
-      style: {
-        flex: 1, overflow: 'auto', margin: 0,
-        background: 'var(--bg-code, #0d1117)',
-        border: '1px solid var(--border)',
-        borderRadius: 4, padding: 10,
-        fontFamily: 'var(--font-mono)', fontSize: 12,
-        color: 'var(--fg)', minHeight: 200,
-      },
-    }, json);
+    const body = createElement(JsonRecordEditor, { value: json, readOnly: true });
 
     const editAction = recordActionRegistry.getById('cell.editRecord');
     const canEdit = editAction?.canExecute(context) ?? false;
