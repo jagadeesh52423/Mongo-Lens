@@ -19,7 +19,7 @@ interface ModalState {
   title: string;
   body: ReactNode;
   footer: ReactNode;
-  beforeClose?: () => boolean;
+  beforeClose?: () => boolean | Promise<boolean>;
 }
 
 function RecordActionsRegistrar({
@@ -121,9 +121,12 @@ export function ResultsPanel({
       openModal(title, body, footer, options) {
         setModal({ title, body, footer, beforeClose: options?.beforeClose });
       },
-      close() {
+      async close() {
         const gate = modalRef.current?.beforeClose;
-        if (gate && gate() === false) return;
+        if (gate) {
+          const result = await gate();
+          if (result === false) return;
+        }
         setModal(null);
       },
       triggerDocUpdate() {
@@ -398,6 +401,7 @@ export function ResultsPanel({
         body={modal.body}
         footer={modal.footer}
         onClose={() => setModal(null)}
+        beforeClose={modal.beforeClose}
       />
     )}
     </CellSelectionProvider>

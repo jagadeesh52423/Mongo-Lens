@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { ask } from '@tauri-apps/plugin-dialog';
 import type { EditorTab } from '../types';
 import { useConnectionsStore } from './connections';
 
@@ -10,7 +11,7 @@ interface EditorState {
   savedScriptsVersion: number;
   panelSizes: Record<string, [number, number]>;
   openTab: (tab: EditorTab) => void;
-  closeTab: (id: string) => void;
+  closeTab: (id: string) => void | Promise<void>;
   setActive: (id: string) => void;
   updateContent: (id: string, content: string) => void;
   markClean: (id: string) => void;
@@ -48,7 +49,15 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     });
     get().initPanelSizes(openedId);
   },
-  closeTab: (id) => {
+  closeTab: async (id) => {
+    const tab = get().tabs.find((t) => t.id === id);
+    if (tab && tab.type === 'script' && tab.isDirty) {
+      const ok = await ask('You have unsaved changes. Discard them?', {
+        title: 'Unsaved changes',
+        kind: 'warning',
+      });
+      if (!ok) return;
+    }
     set((s) => {
       const remaining = s.tabs.filter((t) => t.id !== id);
       const nextActive =

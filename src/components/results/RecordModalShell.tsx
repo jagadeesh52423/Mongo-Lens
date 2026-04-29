@@ -6,7 +6,7 @@ interface RecordModalShellProps {
   footer: ReactNode;
   onClose: () => void;
   // Optional gate run before any close path. If it returns false, close is cancelled.
-  beforeClose?: () => boolean;
+  beforeClose?: () => boolean | Promise<boolean>;
 }
 
 export function RecordModalShell({ title, body, footer, onClose, beforeClose }: RecordModalShellProps) {
@@ -24,8 +24,11 @@ export function RecordModalShell({ title, body, footer, onClose, beforeClose }: 
     };
   }, []);
 
-  function tryClose() {
-    if (beforeCloseRef.current && beforeCloseRef.current() === false) return;
+  async function tryClose() {
+    if (beforeCloseRef.current) {
+      const result = await beforeCloseRef.current();
+      if (result === false) return;
+    }
     onClose();
   }
 

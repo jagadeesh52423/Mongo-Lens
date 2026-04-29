@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 
 export interface OpenModalOptions {
   // Return false to cancel close (e.g., to prompt about unsaved edits).
-  beforeClose?: () => boolean;
+  beforeClose?: () => boolean | Promise<boolean>;
 }
 
 export interface RecordActionHost {

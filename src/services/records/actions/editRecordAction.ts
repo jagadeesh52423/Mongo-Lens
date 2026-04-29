@@ -1,4 +1,5 @@
 import { createElement, useState, useRef } from 'react';
+import { ask } from '@tauri-apps/plugin-dialog';
 import { recordActionRegistry } from '../RecordActionRegistry';
 import { updateDocument } from '../../../ipc';
 import { JsonRecordEditor, type JsonRecordEditorHandle } from '../../../components/editor/JsonRecordEditor';
@@ -120,9 +121,12 @@ recordActionRegistry.register({
     }
 
     host.openModal('Edit Record', createElement(EditBody, null), null, {
-      beforeClose: () => {
+      beforeClose: async () => {
         if (!isDirty()) return true;
-        return window.confirm('You have unsaved changes. Discard them?');
+        return ask('You have unsaved changes. Discard them?', {
+          title: 'Unsaved changes',
+          kind: 'warning',
+        });
       },
     });
   },
