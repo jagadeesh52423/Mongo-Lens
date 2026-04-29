@@ -19,6 +19,7 @@ interface ModalState {
   title: string;
   body: ReactNode;
   footer: ReactNode;
+  beforeClose?: () => boolean;
 }
 
 function RecordActionsRegistrar({
@@ -65,6 +66,11 @@ export function ResultsPanel({
   const res = useResultsStore((s) => s.byTab[tabId]);
   const [view, setView] = useState<'json' | 'table'>('table');
   const [modal, setModal] = useState<ModalState | null>(null);
+  // Mirrors `modal` so host.close (called from action code, e.g., the Cancel
+  // button in EditBody) can consult beforeClose without re-rendering through
+  // a stale closure.
+  const modalRef = useRef<ModalState | null>(null);
+  modalRef.current = modal;
   const onDocUpdatedRef = useRef(onDocUpdated);
   onDocUpdatedRef.current = onDocUpdated;
 
@@ -112,10 +118,12 @@ export function ResultsPanel({
 
   const host = useMemo<RecordActionHost>(() => {
     const h: RecordActionHost = {
-      openModal(title, body, footer) {
-        setModal({ title, body, footer });
+      openModal(title, body, footer, options) {
+        setModal({ title, body, footer, beforeClose: options?.beforeClose });
       },
       close() {
+        const gate = modalRef.current?.beforeClose;
+        if (gate && gate() === false) return;
         setModal(null);
       },
       triggerDocUpdate() {
@@ -231,6 +239,7 @@ export function ResultsPanel({
             body={modal.body}
             footer={modal.footer}
             onClose={() => setModal(null)}
+            beforeClose={modal.beforeClose}
           />
         )}
       </CellSelectionProvider>

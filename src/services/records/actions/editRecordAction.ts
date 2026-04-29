@@ -19,6 +19,25 @@ recordActionRegistry.register({
     const { _id: _removed, ...docWithoutId } = doc;
     const originalJson = JSON.stringify(doc, null, 2);
     const idStr = String(doc._id ?? '');
+    // Lifted out of EditBody so the modal's beforeClose hook can inspect the
+    // current text without bridging React state across the host boundary.
+    const liveJsonRef: { current: string } = { current: originalJson };
+    // Set after a successful save so the programmatic close that follows
+    // doesn't trip the unsaved-changes prompt.
+    const savedRef: { current: boolean } = { current: false };
+
+    function isDirty(): boolean {
+      if (savedRef.current) return false;
+      if (liveJsonRef.current === originalJson) return false;
+      try {
+        const parsed = JSON.parse(liveJsonRef.current);
+        const { _id: _drop, ...rest } = parsed as Record<string, unknown>;
+        return JSON.stringify(rest) !== JSON.stringify(docWithoutId);
+      } catch {
+        // Unparseable text differs from original → treat as dirty.
+        return true;
+      }
+    }
 
     function EditBody() {
       const [editedJson, setEditedJson] = useState(originalJson);
@@ -26,6 +45,7 @@ recordActionRegistry.register({
       const [saving, setSaving] = useState(false);
       const editedJsonRef = useRef(editedJson);
       editedJsonRef.current = editedJson;
+      liveJsonRef.current = editedJson;
       const editorRef = useRef<JsonRecordEditorHandle>(null);
 
       async function handleSubmit() {
@@ -42,6 +62,7 @@ recordActionRegistry.register({
         }
         const { _id: _drop, ...parsedWithoutId } = parsed;
         if (JSON.stringify(parsedWithoutId) === JSON.stringify(docWithoutId)) {
+          savedRef.current = true;
           host.close();
           return;
         }
@@ -50,6 +71,7 @@ recordActionRegistry.register({
         try {
           await updateDocument(connectionId!, database!, collection!, idStr, JSON.stringify(parsedWithoutId));
           host.triggerDocUpdate();
+          savedRef.current = true;
           host.close();
         } catch (e) {
           setError(String(e));
@@ -97,6 +119,11 @@ recordActionRegistry.register({
       );
     }
 
-    host.openModal('Edit Record', createElement(EditBody, null), null);
+    host.openModal('Edit Record', createElement(EditBody, null), null, {
+      beforeClose: () => {
+        if (!isDirty()) return true;
+        return window.confirm('You have unsaved changes. Discard them?');
+      },
+    });
   },
 });

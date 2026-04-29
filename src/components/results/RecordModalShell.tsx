@@ -5,21 +5,36 @@ interface RecordModalShellProps {
   body: ReactNode;
   footer: ReactNode;
   onClose: () => void;
+  // Optional gate run before any close path. If it returns false, close is cancelled.
+  beforeClose?: () => boolean;
 }
 
-export function RecordModalShell({ title, body, footer, onClose }: RecordModalShellProps) {
+export function RecordModalShell({ title, body, footer, onClose, beforeClose }: RecordModalShellProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
+  const beforeCloseRef = useRef(beforeClose);
+  beforeCloseRef.current = beforeClose;
 
   useEffect(() => {
+    const previouslyFocused = document.activeElement as HTMLElement | null;
     dialogRef.current?.focus();
+    return () => {
+      if (previouslyFocused && typeof previouslyFocused.focus === 'function') {
+        previouslyFocused.focus();
+      }
+    };
   }, []);
 
+  function tryClose() {
+    if (beforeCloseRef.current && beforeCloseRef.current() === false) return;
+    onClose();
+  }
+
   function handleBackdropClick(e: React.MouseEvent) {
-    if (e.target === e.currentTarget) onClose();
+    if (e.target === e.currentTarget) tryClose();
   }
 
   function handleBackdropKeyDown(e: React.KeyboardEvent) {
-    if (e.key === 'Escape') { onClose(); return; }
+    if (e.key === 'Escape') { tryClose(); return; }
     e.stopPropagation();
   }
 
@@ -56,7 +71,7 @@ export function RecordModalShell({ title, body, footer, onClose }: RecordModalSh
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span style={{ fontWeight: 600, color: 'var(--fg)' }}>{title}</span>
-          <button aria-label="Close" onClick={onClose}>✕</button>
+          <button aria-label="Close" onClick={tryClose}>✕</button>
         </div>
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
           {body}

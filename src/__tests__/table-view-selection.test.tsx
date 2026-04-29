@@ -192,7 +192,7 @@ describe('TableView cell selection', () => {
     const cell = screen.getAllByRole('cell').find((c) => c.textContent === 'alice')!;
     await user.click(cell);
     await user.keyboard('{F4}');
-    expect(host.openModal).toHaveBeenCalledWith('Edit Record', expect.anything(), null);
+    expect(host.openModal).toHaveBeenCalledWith('Edit Record', expect.anything(), null, expect.anything());
   });
 
   it('F4 stays disabled when the group category is not `query` (e.g. aggregate)', async () => {
