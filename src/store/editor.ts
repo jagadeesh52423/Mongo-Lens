@@ -1,7 +1,7 @@
 import { create } from 'zustand';
-import { ask } from '@tauri-apps/plugin-dialog';
 import type { EditorTab } from '../types';
 import { useConnectionsStore } from './connections';
+import { confirmDiscardUnsaved } from '../utils/confirmDiscard';
 
 export const DEFAULT_PANEL_SIZES: [number, number] = [60, 40];
 
@@ -52,10 +52,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   closeTab: async (id) => {
     const tab = get().tabs.find((t) => t.id === id);
     if (tab && tab.type === 'script' && tab.isDirty) {
-      const ok = await ask('You have unsaved changes. Discard them?', {
-        title: 'Unsaved changes',
-        kind: 'warning',
-      });
+      const ok = await confirmDiscardUnsaved();
       if (!ok) return;
     }
     set((s) => {

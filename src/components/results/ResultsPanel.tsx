@@ -220,38 +220,11 @@ export function ResultsPanel({
     onPageChange?.(clamped - 1, pageSize); // convert to 0-indexed
   }
 
-  if (!res || (res.groups.length === 0 && !res.isRunning && !res.lastError && !res.pagination)) {
-    return (
-      <CellSelectionProvider>
-        <RecordActionsRegistrar
-          context={recordContext}
-          host={host}
-          activeContextRef={activeContextRef}
-          docsRef={docsRef}
-          columnsRef={columnsRef}
-          groupsRef={groupsRef}
-        />
-        <KeyboardScopeZone scope="results">
-          <div style={{ padding: 12, color: 'var(--fg-dim)' }}>
-            Run a script to see results.
-          </div>
-        </KeyboardScopeZone>
-        {modal && (
-          <RecordModalShell
-            title={modal.title}
-            body={modal.body}
-            footer={modal.footer}
-            onClose={() => setModal(null)}
-            beforeClose={modal.beforeClose}
-          />
-        )}
-      </CellSelectionProvider>
-    );
-  }
+  const isEmpty = !res || (res.groups.length === 0 && !res.isRunning && !res.lastError && !res.pagination);
 
   return (
     <CellSelectionProvider>
-      <SelectionClearer tabId={tabId} isRunning={!!res?.isRunning} />
+      {!isEmpty && <SelectionClearer tabId={tabId} isRunning={!!res?.isRunning} />}
       <RecordActionsRegistrar
         context={recordContext}
         host={host}
@@ -260,6 +233,13 @@ export function ResultsPanel({
         columnsRef={columnsRef}
         groupsRef={groupsRef}
       />
+      {isEmpty ? (
+        <KeyboardScopeZone scope="results">
+          <div style={{ padding: 12, color: 'var(--fg-dim)' }}>
+            Run a script to see results.
+          </div>
+        </KeyboardScopeZone>
+      ) : (
       <KeyboardScopeZone ref={resultsScopeRef} scope="results" tabIndex={-1} style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, outline: 'none' }}>
       <div
         style={{
@@ -395,6 +375,7 @@ export function ResultsPanel({
         </div>
       )}
     </KeyboardScopeZone>
+    )}
     {modal && (
       <RecordModalShell
         title={modal.title}
