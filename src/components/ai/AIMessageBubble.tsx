@@ -1,5 +1,7 @@
 import type { CSSProperties } from 'react';
 import type { ChatMessage } from '../../store/ai';
+import { parseAIContent, type AISegment } from '../../utils/aiContent';
+import { CodeBlock } from './CodeBlock';
 
 interface Props {
   message: ChatMessage;
@@ -23,7 +25,11 @@ export function AIMessageBubble({ message, onRetry }: Props) {
   return (
     <div style={rowStyle(isUser)}>
       <div style={bubbleStyle(isUser, hasError)}>
-        <div style={contentStyle}>{message.content}</div>
+        {isUser ? (
+          <div style={contentStyle}>{message.content}</div>
+        ) : (
+          <AssistantContent content={message.content} />
+        )}
         {hasError && (
           <div style={errorBlockStyle}>
             <div style={errorTextStyle}>{message.error}</div>
@@ -42,6 +48,27 @@ export function AIMessageBubble({ message, onRetry }: Props) {
       <div style={timestampStyle(isUser)}>{formatTimestamp(message.timestamp)}</div>
     </div>
   );
+}
+
+function AssistantContent({ content }: { content: string }) {
+  const segments = parseAIContent(content);
+  if (segments.length === 0) return null;
+  return (
+    <>
+      {segments.map((seg, i) => renderSegment(seg, i))}
+    </>
+  );
+}
+
+function renderSegment(seg: AISegment, key: number) {
+  if (seg.kind === 'text') {
+    return (
+      <div key={key} style={contentStyle}>
+        {seg.text}
+      </div>
+    );
+  }
+  return <CodeBlock key={key} lang={seg.lang} code={seg.code} />;
 }
 
 function rowStyle(isUser: boolean): CSSProperties {
