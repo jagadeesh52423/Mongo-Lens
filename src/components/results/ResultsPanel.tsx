@@ -256,7 +256,15 @@ export function ResultsPanel({
         <button onClick={() => exportAs('csv')} disabled={allDocs.length === 0}>Export CSV</button>
         <button onClick={() => exportAs('json')} disabled={allDocs.length === 0}>Export JSON</button>
         <span style={{ marginLeft: 'auto', color: 'var(--fg-dim)', fontSize: 11 }}>
-          {res.isRunning ? 'Running…' : `${allDocs.length} docs · ${res.executionMs ?? 0} ms`}
+          {res.isRunning ? 'Running…' : (() => {
+            const ms = res.executionMs ?? 0;
+            if (pagination && pagination.total >= 0 && allDocs.length > 0) {
+              const startIndex = pagination.page * pageSize + 1;
+              const endIndex = startIndex + allDocs.length - 1;
+              return `${startIndex} - ${endIndex} / ${pagination.total} docs · ${ms} ms`;
+            }
+            return `${allDocs.length} docs · ${ms} ms`;
+          })()}
         </span>
       </div>
       {groupCount > 1 && (
