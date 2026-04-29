@@ -1,6 +1,7 @@
 import { createElement, useState, useRef } from 'react';
 import { recordActionRegistry } from '../RecordActionRegistry';
 import { updateDocument } from '../../../ipc';
+import { JsonRecordEditor, type JsonRecordEditorHandle } from '../../../components/editor/JsonRecordEditor';
 
 recordActionRegistry.register({
   id: 'cell.editRecord',
@@ -25,6 +26,7 @@ recordActionRegistry.register({
       const [saving, setSaving] = useState(false);
       const editedJsonRef = useRef(editedJson);
       editedJsonRef.current = editedJson;
+      const editorRef = useRef<JsonRecordEditorHandle>(null);
 
       async function handleSubmit() {
         let parsed: Record<string, unknown>;
@@ -57,22 +59,15 @@ recordActionRegistry.register({
       }
 
       return createElement('div', { style: { display: 'flex', flexDirection: 'column', flex: 1, gap: 8 } },
-        createElement('textarea', {
-          key: 'textarea',
-          style: {
-            flex: 1, resize: 'none',
-            background: 'var(--bg-code, #0d1117)',
-            border: `1px solid ${error ? 'var(--accent-red, #fc8181)' : 'var(--accent-blue, #63b3ed)'}`,
-            borderRadius: 4, padding: 10,
-            fontFamily: 'var(--font-mono)', fontSize: 12,
-            color: 'var(--fg)', minHeight: 200,
-          },
+        createElement(JsonRecordEditor, {
+          key: 'editor',
+          ref: editorRef,
           value: editedJson,
-          onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-            setEditedJson(e.target.value);
+          onChange: (v: string) => {
+            setEditedJson(v);
             setError(null);
           },
-          spellCheck: false,
+          error: !!error,
         }),
         error ? createElement('div', {
           key: 'error',
@@ -91,6 +86,11 @@ recordActionRegistry.register({
             key: 'hint',
             style: { marginRight: 'auto', color: 'var(--fg-dim)', fontSize: 11 },
           }, 'No changes → submit is a no-op'),
+          createElement('button', {
+            key: 'format',
+            onClick: () => editorRef.current?.format(),
+            disabled: saving,
+          }, 'Format JSON'),
           createElement('button', { key: 'cancel', onClick: host.close, disabled: saving }, 'Cancel'),
           createElement('button', { key: 'submit', onClick: handleSubmit, disabled: saving }, saving ? 'Saving…' : 'Submit'),
         ),
