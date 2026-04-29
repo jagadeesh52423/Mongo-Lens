@@ -3,9 +3,6 @@ use crate::logctx;
 use crate::state::AppState;
 use tauri::State;
 
-/// Keychain account key for the AI API token.
-/// `keychain::account_for` wraps this as `mongomacapp.ai_api_token` internally,
-/// consistent with how connection passwords are keyed.
 const AI_TOKEN_KEY: &str = "ai_api_token";
 
 #[tauri::command]

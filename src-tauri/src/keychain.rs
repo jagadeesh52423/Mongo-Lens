@@ -151,10 +151,6 @@ fn apply_self_trusted_acl(item: &SecKeychainItem, label: &str, log: &dyn Logger)
     }
 }
 
-pub fn account_for(connection_id: &str) -> String {
-    format!("mongomacapp.{}", connection_id)
-}
-
 /// A NonceSequence that returns a single nonce then errors.
 /// Used for one-shot encryption/decryption operations.
 struct OneNonceSequence {
@@ -494,11 +490,6 @@ mod tests {
     /// Serializes master key tests that share the same keychain item.
     /// Parallel keychain access to the same item causes macOS ACL races.
     static MASTER_KEY_LOCK: Mutex<()> = Mutex::new(());
-
-    #[test]
-    fn account_format() {
-        assert_eq!(account_for("abc"), "mongomacapp.abc");
-    }
 
     #[test]
     fn get_or_create_master_key_generates_32_bytes() {
