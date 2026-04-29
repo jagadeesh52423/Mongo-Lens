@@ -2,6 +2,7 @@ import Editor, { OnMount } from '@monaco-editor/react';
 import { useEffect, useRef } from 'react';
 import type { ExecutionMode } from '../../execution-modes';
 import { MONACO_THEME_ID } from '../../themes/applyTheme';
+import { useEditorBridgeStore, type EditorController } from '../../store/editorBridge';
 
 interface HighlightRange {
   startLine: number;
@@ -73,6 +74,54 @@ export function ScriptEditor({
       const sel = model?.getValueInRange(e.selection) ?? '';
       callbacksRef.current.onSelectionChange?.(sel.length > 0 ? sel : null);
       callbacksRef.current.onCursorChange?.(e.selection.getStartPosition().lineNumber);
+    });
+
+    const controller: EditorController = {
+      replaceSelection: (text) => {
+        const sel = editor.getSelection();
+        if (!sel) return;
+        editor.executeEdits('ai', [{ range: sel, text, forceMoveMarkers: true }]);
+      },
+      insertAtCursor: (text) => {
+        const pos = editor.getPosition();
+        if (!pos) return;
+        const range = new monaco.Range(
+          pos.lineNumber,
+          pos.column,
+          pos.lineNumber,
+          pos.column,
+        );
+        editor.executeEdits('ai', [{ range, text, forceMoveMarkers: true }]);
+      },
+      appendToEnd: (text) => {
+        const model = editor.getModel();
+        if (!model) return;
+        const lastLine = model.getLineCount();
+        const lastCol = model.getLineMaxColumn(lastLine);
+        const value = model.getValue();
+        const needsNewline = value.length > 0 && !value.endsWith('\n');
+        const insert = needsNewline ? `\n${text}` : text;
+        const range = new monaco.Range(lastLine, lastCol, lastLine, lastCol);
+        editor.executeEdits('ai', [{ range, text: insert, forceMoveMarkers: true }]);
+      },
+      focus: () => editor.focus(),
+    };
+
+    const bridge = useEditorBridgeStore.getState();
+    bridge.setController(controller);
+    const initialSel = editor.getSelection();
+    bridge.setHasSelection(!!initialSel && !initialSel.isEmpty());
+
+    editor.onDidChangeCursorSelection((e) => {
+      useEditorBridgeStore.getState().setHasSelection(!e.selection.isEmpty());
+    });
+
+    editor.onDidDispose(() => {
+      const s = useEditorBridgeStore.getState();
+      if (s.controller === controller) {
+        s.setController(null);
+        s.setHasSelection(false);
+      }
     });
   };
 
