@@ -16,26 +16,28 @@ export function detectStatements(script: string): Statement[] {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const isBlank = line.trim().length === 0;
+
+    if (!isBlank) {
+      if (!current) {
+        current = { startLine: i + 1, endLine: i + 1, lines: [line] };
+      } else {
+        current.endLine = i + 1;
+        current.lines.push(line);
+      }
+    }
+
     for (const ch of line) {
       if (ch === '{' || ch === '(' || ch === '[') depth++;
       else if (ch === '}' || ch === ')' || ch === ']') depth = Math.max(0, depth - 1);
     }
-    if (isBlank && depth === 0) {
-      if (current) {
-        blocks.push({
-          startLine: current.startLine,
-          endLine: current.endLine,
-          text: current.lines.join('\n'),
-        });
-        current = null;
-      }
-    } else {
-      if (!current && !isBlank) {
-        current = { startLine: i + 1, endLine: i + 1, lines: [line] };
-      } else if (current) {
-        current.endLine = i + 1;
-        current.lines.push(line);
-      }
+
+    if (depth === 0 && current) {
+      blocks.push({
+        startLine: current.startLine,
+        endLine: current.endLine,
+        text: current.lines.join('\n'),
+      });
+      current = null;
     }
   }
   if (current) {
