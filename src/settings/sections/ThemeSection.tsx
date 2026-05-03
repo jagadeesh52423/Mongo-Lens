@@ -5,6 +5,7 @@ import { getThemes, registerTheme, type ThemeDefinition } from '../../themes/reg
 import { applyTheme, applyMonacoTheme } from '../../themes/applyTheme';
 import { useSettingsStore } from '../../store/settings';
 import { register } from '../registry';
+import { ThemeEditor } from './ThemeEditor';
 
 interface ThemeCardAction {
   icon: string;
@@ -15,6 +16,7 @@ interface ThemeCardAction {
 export function ThemeSection() {
   const [themes, setThemes] = useState<ThemeDefinition[]>(() => getThemes());
   const [error, setError] = useState<string | null>(null);
+  const [editingThemeId, setEditingThemeId] = useState<string | null>(null);
   const activeThemeId = useSettingsStore((s) => s.themeId);
   const setTheme = useSettingsStore((s) => s.setTheme);
 
@@ -67,8 +69,13 @@ export function ThemeSection() {
   };
 
   const actions: ThemeCardAction[] = [
+    { icon: '✎', label: 'Edit theme', onClick: (theme) => setEditingThemeId(theme.id) },
     { icon: '⬇', label: 'Export theme', onClick: handleExport },
   ];
+
+  if (editingThemeId !== null) {
+    return <ThemeEditor themeId={editingThemeId} onBack={() => setEditingThemeId(null)} />;
+  }
 
   return (
     <div style={{ padding: 24, color: 'var(--fg)' }}>
