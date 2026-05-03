@@ -31,3 +31,4 @@ input, select, textarea {
   padding: 4px 8px; border-radius: 3px;
 }
 input:focus, select:focus, textarea:focus { outline: 1px solid var(--accent); }
+input::placeholder, textarea::placeholder { color: var(--fg-dim); opacity: 1; }
