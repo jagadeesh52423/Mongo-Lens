@@ -1,6 +1,11 @@
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import { Store } from '@tauri-apps/plugin-store';
+import {
+  getAllOverrides,
+  hydrateOverrides,
+  subscribe as overridesSubscribe,
+} from '../themes/overrides';
 
 const STORE_FILE = 'settings.json';
 const SETTINGS_KEY = 'settings';
@@ -33,6 +38,7 @@ export const DEFAULT_AI_CONFIG: AIConfig = {
 export interface PersistedSettings {
   themeId: string;
   shortcutOverrides: Record<string, string>;
+  themeOverrides: Record<string, Record<string, string>>;
   aiConfig: PersistedAIConfig;
 }
 
@@ -65,6 +71,7 @@ function toPersisted(state: SettingsState): PersistedSettings {
   return {
     themeId: state.themeId,
     shortcutOverrides: state.shortcutOverrides,
+    themeOverrides: getAllOverrides(),
     aiConfig: persistedAi,
   };
 }
@@ -118,6 +125,10 @@ export const useSettingsStore = create<SettingsState>()(
   })),
 );
 
+overridesSubscribe(() => {
+  void persist(toPersisted(useSettingsStore.getState()));
+});
+
 export async function loadSettings(): Promise<void> {
   try {
     const store = await getStore();
@@ -133,6 +144,11 @@ export async function loadSettings(): Promise<void> {
         loadedAi && typeof loadedAi === 'object'
           ? { ...DEFAULT_AI_CONFIG, ...loadedAi, apiToken: '' }
           : DEFAULT_AI_CONFIG;
+      hydrateOverrides(
+        loaded.themeOverrides && typeof loaded.themeOverrides === 'object'
+          ? loaded.themeOverrides
+          : {},
+      );
       useSettingsStore.setState({
         themeId: typeof loaded.themeId === 'string' ? loaded.themeId : DEFAULT_THEME_ID,
         shortcutOverrides:

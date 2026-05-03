@@ -1,22 +1,28 @@
 import { loader } from '@monaco-editor/react';
 import { getTheme } from './registry';
+import { getOverrides } from './overrides';
 
 export const MONACO_THEME_ID = 'mongodb-dark';
 
-export function applyTheme(themeId: string): void {
+function mergedVariables(themeId: string): Record<string, string> | null {
   const theme = getTheme(themeId);
-  if (!theme) return;
+  if (!theme) return null;
+  return { ...theme.variables, ...getOverrides(themeId) };
+}
+
+export function applyTheme(themeId: string): void {
+  const merged = mergedVariables(themeId);
+  if (!merged) return;
   const root = document.documentElement;
-  Object.entries(theme.variables).forEach(([key, value]) => {
+  Object.entries(merged).forEach(([key, value]) => {
     root.style.setProperty(key, value);
   });
 }
 
 export function applyMonacoTheme(themeId: string): void {
-  const theme = getTheme(themeId);
-  if (!theme) return;
-  const vars = theme.variables;
-  const panel = vars['--bg-panel'] ?? vars['--bg'] ?? '#001e2b';
+  const merged = mergedVariables(themeId);
+  if (!merged) return;
+  const panel = merged['--bg-panel'] ?? merged['--bg'] ?? '#001e2b';
   const base = isLightColor(panel) ? 'vs' : 'vs-dark';
 
   loader.init().then((monaco) => {
