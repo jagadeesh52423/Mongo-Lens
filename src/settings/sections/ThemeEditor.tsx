@@ -20,7 +20,7 @@ export function ThemeEditor({ themeId, onBack }: ThemeEditorProps) {
   const [, forceUpdate] = useReducer((x: number) => x + 1, 0);
   const isActive = useSettingsStore((s) => s.themeId) === themeId;
 
-  useEffect(() => subscribe(forceUpdate), []);
+  useEffect(() => subscribe(forceUpdate), [themeId]);
 
   const baseTheme = getTheme(themeId);
 
@@ -43,7 +43,12 @@ export function ThemeEditor({ themeId, onBack }: ThemeEditorProps) {
   const hasOverrides = Object.keys(overrides).length > 0;
 
   const handleChange = (varName: string, value: string) => {
-    setVariable(themeId, varName, value);
+    const baseValue = baseTheme.variables[varName];
+    if (value === baseValue) {
+      resetVariable(themeId, varName);
+    } else {
+      setVariable(themeId, varName, value);
+    }
     if (isActive) {
       applyTheme(themeId);
       applyMonacoTheme(themeId);
