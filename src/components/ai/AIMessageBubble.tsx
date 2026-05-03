@@ -8,8 +8,7 @@ interface Props {
   onRetry?: (content: string) => void;
 }
 
-const USER_BG = '#094771';
-const ERROR_COLOR = '#f44747';
+const ERROR_COLOR = 'var(--accent-red)';
 
 function formatTimestamp(ts: number): string {
   const d = new Date(ts);
@@ -86,8 +85,8 @@ function bubbleStyle(isUser: boolean, hasError: boolean): CSSProperties {
     maxWidth: '85%',
     padding: '8px 12px',
     borderRadius: 8,
-    background: isUser ? USER_BG : 'var(--bg-elevated, var(--bg-panel))',
-    color: 'var(--fg)',
+    background: isUser ? 'var(--accent)' : 'var(--bg-elevated, var(--bg-panel))',
+    color: isUser ? 'var(--bg)' : 'var(--fg)',
     border: hasError ? `1px solid ${ERROR_COLOR}` : '1px solid transparent',
     fontSize: 13,
     lineHeight: 1.45,

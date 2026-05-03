@@ -37,7 +37,7 @@ const GUIDE_STYLE = `
   position: absolute;
   left: 7px;
   width: 1px;
-  background: #2a3f52;
+  background: var(--border);
 }
 .t-guide-line::before   { top: 0; bottom: 0; }
 .t-guide-branch::before { top: 0; bottom: 0; }
@@ -50,7 +50,7 @@ const GUIDE_STYLE = `
   left: 7px;
   width: 8px;
   height: 1px;
-  background: #2a3f52;
+  background: var(--border);
 }
 .t-label {
   display: flex;

@@ -145,7 +145,7 @@ export function SavedScriptsPanel() {
               >
                 <IconBtn
                   title="Duplicate"
-                  hoverStyle={{ background: '#2d4a6e', color: '#7cb8f0', borderColor: '#2d4a6e' }}
+                  hoverStyle={{ background: 'var(--accent-blue-dim)', color: 'var(--accent-blue)', borderColor: 'var(--accent-blue-dim)' }}
                   onClick={(e) => {
                     e.stopPropagation();
                     handleDuplicate(s);
@@ -155,7 +155,7 @@ export function SavedScriptsPanel() {
                 </IconBtn>
                 <IconBtn
                   title="Delete"
-                  hoverStyle={{ background: '#5c1f1f', color: '#f07070', borderColor: '#5c1f1f' }}
+                  hoverStyle={{ background: 'var(--accent-red-dim)', color: 'var(--accent-red)', borderColor: 'var(--accent-red-dim)' }}
                   onClick={(e) => {
                     e.stopPropagation();
                     setConfirmingId(s.id);
@@ -196,10 +196,10 @@ export function SavedScriptsPanel() {
                     style={{
                       padding: '3px 10px',
                       fontSize: 12,
-                      background: '#7a1f1f',
+                      background: 'var(--accent-red-dim)',
                       border: 'none',
                       borderRadius: 4,
-                      color: '#ffaaaa',
+                      color: 'var(--accent-red)',
                       cursor: 'pointer',
                     }}
                   >

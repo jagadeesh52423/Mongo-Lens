@@ -91,10 +91,10 @@ export function CodeBlock({ lang, code }: Props) {
 
 const wrapperStyle: CSSProperties = {
   margin: '6px 0',
-  border: '1px solid var(--border, #2a2a2a)',
+  border: '1px solid var(--border)',
   borderRadius: 6,
   overflow: 'hidden',
-  background: 'var(--bg-code, #1e1e1e)',
+  background: 'var(--bg)',
 };
 
 const headerStyle: CSSProperties = {
@@ -102,13 +102,13 @@ const headerStyle: CSSProperties = {
   alignItems: 'center',
   justifyContent: 'space-between',
   padding: '4px 8px',
-  background: 'var(--bg-elevated, #252526)',
-  borderBottom: '1px solid var(--border, #2a2a2a)',
+  background: 'var(--bg-hover)',
+  borderBottom: '1px solid var(--border)',
   fontSize: 11,
 };
 
 const langStyle: CSSProperties = {
-  color: 'var(--fg-dim, #888)',
+  color: 'var(--fg-dim)',
   textTransform: 'lowercase',
 };
 
@@ -121,9 +121,9 @@ function buttonStyle(disabled: boolean): CSSProperties {
   return {
     padding: '2px 8px',
     borderRadius: 4,
-    border: '1px solid var(--border, #444)',
+    border: '1px solid var(--border)',
     background: 'transparent',
-    color: disabled ? 'var(--fg-dim, #666)' : 'var(--fg, #ddd)',
+    color: disabled ? 'var(--fg-dim)' : 'var(--fg)',
     fontSize: 11,
     cursor: disabled ? 'not-allowed' : 'pointer',
     opacity: disabled ? 0.6 : 1,
@@ -138,5 +138,5 @@ const preStyle: CSSProperties = {
   lineHeight: 1.45,
   whiteSpace: 'pre',
   overflowX: 'auto',
-  color: 'var(--fg, #ddd)',
+  color: 'var(--fg)',
 };
