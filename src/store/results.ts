@@ -3,6 +3,7 @@ import type { PaginationState, ResultGroup } from '../types';
 
 interface TabResults {
   groups: ResultGroup[];
+  logs?: string[];
   isRunning: boolean;
   executionMs?: number;
   lastError?: string;
@@ -14,6 +15,7 @@ interface ResultsState {
   byTab: Record<string, TabResults>;
   startRun: (tabId: string, runId: string) => void;
   appendGroup: (tabId: string, group: ResultGroup) => void;
+  appendLog: (tabId: string, line: string) => void;
   setError: (tabId: string, error: string) => void;
   finishRun: (tabId: string, executionMs: number) => void;
   setPagination: (tabId: string, pagination: PaginationState) => void;
@@ -26,27 +28,32 @@ export const useResultsStore = create<ResultsState>((set) => ({
     set((s) => ({
       byTab: {
         ...s.byTab,
-        [tabId]: { groups: [], isRunning: true, executionMs: undefined, lastError: undefined, pagination: undefined, runId },
+        [tabId]: { groups: [], logs: [], isRunning: true, executionMs: undefined, lastError: undefined, pagination: undefined, runId },
       },
     })),
   appendGroup: (tabId, group) =>
     set((s) => {
-      const cur = s.byTab[tabId] ?? { groups: [], isRunning: true };
+      const cur = s.byTab[tabId] ?? { groups: [], logs: [], isRunning: true };
       return { byTab: { ...s.byTab, [tabId]: { ...cur, groups: [...cur.groups, group] } } };
+    }),
+  appendLog: (tabId, line) =>
+    set((s) => {
+      const cur = s.byTab[tabId] ?? { groups: [], logs: [], isRunning: true };
+      return { byTab: { ...s.byTab, [tabId]: { ...cur, logs: [...(cur.logs ?? []), line] } } };
     }),
   setError: (tabId, error) =>
     set((s) => {
-      const cur = s.byTab[tabId] ?? { groups: [], isRunning: true };
+      const cur = s.byTab[tabId] ?? { groups: [], logs: [], isRunning: true };
       return { byTab: { ...s.byTab, [tabId]: { ...cur, isRunning: false, lastError: error } } };
     }),
   finishRun: (tabId, executionMs) =>
     set((s) => {
-      const cur = s.byTab[tabId] ?? { groups: [], isRunning: true };
+      const cur = s.byTab[tabId] ?? { groups: [], logs: [], isRunning: true };
       return { byTab: { ...s.byTab, [tabId]: { ...cur, isRunning: false, executionMs, runId: undefined } } };
     }),
   setPagination: (tabId, pagination) =>
     set((s) => {
-      const cur = s.byTab[tabId] ?? { groups: [], isRunning: false };
+      const cur = s.byTab[tabId] ?? { groups: [], logs: [], isRunning: false };
       return { byTab: { ...s.byTab, [tabId]: { ...cur, pagination } } };
     }),
   clearTab: (tabId) =>

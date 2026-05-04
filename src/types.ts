@@ -95,7 +95,7 @@ export interface PaginationState {
 
 export interface ScriptEvent {
   tabId: string;
-  kind: 'group' | 'error' | 'done' | 'pagination';
+  kind: 'group' | 'error' | 'done' | 'pagination' | 'log';
   groupIndex?: number;
   docs?: unknown[];
   error?: string;
@@ -106,4 +106,6 @@ export interface ScriptEvent {
   collection?: string;
   /** Operation category resolved by the runner for this group's statement. */
   category?: QueryCategory;
+  /** Single line of script-emitted log output (print() in user scripts). */
+  log?: string;
 }

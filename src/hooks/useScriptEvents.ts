@@ -6,7 +6,7 @@ import { useLogger } from '../services/logger';
 
 export function useScriptEvents() {
   const log = useLogger('hooks.useScriptEvents');
-  const { appendGroup, setError, finishRun, setPagination } = useResultsStore();
+  const { appendGroup, appendLog, setError, finishRun, setPagination } = useResultsStore();
 
   useEffect(() => {
     let cancelled = false;
@@ -25,6 +25,8 @@ export function useScriptEvents() {
           collection: p.collection,
           category: p.category,
         });
+      } else if (p.kind === 'log' && p.log !== undefined) {
+        appendLog(p.tabId, p.log);
       } else if (p.kind === 'pagination' && p.pagination) {
         setPagination(p.tabId, p.pagination);
       } else if (p.kind === 'error' && p.error) {
@@ -43,5 +45,5 @@ export function useScriptEvents() {
       cancelled = true;
       unsub?.();
     };
-  }, [appendGroup, setError, finishRun, setPagination, log]);
+  }, [appendGroup, appendLog, setError, finishRun, setPagination, log]);
 }

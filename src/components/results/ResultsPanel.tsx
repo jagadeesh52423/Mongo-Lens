@@ -86,12 +86,21 @@ export function ResultsPanel({
   }, [pagination?.page]);
 
   const groupCount = res?.groups.length ?? 0;
+  const logs = res?.logs ?? [];
+  const hasLogs = logs.length > 0;
   const runId = res?.runId;
-  const [activeGroupIndex, setActiveGroupIndex] = useState(0);
+  // Active selection is either a query-group index or the synthetic 'console'
+  // tab that surfaces print() output. 'console' is opt-in and never auto-
+  // selected so existing query workflows are unaffected.
+  const [activeGroupIndex, setActiveGroupIndex] = useState<number | 'console'>(0);
   // Reset to first tab only when a new run starts (tabId or runId change),
   // not on every streaming group append.
   useEffect(() => { setActiveGroupIndex(0); }, [tabId, runId]);
-  const safeActiveIndex = activeGroupIndex < groupCount ? activeGroupIndex : 0;
+  const isConsoleActive = activeGroupIndex === 'console';
+  const safeActiveIndex =
+    typeof activeGroupIndex === 'number' && activeGroupIndex < groupCount
+      ? activeGroupIndex
+      : 0;
 
   const activeGroup = res?.groups[safeActiveIndex];
 
@@ -220,7 +229,7 @@ export function ResultsPanel({
     onPageChange?.(clamped - 1, pageSize); // convert to 0-indexed
   }
 
-  const isEmpty = !res || (res.groups.length === 0 && !res.isRunning && !res.lastError && !res.pagination);
+  const isEmpty = !res || (res.groups.length === 0 && logs.length === 0 && !res.isRunning && !res.lastError && !res.pagination);
 
   return (
     <CellSelectionProvider>
@@ -267,7 +276,7 @@ export function ResultsPanel({
           })()}
         </span>
       </div>
-      {groupCount > 1 && (
+      {(groupCount > 1 || hasLogs) && (
         <div
           role="tablist"
           style={{
@@ -281,7 +290,7 @@ export function ResultsPanel({
           }}
         >
           {res.groups.map((_, idx) => {
-            const isActive = idx === safeActiveIndex;
+            const isActive = !isConsoleActive && idx === safeActiveIndex;
             return (
               <button
                 key={idx}
@@ -304,6 +313,27 @@ export function ResultsPanel({
               </button>
             );
           })}
+          {hasLogs && (
+            <button
+              key="console"
+              role="tab"
+              aria-selected={isConsoleActive}
+              onClick={() => setActiveGroupIndex('console')}
+              style={{
+                background: 'transparent',
+                border: 'none',
+                padding: '6px 12px',
+                fontSize: 12,
+                fontWeight: isConsoleActive ? 600 : 400,
+                color: isConsoleActive ? 'var(--accent)' : 'var(--fg-dim)',
+                borderBottom: isConsoleActive ? '2px solid var(--accent)' : '2px solid transparent',
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              Console ({logs.length})
+            </button>
+          )}
         </div>
       )}
       {res.lastError && (
@@ -312,7 +342,25 @@ export function ResultsPanel({
         </div>
       )}
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-        {view === 'json' ? (
+        {isConsoleActive ? (
+          <pre
+            style={{
+              flex: 1,
+              minHeight: 0,
+              margin: 0,
+              padding: 8,
+              overflow: 'auto',
+              fontFamily: 'var(--font-mono)',
+              fontSize: 12,
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+              background: 'var(--bg-panel)',
+              color: 'var(--fg)',
+            }}
+          >
+            {logs.join('\n')}
+          </pre>
+        ) : view === 'json' ? (
           <JsonView docs={allDocs} />
         ) : (
           <KeyboardScopeZone scope="results-table" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>

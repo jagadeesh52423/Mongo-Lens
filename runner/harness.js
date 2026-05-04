@@ -306,7 +306,15 @@ async function run() {
     const userScript = transformScript(rawScript, transformLogger);
     const AsyncFn = Object.getPrototypeOf(async function () {}).constructor;
     const fn = new AsyncFn('db', 'print', userScript);
-    const print = (v) => emitGroup(v, emitLogger);
+    // print() streams to a separate log channel (__log), not the result-group
+    // channel. The UI surfaces these in a dedicated Console tab so a script
+    // doing `forEach(d => print(...))` doesn't fragment results into N tabs.
+    const print = (v) => {
+      const message = typeof v === 'string' ? v : (() => {
+        try { return JSON.stringify(v); } catch (_e) { return String(v); }
+      })();
+      process.stdout.write(JSON.stringify({ __log: { message } }) + '\n');
+    };
     await fn(db, print);
     logger.info('script complete', { groups: groupIndex });
     process.stderr.write(JSON.stringify({ __debug: `[harness] script complete, groups=${groupIndex}` }) + '\n');
