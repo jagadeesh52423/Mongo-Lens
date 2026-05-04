@@ -149,6 +149,54 @@ describe('harness integration tests', () => {
     expect(pendingEntry.count).toBeGreaterThan(0);
   });
 
+  it('cursor.count() emits a numeric group and no doc list', async () => {
+    const result = await spawnHarness('db.alert_tracker.find({}).count()');
+    expect(result.error).toBeNull();
+    expect(result.groups.length).toBe(1);
+    const docs = result.groups[0].docs;
+    expect(docs.length).toBe(1);
+    expect(typeof docs[0]).toBe('number');
+    expect(docs[0]).toBeGreaterThan(0);
+  });
+
+  it('cursor.size() emits a numeric group', async () => {
+    const result = await spawnHarness('db.alert_tracker.find({}).size()');
+    expect(result.error).toBeNull();
+    expect(result.groups.length).toBe(1);
+    expect(typeof result.groups[0].docs[0]).toBe('number');
+  });
+
+  it('cursor.forEach() iterates without auto-emitting the doc list', async () => {
+    const result = await spawnHarness(
+      'db.alert_tracker.find({}).forEach(d => print(String(d._id)))',
+      { pageSize: 3 },
+    );
+    expect(result.error).toBeNull();
+    for (const g of result.groups) {
+      expect(Array.isArray(g.docs) && g.docs.length > 1).toBe(false);
+    }
+  });
+
+  it('cursor.map() returns a transformed array without auto-emitting', async () => {
+    const result = await spawnHarness(
+      'const ids = await db.alert_tracker.find({}).map(d => d._id); print("len=" + ids.length)',
+      { pageSize: 3 },
+    );
+    expect(result.error).toBeNull();
+    const printed = result.groups.find((g) => typeof g.docs[0] === 'string' && g.docs[0].startsWith('len='));
+    expect(printed).toBeDefined();
+  });
+
+  it('cursor.explain() emits a plan group', async () => {
+    const result = await spawnHarness('db.alert_tracker.find({}).explain()');
+    expect(result.error).toBeNull();
+    expect(result.groups.length).toBe(1);
+    const plan = result.groups[0].docs[0];
+    expect(plan).toBeDefined();
+    expect(typeof plan).toBe('object');
+    expect(plan.queryPlanner || plan.stages || plan.command).toBeTruthy();
+  });
+
   it('invalid syntax produces an error and non-zero exit code', async () => {
     const result = await spawnHarness('db.alert_tracker.find(INVALID');
     expect(result.error).not.toBeNull();

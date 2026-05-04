@@ -156,6 +156,14 @@ function makeCursorProxy(cursor, countPromise, log = cursorLogger) {
     catch: (rej) => materialize().catch(rej),
     finally: (fn) => materialize().finally(fn),
     toArray: () => materialize(),
+    forEach: (fn) => cursor.toArray().then((docs) => { docs.forEach(fn); }),
+    map: (fn) => cursor.toArray().then((docs) => docs.map(fn)),
+    count: () => {
+      const p = countPromise !== undefined ? Promise.resolve(countPromise) : cursor.toArray().then((docs) => docs.length);
+      return p.then((n) => { emitGroup(n, log); return n; });
+    },
+    size: () => cursor.toArray().then((docs) => { emitGroup(docs.length, log); return docs.length; }),
+    explain: (verbosity) => cursor.explain(verbosity).then((plan) => { emitGroup(plan, log); return plan; }),
   };
 
   modifiers.forEach((m) => {
