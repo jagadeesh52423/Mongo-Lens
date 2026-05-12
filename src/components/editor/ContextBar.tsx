@@ -71,6 +71,7 @@ export function ContextBar({
     if (cached) {
       setDbs(cached);
       setDbsError(null);
+      if (!database && cached.length === 1) onDatabaseChange(cached[0]);
       return;
     }
     let cancelled = false;
@@ -81,6 +82,7 @@ export function ContextBar({
         if (cancelled) return;
         cacheRef.current[connectionId] = list;
         setDbs(list);
+        if (!database && list.length === 1) onDatabaseChange(list[0]);
       })
       .catch((e) => {
         if (cancelled) return;
@@ -93,6 +95,7 @@ export function ContextBar({
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connectionId, connectedIds]);
 
   const canRun = !!connectionId && !!database && !isRunning;
