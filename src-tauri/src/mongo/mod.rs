@@ -52,13 +52,21 @@ pub async fn client_for(uri: &str, log: &dyn Logger) -> Result<mongodb::Client, 
 }
 
 /// Best-effort default-database name for a connection (used when listDatabases is unauthorized).
+/// Parses the path component of a MongoDB URI (the segment after the host, before any query
+/// string), falling back to the configured `auth_db`. We deliberately scan past the `://`
+/// scheme separator so that schemes without a path component (e.g. `mongodb+srv://cluster.foo`)
+/// don't surface the host as a "database".
 pub fn default_db(rec: &ConnectionRecord) -> Option<String> {
     if let Some(cs) = &rec.conn_string {
-        if let Some(end) = cs.rfind('/') {
-            let after_slash = &cs[end + 1..];
-            // strip query string
-            let db = after_slash.split('?').next().unwrap_or("");
-            if !db.is_empty() && db != "admin" { return Some(db.to_string()); }
+        if let Some(scheme_end) = cs.find("://") {
+            let after_scheme = &cs[scheme_end + 3..];
+            if let Some(slash) = after_scheme.find('/') {
+                let path = &after_scheme[slash + 1..];
+                let db = path.split('?').next().unwrap_or("");
+                if !db.is_empty() && db != "admin" {
+                    return Some(db.to_string());
+                }
+            }
         }
     }
     rec.auth_db.clone().filter(|d| !d.is_empty() && d != "admin")
@@ -144,5 +152,34 @@ mod default_db_tests {
         let mut r = rec();
         r.auth_db = Some("admin".into());
         assert_eq!(default_db(&r), None);
+    }
+
+    #[test]
+    fn srv_uri_without_path_does_not_leak_host() {
+        let mut r = rec();
+        r.conn_string = Some("mongodb+srv://cluster.foo".into());
+        assert_eq!(default_db(&r), None);
+    }
+
+    #[test]
+    fn standard_uri_without_path_does_not_leak_host() {
+        let mut r = rec();
+        r.conn_string = Some("mongodb://h:27017".into());
+        assert_eq!(default_db(&r), None);
+    }
+
+    #[test]
+    fn srv_uri_with_empty_path_and_query_returns_none() {
+        let mut r = rec();
+        r.conn_string =
+            Some("mongodb+srv://user:pw@cluster.mongodb.net/?retryWrites=true".into());
+        assert_eq!(default_db(&r), None);
+    }
+
+    #[test]
+    fn standard_uri_with_explicit_db_path() {
+        let mut r = rec();
+        r.conn_string = Some("mongodb://h/marketplace".into());
+        assert_eq!(default_db(&r), Some("marketplace".into()));
     }
 }

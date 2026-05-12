@@ -1,5 +1,8 @@
+use crate::logctx;
+use crate::logger::Logger;
 use mongodb::error::Error as MongoError;
 use mongodb::options::ClientOptions;
+use mongodb::Client;
 
 /// Implement this trait and register in `registry()` to add a new connect-time fallback.
 /// Strategies must be idempotent — `apply` is only called once per strategy per connect attempt.
@@ -22,10 +25,6 @@ pub fn registry() -> &'static [&'static dyn ConnectFallback] {
     ];
     REG
 }
-
-use crate::logctx;
-use crate::logger::Logger;
-use mongodb::Client;
 
 /// Build a client from `uri`, ping `admin`, and on failure walk the registry applying any
 /// matching strategies and retrying. Returns the first successful client. Each strategy is
