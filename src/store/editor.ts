@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { EditorTab } from '../types';
+import type { EditorSelection, EditorTab } from '../types';
 import { useConnectionsStore } from './connections';
 import { confirmDiscardUnsaved } from '../utils/confirmDiscard';
 
@@ -10,6 +10,13 @@ interface EditorState {
   activeTabId: string | null;
   savedScriptsVersion: number;
   panelSizes: Record<string, [number, number]>;
+  /**
+   * Latest editor selection per tab. `null` (or absent) means no selection —
+   * including the whitespace-only case, which callers should normalise before
+   * writing. Cleared when a tab closes.
+   */
+  selections: Record<string, EditorSelection | null>;
+  setSelection: (tabId: string, selection: EditorSelection | null) => void;
   openTab: (tab: EditorTab) => void;
   closeTab: (id: string) => void | Promise<void>;
   setActive: (id: string) => void;
@@ -28,6 +35,23 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   activeTabId: null,
   savedScriptsVersion: 0,
   panelSizes: {},
+  selections: {},
+  setSelection: (tabId, selection) =>
+    set((s) => {
+      const current = s.selections[tabId] ?? null;
+      // Reference-equality guard so identical selections don't churn subscribers.
+      if (
+        current === selection ||
+        (current &&
+          selection &&
+          current.text === selection.text &&
+          current.startLine === selection.startLine &&
+          current.endLine === selection.endLine)
+      ) {
+        return s;
+      }
+      return { selections: { ...s.selections, [tabId]: selection } };
+    }),
   openTab: (tab) => {
     let openedId = tab.id;
     set((s) => {
@@ -61,7 +85,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         s.activeTabId === id
           ? remaining[remaining.length - 1]?.id ?? null
           : s.activeTabId;
-      return { tabs: remaining, activeTabId: nextActive };
+      const { [id]: _droppedSelection, ...remainingSelections } = s.selections;
+      return {
+        tabs: remaining,
+        activeTabId: nextActive,
+        selections: remainingSelections,
+      };
     });
     get().removePanelSizes(id);
   },

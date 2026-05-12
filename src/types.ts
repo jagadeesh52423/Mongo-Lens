@@ -37,6 +37,17 @@ export interface SavedScript {
   createdAt: string;
 }
 
+/**
+ * Active text selection within a script tab. `text` is the raw selected
+ * string (not trimmed); `startLine` and `endLine` are 1-based Monaco line
+ * numbers covering the selection.
+ */
+export interface EditorSelection {
+  text: string;
+  startLine: number;
+  endLine: number;
+}
+
 export interface EditorTab {
   id: string;
   title: string;

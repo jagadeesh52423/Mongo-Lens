@@ -1,6 +1,7 @@
 import Editor, { OnMount } from '@monaco-editor/react';
 import { useEffect, useRef } from 'react';
 import type { ExecutionMode } from '../../execution-modes';
+import type { EditorSelection } from '../../types';
 import { MONACO_THEME_ID } from '../../themes/applyTheme';
 import { useEditorBridgeStore, type EditorController } from '../../store/editorBridge';
 
@@ -16,7 +17,7 @@ interface Props {
   modes: readonly ExecutionMode[];
   onExecute?: (modeId: string) => void;
   onCursorChange?: (line: number) => void;
-  onSelectionChange?: (text: string | null) => void;
+  onSelectionChange?: (selection: EditorSelection | null) => void;
   highlightRange?: HighlightRange | null;
   collections?: string[];
 }
@@ -77,8 +78,18 @@ export function ScriptEditor({
     });
     editor.onDidChangeCursorSelection((e) => {
       const model = editor.getModel();
-      const sel = model?.getValueInRange(e.selection) ?? '';
-      callbacksRef.current.onSelectionChange?.(sel.length > 0 ? sel : null);
+      const text = model?.getValueInRange(e.selection) ?? '';
+      if (text.length > 0) {
+        // Monaco selections can run "backwards" (endLineNumber < startLineNumber)
+        // when the user drags upward; normalize so consumers always see ascending lines.
+        const a = e.selection.startLineNumber;
+        const b = e.selection.endLineNumber;
+        const startLine = Math.min(a, b);
+        const endLine = Math.max(a, b);
+        callbacksRef.current.onSelectionChange?.({ text, startLine, endLine });
+      } else {
+        callbacksRef.current.onSelectionChange?.(null);
+      }
       callbacksRef.current.onCursorChange?.(e.selection.getStartPosition().lineNumber);
     });
 

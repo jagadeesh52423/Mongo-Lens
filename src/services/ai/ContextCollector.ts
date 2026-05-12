@@ -19,6 +19,31 @@ export interface ContextCollectorInterface {
   collect(): Promise<string>;
 }
 
+/**
+ * Collects the user's currently highlighted text in the active tab's editor,
+ * if any. Emits a `Selected portion (lines X–Y):` block followed by a fenced
+ * code block holding the literal selected text. When the selection is
+ * absent, empty, or whitespace-only, returns '' so the prompt stays
+ * byte-identical to the no-selection case.
+ *
+ * TODO (option 3 — selected query's result): once the harness emits source
+ * ranges per result group (see TEST_REPORT.md "Harness investigation"),
+ * introduce a `QueryResultLocator` strategy that maps a selection range to
+ * the matching result group and surfaces that preview here or in a sibling
+ * collector. The strategy interface is the extension point — new locators
+ * (e.g. AST-based, line-overlap) register themselves; existing collectors
+ * stay closed for modification.
+ */
+export class SelectionContextCollector implements ContextCollectorInterface {
+  async collect(): Promise<string> {
+    const { activeTabId, selections } = useEditorStore.getState();
+    if (!activeTabId) return '';
+    const sel = selections[activeTabId];
+    if (!sel || !sel.text.trim()) return '';
+    return `Selected portion (lines ${sel.startLine}–${sel.endLine}):\n\`\`\`\n${sel.text}\n\`\`\``;
+  }
+}
+
 /** Collects the active tab's editor content. */
 export class EditorContextCollector implements ContextCollectorInterface {
   async collect(): Promise<string> {
@@ -107,6 +132,7 @@ export class ContextCollector {
     this.collectors = collectors ?? [
       new ConnectionContextCollector(),
       new EditorContextCollector(),
+      new SelectionContextCollector(),
       new ResultsContextCollector(),
       new SchemaContextCollector(),
     ];

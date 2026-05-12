@@ -16,6 +16,7 @@ import { newScriptTab } from '../../utils/newScriptTab';
 import { getStatementAtCursor } from '../../utils/statementDetection';
 import { getExecutionMode, getExecutionModes } from '../../execution-modes';
 import { useLogger } from '../../services/logger';
+import type { EditorSelection } from '../../types';
 
 export function EditorArea() {
   const {
@@ -29,6 +30,8 @@ export function EditorArea() {
     bumpScriptsVersion,
     panelSizes,
     setPanelSizes,
+    selections,
+    setSelection,
   } = useEditorStore();
   const { activeConnectionId, activeDatabase } = useConnectionsStore();
   const startRun = useResultsStore((s) => s.startRun);
@@ -63,7 +66,6 @@ export function EditorArea() {
   }, [tabs]);
 
   const [cursorLines, setCursorLines] = useState<Record<string, number>>({});
-  const [selections, setSelections] = useState<Record<string, string | null>>({});
   const lastRunContentRef = useRef<Record<string, string>>({});
 
   const activeCursorLine = active ? (cursorLines[active.id] ?? 1) : 1;
@@ -111,7 +113,8 @@ export function EditorArea() {
     const content = mode.resolveContent({
       content: active.content,
       cursorLine: cursorLines[active.id] ?? 1,
-      selection: selections[active.id] ?? null,
+      // Execution modes only care about the selected text, not its range.
+      selection: selections[active.id]?.text ?? null,
     });
     if (content == null) return;
     await executeContent(content, 0, activePageSize);
@@ -177,9 +180,9 @@ export function EditorArea() {
     setCursorLines((prev) => (prev[active.id] === line ? prev : { ...prev, [active.id]: line }));
   }
 
-  function handleSelectionChange(text: string | null) {
+  function handleSelectionChange(selection: EditorSelection | null) {
     if (!active) return;
-    setSelections((prev) => (prev[active.id] === text ? prev : { ...prev, [active.id]: text }));
+    setSelection(active.id, selection);
   }
 
   const activeSizes = (active && panelSizes[active.id]) || DEFAULT_PANEL_SIZES;
