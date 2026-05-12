@@ -17,6 +17,13 @@
     "fs:allow-remove",
     "fs:allow-home-read-recursive",
     "fs:allow-home-write-recursive",
+    {
+      "identifier": "fs:scope",
+      "allow": [
+        { "path": "$HOME" },
+        { "path": "$HOME/**" }
+      ]
+    },
     "store:default"
   ]
 }
