@@ -22,6 +22,10 @@ export const DEFAULT_SHORTCUTS: ShortcutDefinition[] = [
   { id: 'tab.goTo.8', label: 'Go to Tab 8', keys: { cmd: true, key: '8' }, scope: 'global' },
   { id: 'tab.goTo.9', label: 'Go to Tab 9', keys: { cmd: true, key: '9' }, scope: 'global' },
 
+  // Results — select all (JSON view selects body text; table view is a no-op
+  // to suppress the browser's default page-wide select-all)
+  { id: 'results.selectAll', label: 'Select All', keys: { cmd: true, key: 'a' }, scope: 'results' },
+
   // Results — copy actions
   { id: 'cell.copyValue', label: 'Copy Value', keys: { cmd: true, key: 'c' }, scope: 'results', showInContextMenu: true },
   { id: 'cell.copyField', label: 'Copy Field', keys: { ctrl: true, cmd: true, key: 'c' }, scope: 'results', showInContextMenu: true },

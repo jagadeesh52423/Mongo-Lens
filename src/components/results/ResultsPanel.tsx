@@ -10,6 +10,8 @@ import { toCsv, toJsonText } from '../../utils/export';
 import { CellSelectionProvider, useCellSelection } from '../../contexts/CellSelectionContext';
 import { useRecordActions } from '../../hooks/useRecordActions';
 import { KeyboardScopeZone } from '../shared/KeyboardScopeZone';
+import { keyboardService } from '../../services/KeyboardService';
+import { DEFAULT_SHORTCUTS } from '../../shortcuts/defaults';
 import { recordActionRegistry } from '../../services/records/RecordActionRegistry';
 import type { RecordContext } from '../../services/records/RecordContext';
 import type { RecordActionHost } from '../../services/records/RecordActionHost';
@@ -48,6 +50,9 @@ function SelectionClearer({ tabId, isRunning }: { tabId: string; isRunning: bool
 }
 
 const PAGE_SIZE_OPTIONS = [5, 10, 20, 50, 100, 200] as const;
+
+const selectAllDef = DEFAULT_SHORTCUTS.find((d) => d.id === 'results.selectAll');
+if (selectAllDef) keyboardService.defineShortcut(selectAllDef);
 
 interface Props {
   tabId: string;
@@ -203,7 +208,27 @@ export function ResultsPanel({
   // so without this auto-focus a freshly-loaded script's results would not
   // receive any panel shortcuts until the user clicked into the panel.
   const resultsScopeRef = useRef<HTMLDivElement>(null);
+  const jsonViewRef = useRef<HTMLDivElement>(null);
   const prevIsRunningRef = useRef(false);
+
+  // Cmd+A inside results: select JSON body text in JSON view; in table view,
+  // the keyboard service already preventDefaults on match, so this is a no-op
+  // (suppresses the browser's page-wide select-all).
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  useEffect(() => {
+    return keyboardService.register('results.selectAll', () => {
+      if (viewRef.current !== 'json') return;
+      const el = jsonViewRef.current;
+      if (!el) return;
+      const sel = window.getSelection();
+      if (!sel) return;
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    });
+  }, []);
   const isRunning = !!res?.isRunning;
   useEffect(() => {
     if (prevIsRunningRef.current && !isRunning && allDocs.length > 0 && view === 'table') {
@@ -361,7 +386,9 @@ export function ResultsPanel({
             {logs.join('\n')}
           </pre>
         ) : view === 'json' ? (
-          <JsonView docs={allDocs} />
+          <div ref={jsonViewRef} style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+            <JsonView docs={allDocs} />
+          </div>
         ) : (
           <KeyboardScopeZone scope="results-table" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
             <TableView
