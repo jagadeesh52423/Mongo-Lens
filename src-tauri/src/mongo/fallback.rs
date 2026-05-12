@@ -16,7 +16,9 @@ pub trait ConnectFallback: Send + Sync {
 
 pub fn registry() -> &'static [&'static dyn ConnectFallback] {
     // Order matters: try cheaper / more common fallbacks first.
-    static REG: &[&dyn ConnectFallback] = &[];
+    static REG: &[&dyn ConnectFallback] = &[
+        &crate::mongo::strategies::DirectReadPrefFallback,
+    ];
     REG
 }
 

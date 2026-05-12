@@ -5,6 +5,7 @@ use crate::state::AppState;
 use tauri::State;
 
 pub mod fallback;
+pub mod strategies;
 
 pub fn build_uri(rec: &ConnectionRecord, password: Option<&str>) -> String {
     if let Some(cs) = &rec.conn_string {
