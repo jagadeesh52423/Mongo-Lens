@@ -2,7 +2,7 @@ export interface Disposable {
   dispose(): void | Promise<void>;
 }
 
-export function toDisposable(fn: () => void | Promise<void>): Disposable {
+export function toDisposable(fn: () => unknown): Disposable {
   let disposed = false;
   return {
     async dispose() {
