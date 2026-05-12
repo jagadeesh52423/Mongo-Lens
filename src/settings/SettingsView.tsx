@@ -4,6 +4,7 @@ import { useSettingsStore } from '../store/settings';
 import './sections/ShortcutsSection';
 import './sections/ThemeSection';
 import './sections/AISettingsSection';
+import './sections/PluginsSection';
 
 interface Props {
   onClose: () => void;
