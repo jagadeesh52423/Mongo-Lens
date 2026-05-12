@@ -232,7 +232,14 @@ function makeCollectionProxy(col) {
         return (filter = {}, options) => {
           const normalizedOptions = normalizeFindOptions(options);
           const rawCursor = val.call(target, filter, normalizedOptions);
-          const countPromise = target.countDocuments(filter).catch(() => -1);
+          // Empty filter: use estimatedDocumentCount() (reads collection
+          // metadata, O(1)) instead of countDocuments({}) which forces a
+          // COLLSCAN and hangs on large collections.
+          const isEmptyFilter =
+            filter && typeof filter === 'object' && Object.keys(filter).length === 0;
+          const countPromise = isEmptyFilter
+            ? target.estimatedDocumentCount().catch(() => -1)
+            : target.countDocuments(filter).catch(() => -1);
           return makeCursorProxy(rawCursor, countPromise);
         };
       }
