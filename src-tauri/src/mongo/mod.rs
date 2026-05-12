@@ -4,6 +4,7 @@ use crate::logger::Logger;
 use crate::state::AppState;
 use tauri::State;
 
+pub mod authz;
 pub mod fallback;
 pub mod strategies;
 
@@ -48,6 +49,19 @@ pub async fn ping(uri: &str, log: &dyn Logger) -> Result<(), String> {
 pub async fn client_for(uri: &str, log: &dyn Logger) -> Result<mongodb::Client, String> {
     log.info("mongo connect", logctx! { "uri" => uri });
     fallback::connect_with_fallback(uri, log).await
+}
+
+/// Best-effort default-database name for a connection (used when listDatabases is unauthorized).
+pub fn default_db(rec: &ConnectionRecord) -> Option<String> {
+    if let Some(cs) = &rec.conn_string {
+        if let Some(end) = cs.rfind('/') {
+            let after_slash = &cs[end + 1..];
+            // strip query string
+            let db = after_slash.split('?').next().unwrap_or("");
+            if !db.is_empty() && db != "admin" { return Some(db.to_string()); }
+        }
+    }
+    rec.auth_db.clone().filter(|d| !d.is_empty() && d != "admin")
 }
 
 pub fn active_client(state: &State<'_, AppState>, id: &str) -> Result<mongodb::Client, String> {
@@ -99,5 +113,36 @@ mod tests {
         let mut r = rec();
         r.conn_string = Some("mongodb+srv://cluster.foo/admin".into());
         assert_eq!(build_uri(&r, Some("x")), "mongodb+srv://cluster.foo/admin");
+    }
+}
+
+#[cfg(test)]
+mod default_db_tests {
+    use super::*;
+    fn rec() -> ConnectionRecord {
+        ConnectionRecord {
+            id: "1".into(), name: "t".into(),
+            host: None, port: None, auth_db: None, username: None,
+            conn_string: None, ssh_host: None, ssh_port: None, ssh_user: None,
+            ssh_key_path: None, created_at: "x".into(),
+        }
+    }
+    #[test]
+    fn pulls_default_db_from_uri() {
+        let mut r = rec();
+        r.conn_string = Some("mongodb://u:p@h:1/marketplace?authSource=admin".into());
+        assert_eq!(default_db(&r), Some("marketplace".into()));
+    }
+    #[test]
+    fn falls_back_to_auth_db() {
+        let mut r = rec();
+        r.auth_db = Some("foo".into());
+        assert_eq!(default_db(&r), Some("foo".into()));
+    }
+    #[test]
+    fn admin_is_not_useful() {
+        let mut r = rec();
+        r.auth_db = Some("admin".into());
+        assert_eq!(default_db(&r), None);
     }
 }

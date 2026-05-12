@@ -39,14 +39,27 @@ pub async fn list_databases(
     });
     log.info("list_databases", logctx! {});
     let client = mongo::active_client(&state, &connection_id)?;
-    let names = client
-        .list_database_names()
-        .await
-        .map_err(|e| {
+
+    match client.list_database_names().await {
+        Ok(names) => Ok(names.into_iter().filter(|n| n != "local").collect()),
+        Err(e) if mongo::authz::is_unauthorized(&e) => {
+            log.warn("list_databases unauthorized, falling back to default db",
+                logctx! { "err" => e.to_string() });
+            // Look up the connection record for its default DB.
+            let sql = state.open_db().map_err(|e| e.to_string())?;
+            let rec = crate::db::connections::get(&sql, &connection_id)
+                .map_err(|e| e.to_string())?
+                .ok_or("connection not found")?;
+            match mongo::default_db(&rec) {
+                Some(db) => Ok(vec![db]),
+                None => Ok(vec![]),
+            }
+        }
+        Err(e) => {
             log.error("list_database_names failed", logctx! { "err" => e.to_string() });
-            e.to_string()
-        })?;
-    Ok(names.into_iter().filter(|n| n != "local").collect())
+            Err(e.to_string())
+        }
+    }
 }
 
 #[tauri::command]
