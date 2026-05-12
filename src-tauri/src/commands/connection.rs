@@ -226,14 +226,6 @@ pub async fn connect_connection(
     let pw = keychain::get_password(&id, log.as_ref())?;
     let uri = mongo::build_uri(&rec, pw.as_deref());
     let client = mongo::client_for(&uri, log.as_ref()).await?;
-    client
-        .database("admin")
-        .run_command(mongodb::bson::doc! {"ping": 1})
-        .await
-        .map_err(|e| {
-            log.error("ping failed", logctx! { "err" => e.to_string() });
-            e.to_string()
-        })?;
     state.mongo_clients.lock().unwrap().insert(id, client);
     log.info("connect_connection ok", logctx! {});
     Ok(())

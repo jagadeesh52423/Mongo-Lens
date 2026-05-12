@@ -40,40 +40,14 @@ fn urlencoding_encode(s: &str) -> String {
 }
 
 pub async fn ping(uri: &str, log: &dyn Logger) -> Result<(), String> {
-    use mongodb::{options::ClientOptions, Client};
-    // `uri` is redacted automatically by the logger's redact_ctx — never log raw URIs.
     log.info("mongo ping", logctx! { "uri" => uri });
-    let opts = ClientOptions::parse(uri).await.map_err(|e| {
-        log.error("mongo parse failed", logctx! { "err" => e.to_string() });
-        e.to_string()
-    })?;
-    let client = Client::with_options(opts).map_err(|e| {
-        log.error("mongo client build failed", logctx! { "err" => e.to_string() });
-        e.to_string()
-    })?;
-    client
-        .database("admin")
-        .run_command(mongodb::bson::doc! {"ping": 1})
-        .await
-        .map_err(|e| {
-            log.error("mongo ping failed", logctx! { "err" => e.to_string() });
-            e.to_string()
-        })?;
-    log.info("mongo ping ok", logctx! {});
-    Ok(())
+    // connect_with_fallback already pings admin as part of validating the connection.
+    fallback::connect_with_fallback(uri, log).await.map(|_| ())
 }
 
 pub async fn client_for(uri: &str, log: &dyn Logger) -> Result<mongodb::Client, String> {
-    use mongodb::{options::ClientOptions, Client};
     log.info("mongo connect", logctx! { "uri" => uri });
-    let opts = ClientOptions::parse(uri).await.map_err(|e| {
-        log.error("mongo parse failed", logctx! { "err" => e.to_string() });
-        e.to_string()
-    })?;
-    Client::with_options(opts).map_err(|e| {
-        log.error("mongo client build failed", logctx! { "err" => e.to_string() });
-        e.to_string()
-    })
+    fallback::connect_with_fallback(uri, log).await
 }
 
 pub fn active_client(state: &State<'_, AppState>, id: &str) -> Result<mongodb::Client, String> {
