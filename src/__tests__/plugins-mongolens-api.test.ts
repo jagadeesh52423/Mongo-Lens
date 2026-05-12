@@ -40,7 +40,7 @@ describe('mongolens facade', () => {
     const set = createRegistrySet();
     const api = createMongolens({
       pluginId: 'p1', registries: set,
-      services: { db: { find }, net: { fetch: vi.fn() } },
+      services: { db: { find }, net: { fetch: vi.fn() } } as never,
     });
     await expect(api.db.find('coll', {})).resolves.toEqual([1]);
   });
