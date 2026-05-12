@@ -139,6 +139,32 @@ export default function App() {
     };
   }, []);
 
+  // Bootstrap the plugin host: discover installed plugins and activate any
+  // that declare `onStartup`. Dynamic imports keep the Tauri FS adapter
+  // (which calls native APIs) out of the test bundle. A try/catch guards
+  // against non-Tauri environments (jsdom, unit tests).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { createTauriPluginFs } = await import('./plugins/io.tauri');
+        const fs = await createTauriPluginFs();
+        const { createPluginHost } = await import('./plugins/host');
+        const host = createPluginHost({
+          hostApiVersion: '1.0.0',
+          logger: console as never,  // replace with the app's structured logger
+          fs,
+          pluginsRoot: fs.pluginsRoot,
+        });
+        (window as Record<string, unknown>).__pluginHost = host;
+        await host.manager.discover();
+        if (!cancelled) await host.manager.activateStartup();
+      } catch {
+        // Tauri APIs unavailable (test environment or early startup failure).
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const [panel, setPanel] = useState<PanelKey>('connections');
   const [settingsOpen, setSettingsOpen] = useState(false);
