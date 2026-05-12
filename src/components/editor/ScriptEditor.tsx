@@ -10,6 +10,7 @@ interface HighlightRange {
 }
 
 interface Props {
+  tabId: string;
   value: string;
   onChange: (value: string) => void;
   modes: readonly ExecutionMode[];
@@ -22,6 +23,10 @@ interface Props {
 
 const HIGHLIGHT_CLASS = 'current-statement-highlight';
 const HIGHLIGHT_STYLE_ID = 'current-statement-highlight-style';
+
+export function modelPathForTab(tabId: string): string {
+  return `inmemory://tab/${encodeURIComponent(tabId)}.js`;
+}
 
 function ensureHighlightStyle() {
   if (typeof document === 'undefined') return;
@@ -36,6 +41,7 @@ type EditorInstance = Parameters<OnMount>[0];
 type MonacoInstance = Parameters<OnMount>[1];
 
 export function ScriptEditor({
+  tabId,
   value,
   onChange,
   modes,
@@ -175,6 +181,8 @@ export function ScriptEditor({
       height="100%"
       language="javascript"
       theme={MONACO_THEME_ID}
+      path={modelPathForTab(tabId)}
+      keepCurrentModel
       value={value}
       onChange={(v) => onChange(v ?? '')}
       onMount={handleMount}

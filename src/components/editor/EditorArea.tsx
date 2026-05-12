@@ -1,5 +1,7 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Panel, PanelGroup } from 'react-resizable-panels';
+import { loader } from '@monaco-editor/react';
+import { modelPathForTab } from './ScriptEditor';
 import { useEditorStore, DEFAULT_PANEL_SIZES } from '../../store/editor';
 import { useConnectionsStore } from '../../store/connections';
 import { ScriptEditor } from './ScriptEditor';
@@ -42,6 +44,23 @@ export function EditorArea() {
   const isRunning = useResultsStore((s) => (active ? !!s.byTab[active.id]?.isRunning : false));
   const log = useLogger('components.EditorArea');
   useTabActions();
+
+  const prevTabIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const current = new Set(tabs.map((t) => t.id));
+    const removed: string[] = [];
+    prevTabIdsRef.current.forEach((id) => {
+      if (!current.has(id)) removed.push(id);
+    });
+    prevTabIdsRef.current = current;
+    if (removed.length === 0) return;
+    const monaco = loader.__getMonacoInstance();
+    if (!monaco) return;
+    for (const id of removed) {
+      const uri = monaco.Uri.parse(modelPathForTab(id));
+      monaco.editor.getModel(uri)?.dispose();
+    }
+  }, [tabs]);
 
   const [cursorLines, setCursorLines] = useState<Record<string, number>>({});
   const [selections, setSelections] = useState<Record<string, string | null>>({});
@@ -251,6 +270,7 @@ export function EditorArea() {
             <Panel minSize={20} defaultSize={editorDefault}>
               <div style={{ height: '100%' }}>
                 <ScriptEditor
+                  tabId={active.id}
                   value={active.content}
                   onChange={(v) => updateContent(active.id, v)}
                   modes={getExecutionModes()}
