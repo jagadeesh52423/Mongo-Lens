@@ -9,3 +9,6 @@ src-tauri/gen
 .claude/
 .superpowers/
 .worktrees/
+
+# Standalone plugin source folders (kept out of the main repo)
+plugin-packages/
