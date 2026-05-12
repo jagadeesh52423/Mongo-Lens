@@ -1,15 +1,16 @@
+import { Registry } from '../plugins/Registry';
 import { ExecutionMode } from './types';
 
-const _modes: ExecutionMode[] = [];
+const _registry = new Registry<ExecutionMode>('builtinExecutionModes');
 
 export function registerExecutionMode(mode: ExecutionMode): void {
-  _modes.push(mode);
+  _registry.register(mode, '__builtin__');
 }
 
 export function getExecutionModes(): readonly ExecutionMode[] {
-  return _modes;
+  return _registry.list();
 }
 
 export function getExecutionMode(id: string): ExecutionMode | undefined {
-  return _modes.find(m => m.id === id);
+  return _registry.get(id);
 }
