@@ -22,7 +22,7 @@ describe('mongolens facade', () => {
       pluginId: 'p1', registries: set,
       services: { db: { find: vi.fn() }, net: { fetch: vi.fn() } } as never,
     });
-    api.commands.register('add', (a: number, b: number) => a + b);
+    api.commands.register('add', (a: unknown, b: unknown) => (a as number) + (b as number));
     await expect(api.commands.execute('add', 2, 3)).resolves.toBe(5);
   });
 
@@ -52,7 +52,7 @@ describe('mongolens facade', () => {
       pluginId: 'p1', registries: set,
       services: { db: { find: vi.fn() }, net: { fetch: vi.fn() } } as never,
     });
-    expect((api as Record<string, unknown>).broker).toBeUndefined();
+    expect((api as unknown as Record<string, unknown>).broker).toBeUndefined();
     new PermissionBroker(); // touch import so strict TS doesn't complain
   });
 });

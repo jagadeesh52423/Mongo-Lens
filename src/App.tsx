@@ -156,7 +156,7 @@ export default function App() {
           fs,
           pluginsRoot: fs.pluginsRoot,
         });
-        (window as Record<string, unknown>).__pluginHost = host;
+        (window as unknown as Record<string, unknown>).__pluginHost = host;
         await host.manager.discover();
         if (!cancelled) await host.manager.activateStartup();
       } catch {
