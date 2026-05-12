@@ -3,6 +3,7 @@ export const KNOWN_SCOPE_KINDS = [
   'network:fetch',
   'secrets:read', 'secrets:write',
   'workspace:read', 'workspace:write',
+  'connections:write',
 ] as const;
 
 export type ScopeKind = (typeof KNOWN_SCOPE_KINDS)[number];

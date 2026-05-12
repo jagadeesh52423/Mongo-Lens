@@ -1,5 +1,6 @@
 import { parseScope, matchesScope, KNOWN_SCOPE_KINDS } from '../plugins/permissions';
 
+
 describe('permissions', () => {
   it('parses scopes with no argument', () => {
     expect(parseScope('database:read')).toEqual({ kind: 'database:read' });
@@ -38,5 +39,23 @@ describe('permissions', () => {
     const granted = [parseScope('network:fetch:https://*.acme.com')];
     expect(matchesScope(granted, { kind: 'network:fetch', arg: 'https://api.acme.com/v1' })).toBe(true);
     expect(matchesScope(granted, { kind: 'network:fetch', arg: 'https://evil.com/' })).toBe(false);
+  });
+});
+
+describe('connections:write scope', () => {
+  it('parses connections:write as a known scope', () => {
+    expect(parseScope('connections:write')).toEqual({ kind: 'connections:write' });
+  });
+
+  it('rejects connections:read (not in known kinds yet)', () => {
+    expect(() => parseScope('connections:read')).toThrow(/Unknown scope kind/);
+  });
+
+  it('matches granted connections:write against requested connections:write', () => {
+    expect(matchesScope([{ kind: 'connections:write' }], { kind: 'connections:write' })).toBe(true);
+  });
+
+  it('does not match when not granted', () => {
+    expect(matchesScope([{ kind: 'secrets:read' }], { kind: 'connections:write' })).toBe(false);
   });
 });
