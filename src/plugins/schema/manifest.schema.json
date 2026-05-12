@@ -1,0 +1,43 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["id", "name", "version", "engines", "main"],
+  "additionalProperties": false,
+  "properties": {
+    "id":      { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*\\.[a-z0-9][a-z0-9-]*$" },
+    "name":    { "type": "string", "minLength": 1 },
+    "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+(?:-[A-Za-z0-9.-]+)?$" },
+    "engines": {
+      "type": "object",
+      "required": ["mongolens"],
+      "properties": { "mongolens": { "type": "string", "minLength": 1 } },
+      "additionalProperties": false
+    },
+    "main": { "type": "string", "minLength": 1 },
+    "permissions": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^(database:(read|write)|network:fetch:.+|secrets:(read|write)|workspace:(read|write))$" },
+      "uniqueItems": true
+    },
+    "activationEvents": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^(onCommand:|onView:|onExecutionMode:|onConnectionProvider:|onExportTarget:).+|^onStartup$" },
+      "uniqueItems": true
+    },
+    "contributes": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "commands":            { "type": "array", "items": { "type": "object", "required": ["id","title"], "properties": { "id":{"type":"string"},"title":{"type":"string"},"category":{"type":"string"} } } },
+        "keybindings":         { "type": "array", "items": { "type": "object", "required": ["command","mac"], "properties": { "command":{"type":"string"},"mac":{"type":"string"},"when":{"type":"string"} } } },
+        "views":               { "type": "array", "items": { "type": "object", "required": ["id","title","location"], "properties": { "id":{"type":"string"},"title":{"type":"string"},"location":{"enum":["sidebar","panel"]} } } },
+        "resultViewers":       { "type": "array", "items": { "type": "object", "required": ["id","title"], "properties": { "id":{"type":"string"},"title":{"type":"string"},"when":{"type":"string"} } } },
+        "executionModes":      { "type": "array", "items": { "type": "object", "required": ["id","title"], "properties": { "id":{"type":"string"},"title":{"type":"string"} } } },
+        "aiTools":             { "type": "array", "items": { "type": "object", "required": ["id","schema"], "properties": { "id":{"type":"string"},"schema":{"type":"string"} } } },
+        "connectionProviders": { "type": "array", "items": { "type": "object", "required": ["id","title"], "properties": { "id":{"type":"string"},"title":{"type":"string"} } } },
+        "themes":              { "type": "array", "items": { "type": "object", "required": ["id","path"], "properties": { "id":{"type":"string"},"path":{"type":"string"} } } },
+        "exportTargets":       { "type": "array", "items": { "type": "object", "required": ["id","title","formats"], "properties": { "id":{"type":"string"},"title":{"type":"string"},"formats":{"type":"array","items":{"type":"string"}} } } }
+      }
+    }
+  }
+}
