@@ -65,6 +65,7 @@ pub async fn list_collections(
     let mut names = client
         .database(&database)
         .list_collection_names()
+        .authorized_collections(true)
         .await
         .map_err(|e| {
             log.error("list_collection_names failed", logctx! { "err" => e.to_string() });
