@@ -25,6 +25,11 @@ export class Registry<T extends { id: string }> {
     return this.entries.get(id)?.item;
   }
 
+  /** Returns the pluginId that registered this id, or undefined if not found. */
+  getOwner(id: string): string | undefined {
+    return this.entries.get(id)?.owner;
+  }
+
   list(): readonly T[] {
     return Array.from(this.entries.values(), e => e.item);
   }

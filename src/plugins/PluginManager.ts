@@ -106,10 +106,16 @@ export class PluginManager {
     const ctx       = createExtensionContext({ pluginId: id, storagePath: `${rec.dir}/.data`, secrets, logger });
     const backend: HostBackend = this.opts.hostBackend ?? defaultBackend();
     const services  = createHostServices({ broker: this.opts.broker, pluginId: id, backend });
-    const api: MongolensAPI = createMongolens({ pluginId: id, registries: this.opts.registries, services });
+    const api: MongolensAPI = createMongolens({ pluginId: id, registries: this.opts.registries, services, logger: this.opts.logger });
     this.contexts.set(id, ctx);
 
     const result = await runInPluginSandbox(id, async () => {
+      // Guard against concurrent activate() calls racing on the shared global.
+      // Sequential today (activateForEvent awaits each call), but public API
+      // allows parallel callers. Fail fast rather than silently mixing bindings.
+      if ('mongolens' in globalThis) {
+        throw new Error('Concurrent plugin activation is not supported — activate() must be called sequentially');
+      }
       // Inject `mongolens` BEFORE loading so the CJS test-path fallback in
       // defaultLoader can capture it when building the module via new Function().
       // The production blob-URL path reads it via closure at activate() call-time,

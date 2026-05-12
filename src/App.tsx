@@ -140,10 +140,12 @@ export default function App() {
   }, []);
 
   // Bootstrap the plugin host: discover installed plugins and activate any
-  // that declare `onStartup`. Dynamic imports keep the Tauri FS adapter
-  // (which calls native APIs) out of the test bundle. A try/catch guards
-  // against non-Tauri environments (jsdom, unit tests).
+  // that declare `onStartup`. Guard on __TAURI_INTERNALS__ so this is a
+  // no-op in jsdom / unit tests (where Tauri IPC is absent) while still
+  // surfacing real Tauri-side failures (FS errors, broken plugins) via
+  // console.error so they appear in devtools and crash reports.
   useEffect(() => {
+    if (!('__TAURI_INTERNALS__' in window)) return; // not in Tauri renderer
     let cancelled = false;
     (async () => {
       try {
@@ -159,8 +161,8 @@ export default function App() {
         (window as unknown as Record<string, unknown>).__pluginHost = host;
         await host.manager.discover();
         if (!cancelled) await host.manager.activateStartup();
-      } catch {
-        // Tauri APIs unavailable (test environment or early startup failure).
+      } catch (e) {
+        console.error('Plugin host bootstrap failed', e);
       }
     })();
     return () => { cancelled = true; };
