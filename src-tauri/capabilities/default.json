@@ -21,7 +21,9 @@
       "identifier": "fs:scope",
       "allow": [
         { "path": "$HOME" },
-        { "path": "$HOME/**" }
+        { "path": "$HOME/**" },
+        { "path": "$HOME/.mongomacapp" },
+        { "path": "$HOME/.mongomacapp/**" }
       ]
     },
     "store:default"
