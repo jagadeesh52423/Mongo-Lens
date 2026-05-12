@@ -34,6 +34,30 @@ impl ConnectFallback for DirectReadPrefFallback {
     }
 }
 
+use mongodb::options::TlsOptions;
+
+/// Recovers from TLS-handshake / "connection closed" errors when connecting to
+/// managed clusters (Atlas, DocumentDB) that require TLS by default.
+pub struct TlsFallback;
+
+impl ConnectFallback for TlsFallback {
+    fn id(&self) -> &'static str { "tls" }
+
+    fn matches(&self, err: &MongoError) -> bool {
+        let msg = err.to_string().to_lowercase();
+        msg.contains("tls")
+            || msg.contains("ssl")
+            || msg.contains("connection closed")
+            || msg.contains("handshake")
+    }
+
+    fn apply(&self, opts: &mut ClientOptions) {
+        if opts.tls.is_none() {
+            opts.tls = Some(mongodb::options::Tls::Enabled(TlsOptions::default()));
+        }
+    }
+}
+
 #[cfg(test)]
 fn make_err(msg: &str) -> MongoError {
     // The mongodb 3.x driver doesn't expose a public `Error::custom` constructor.
@@ -92,5 +116,43 @@ mod tests {
             opts.selection_criteria,
             Some(SelectionCriteria::ReadPreference(ReadPreference::Primary))
         ));
+    }
+}
+
+#[cfg(test)]
+mod tls_tests {
+    use super::*;
+
+    #[test]
+    fn matches_tls_error() {
+        let err = make_err("TLS handshake failed");
+        assert!(TlsFallback.matches(&err));
+    }
+
+    #[test]
+    fn matches_connection_closed() {
+        let err = make_err("connection closed unexpectedly");
+        assert!(TlsFallback.matches(&err));
+    }
+
+    #[test]
+    fn does_not_match_auth_error() {
+        let err = make_err("authentication failed");
+        assert!(!TlsFallback.matches(&err));
+    }
+
+    #[test]
+    fn apply_enables_tls_when_absent() {
+        let mut opts = ClientOptions::default();
+        TlsFallback.apply(&mut opts);
+        assert!(matches!(opts.tls, Some(mongodb::options::Tls::Enabled(_))));
+    }
+
+    #[test]
+    fn apply_preserves_user_tls_disabled() {
+        let mut opts = ClientOptions::default();
+        opts.tls = Some(mongodb::options::Tls::Disabled);
+        TlsFallback.apply(&mut opts);
+        assert!(matches!(opts.tls, Some(mongodb::options::Tls::Disabled)));
     }
 }

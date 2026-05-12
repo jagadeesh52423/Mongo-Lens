@@ -18,6 +18,7 @@ pub fn registry() -> &'static [&'static dyn ConnectFallback] {
     // Order matters: try cheaper / more common fallbacks first.
     static REG: &[&dyn ConnectFallback] = &[
         &crate::mongo::strategies::DirectReadPrefFallback,
+        &crate::mongo::strategies::TlsFallback,
     ];
     REG
 }
