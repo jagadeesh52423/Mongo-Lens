@@ -21,8 +21,11 @@ export interface MongolensAPI {
   themes:              { register(v: ThemeContract): Disposable };
   exportTargets:       { register(v: ExportTargetContract): Disposable };
 
-  db:  HostServices['db'];
-  net: HostServices['net'];
+  db:          HostServices['db'];
+  net:         HostServices['net'];
+  connections: HostServices['connections'];
+  secrets:     HostServices['secrets'];
+  workspace:   HostServices['workspace'];
 }
 
 export function createMongolens(params: {
@@ -58,7 +61,10 @@ export function createMongolens(params: {
     themes:              { register: v => r.themes.register(v, pluginId) },
     exportTargets:       { register: v => r.exportTargets.register(v, pluginId) },
 
-    db:  services.db,
-    net: services.net,
+    db:          services.db,
+    net:         services.net,
+    connections: services.connections,
+    secrets:     services.secrets,
+    workspace:   services.workspace,
   };
 }
