@@ -110,15 +110,16 @@ export class PluginManager {
     this.contexts.set(id, ctx);
 
     const result = await runInPluginSandbox(id, async () => {
-      const mod = this.opts.entryLoader
-        ? await this.opts.entryLoader(rec)
-        : await defaultLoader(this.opts.fs, rec);
-      this.loadedModules.set(id, mod);
-      // Inject `mongolens` into the plugin's scope by attaching to globalThis
-      // for the duration of activate(). The wrapper IIFE shadows other globals but
-      // lets `mongolens` through. Simplest cross-bundler injection point.
+      // Inject `mongolens` BEFORE loading so the CJS test-path fallback in
+      // defaultLoader can capture it when building the module via new Function().
+      // The production blob-URL path reads it via closure at activate() call-time,
+      // but the CJS path captures it at load-time — so the order matters.
       (globalThis as Record<string, unknown>).mongolens = api;
       try {
+        const mod = this.opts.entryLoader
+          ? await this.opts.entryLoader(rec)
+          : await defaultLoader(this.opts.fs, rec);
+        this.loadedModules.set(id, mod);
         if (typeof mod.activate === 'function') await mod.activate(ctx);
       } finally {
         delete (globalThis as Record<string, unknown>).mongolens;
