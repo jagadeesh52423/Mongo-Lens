@@ -142,10 +142,12 @@ export interface PortalClient {
   "main": "dist/extension.js",
   "activationEvents": ["onView:datafleet.requests"],
   "permissions": [
-    "net:https://o7yd4zabrg.execute-api.ap-south-1.amazonaws.com/*",
+    "network:fetch:https://o7yd4zabrg.execute-api.ap-south-1.amazonaws.com/*",
     "connections:write",
-    "secrets:datafleet/*",
-    "workspace:datafleet/*"
+    "secrets:read",
+    "secrets:write",
+    "workspace:read",
+    "workspace:write"
   ],
   "contributes": {
     "views": [
@@ -242,7 +244,7 @@ Fetched passwords are **never** persisted. They live on the request row in React
 | `src/plugins/api/contracts.ts` | Add `ConnectionRef`, `ConnectionsApi`; extend `Mongolens` |
 | `src/plugins/permissions.ts` | Add `"connections"` to `KNOWN_SCOPE_KINDS`; verb-only matcher |
 | `src/plugins/api/createMongolens.ts` | Wire `connections` namespace with permission checks + audit |
-| `src/plugins/api/hostServices.ts` | Add `connections` service: `list()` → `listConnections` IPC; `updateCredentials(id, pwd)` → `updateConnection(id, { password: pwd })` IPC |
+| `src/plugins/hostServices.ts` | Add `connections` service: `list()` → `listConnections` IPC; `updateCredentials(id, pwd)` → `updateConnection(id, { password: pwd })` IPC. Also surface `secrets` and `workspace` namespaces (using existing `InMemorySecretStorage`; new in-memory `WorkspaceStore`). |
 | `src/plugins/api/__tests__/connections.test.ts` | New unit tests for the namespace |
 | `src/plugins/__tests__/permissions.test.ts` | Extend with `connections:write` cases |
 
@@ -256,6 +258,7 @@ See §5.1 for the full layout.
 - **SecretStorage backend is in-memory today.** Saved LDAP creds will not survive an app restart until the Keychain backend (Part 2 backlog) lands. Plugin behaves correctly in both worlds — it just re-prompts more often today. Surfaced to the user via inline hint in the LDAP prompt.
 - **Permission scope creep.** `connections:write` covers both `list` and `updateCredentials`. If a future use case needs a read-only list without write authority, the scope must be split into `connections:read` and `connections:write`. Called out so the next plugin author doesn't add a second namespace for it.
 - **Race between picker render and attach.** Connection can be deleted in the host between `list()` and `updateCredentials()`. Already covered in §7.
+- **Permission grain on `secrets`/`workspace`.** Today's host scopes are coarse (`secrets:read`, `secrets:write`, `workspace:read`, `workspace:write`). The plugin gets access to *all* of its own secrets and workspace data, not just `datafleet/*`. Per-prefix scoping is deferred. Each plugin already has a sandboxed key namespace (via `namespaceFor(pluginId, key)`), so this is a small risk increase but worth noting.
 
 ## 11. Out-of-spec follow-ups
 
