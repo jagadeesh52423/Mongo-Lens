@@ -46,7 +46,14 @@ pub async fn ping(uri: &str, log: &dyn Logger) -> Result<(), String> {
     fallback::connect_with_fallback(uri, log).await.map(|_| ())
 }
 
-pub async fn client_for(uri: &str, log: &dyn Logger) -> Result<mongodb::Client, String> {
+/// Returns the connected client and the URI variant that actually succeeded (with any
+/// fallback query params appended). Callers should propagate the returned URI to any
+/// downstream consumer that needs its own connection (e.g., the Node query runner) so
+/// the same fallback that made the Rust connect succeed also applies there.
+pub async fn client_for(
+    uri: &str,
+    log: &dyn Logger,
+) -> Result<(mongodb::Client, String), String> {
     log.info("mongo connect", logctx! { "uri" => uri });
     fallback::connect_with_fallback(uri, log).await
 }
@@ -80,6 +87,13 @@ pub fn active_client(state: &State<'_, AppState>, id: &str) -> Result<mongodb::C
         .get(id)
         .cloned()
         .ok_or_else(|| "connection not active — connect first".to_string())
+}
+
+/// Returns the URI that the cached client connected with (with any fallback query
+/// params applied). Falls back to `None` if the connection isn't active, letting the
+/// caller decide whether to rebuild a URI from the raw connection record.
+pub fn active_uri(state: &State<'_, AppState>, id: &str) -> Option<String> {
+    state.mongo_uris.lock().unwrap().get(id).cloned()
 }
 
 #[cfg(test)]

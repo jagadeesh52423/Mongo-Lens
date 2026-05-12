@@ -11,6 +11,9 @@ pub struct AppState {
     pub db_path: PathBuf,
     pub logs_dir: PathBuf,
     pub mongo_clients: Mutex<HashMap<String, Client>>,
+    /// URI variant (with any fallback query params applied) that the cached client
+    /// actually connected with. Keyed by connection id, mirrors `mongo_clients`.
+    pub mongo_uris: Mutex<HashMap<String, String>>,
     /// Per-tab cancel flag. Set to true to signal the running script to abort.
     pub active_scripts: Mutex<HashMap<String, Arc<AtomicBool>>>,
     /// Generic logger handle used by commands and the runner executor.
@@ -27,6 +30,7 @@ impl AppState {
             db_path,
             logs_dir,
             mongo_clients: Mutex::new(HashMap::new()),
+            mongo_uris: Mutex::new(HashMap::new()),
             active_scripts: Mutex::new(HashMap::new()),
             logger,
             tracing_logger: Some(tracing_logger),

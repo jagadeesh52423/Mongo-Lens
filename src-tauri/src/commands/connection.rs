@@ -156,8 +156,8 @@ pub fn delete_connection(state: State<'_, AppState>, id: String) -> Result<(), S
         e.to_string()
     })?;
     keychain::delete_password(&id, log.as_ref())?;
-    let mut clients = state.mongo_clients.lock().unwrap();
-    clients.remove(&id);
+    state.mongo_clients.lock().unwrap().remove(&id);
+    state.mongo_uris.lock().unwrap().remove(&id);
     Ok(())
 }
 
@@ -225,8 +225,9 @@ pub async fn connect_connection(
     drop(conn);
     let pw = keychain::get_password(&id, log.as_ref())?;
     let uri = mongo::build_uri(&rec, pw.as_deref());
-    let client = mongo::client_for(&uri, log.as_ref()).await?;
-    state.mongo_clients.lock().unwrap().insert(id, client);
+    let (client, winning_uri) = mongo::client_for(&uri, log.as_ref()).await?;
+    state.mongo_clients.lock().unwrap().insert(id.clone(), client);
+    state.mongo_uris.lock().unwrap().insert(id, winning_uri);
     log.info("connect_connection ok", logctx! {});
     Ok(())
 }
@@ -239,5 +240,6 @@ pub fn disconnect_connection(state: State<'_, AppState>, id: String) -> Result<(
     });
     log.info("disconnect_connection", logctx! {});
     state.mongo_clients.lock().unwrap().remove(&id);
+    state.mongo_uris.lock().unwrap().remove(&id);
     Ok(())
 }

@@ -101,8 +101,16 @@ pub async fn run_script(
             "connection not found".to_string()
         })?;
     drop(conn);
-    let pw = keychain::get_password(&connection_id, log.as_ref())?;
-    let uri = mongo::build_uri(&rec, pw.as_deref());
+    // Prefer the URI that the active client succeeded with — it already has whatever
+    // fallback params (directConnection, tls) were needed to reach the cluster, so the
+    // Node runner doesn't repeat the 30s SDAM hang the Rust side already worked around.
+    let uri = match mongo::active_uri(&state, &connection_id) {
+        Some(u) => u,
+        None => {
+            let pw = keychain::get_password(&connection_id, log.as_ref())?;
+            mongo::build_uri(&rec, pw.as_deref())
+        }
+    };
     log.debug("resolved host", logctx! { "host" => rec.host.clone() });
 
     let tmp_dir = std::env::temp_dir();
