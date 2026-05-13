@@ -9,6 +9,7 @@ Folder layout:
 ```
 my-plugin/
   ├── manifest.json
+  ├── README.md
   └── dist/main.js
 ```
 
@@ -61,6 +62,23 @@ export function activate(context) {
 >
 > The host plans to keep `globalThis.mongolens` alive for the plugin's full
 > lifetime in a future release; until then, capture explicitly.
+
+## Required files & enforcement rules
+
+Every plugin is checked against a set of enforcement rules at discovery. Findings appear in **Settings → Plugins** beside the plugin and on its detail pane.
+
+| Rule id | Required file / check | Severity | Fix |
+|---------|----------------------|----------|-----|
+| `core.readme-present` | `README.md` at plugin root, non-empty | warning | Add a `README.md` describing what your plugin does, how to enable it, and any permissions it requests. |
+
+**Severities:**
+
+- **`error`** — the plugin cannot be enabled until you fix it. The Enable button is disabled and the failure message appears on the detail pane.
+- **`warning`** — the plugin can still be enabled, but the ⚠ badge stays in the list until you fix it.
+
+**README content.** Rendered on the plugin's detail pane as sanitized markdown. Headings, lists, code blocks, tables, and intra-document anchor links (`[section](#section)`) are supported. **Images, external links (`http(s):`, `mailto:`, etc.), `<script>`, `<style>`, inline event handlers, and `<form>` are stripped** — README content ships with untrusted plugin code, so the host treats it as untrusted text.
+
+Write your README assuming it will be the first thing a user sees when they click on your plugin in Settings.
 
 ## Install
 
