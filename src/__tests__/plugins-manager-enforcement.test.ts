@@ -70,3 +70,54 @@ describe('PluginManager enforcement integration', () => {
       findings: [{ ruleId: 'r', severity: 'error', message: 'm' }] })).toBe(true);
   });
 });
+
+describe('PluginManager activate gating', () => {
+  it('refuses activation when an error-severity finding exists', async () => {
+    const enforcement = new EnforcementRegistry();
+    enforcement.register(makeRule('err.rule', [{ severity: 'error', message: 'fatal flaw' }]));
+    const logger = silentLogger();
+    const mgr = new PluginManager({
+      registries: createRegistrySet(),
+      broker: new PermissionBroker(),
+      hostApiVersion: '1.0.0',
+      logger,
+      fs: {
+        listPluginDirs: async () => ['/plugins/acme.foo'],
+        readManifest:    async () => JSON.stringify(MANIFEST),
+        readEntry:       async () => 'export function activate(){}',
+        pluginEntryPath: (d, m) => `${d}/${m}`,
+      },
+      enforcement,
+    });
+    await mgr.discover();
+    await mgr.activate('acme.foo');
+    const rec = mgr.get('acme.foo')!;
+    expect(rec.state).toBe('failed');
+    expect(rec.errors).toEqual(['fatal flaw']);
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringMatching(/blocking/i),
+      expect.objectContaining({ id: 'acme.foo' }),
+    );
+  });
+
+  it('allows activation when only warning findings exist', async () => {
+    const enforcement = new EnforcementRegistry();
+    enforcement.register(makeRule('warn.rule', [{ severity: 'warning', message: 'cosmetic' }]));
+    const mgr = new PluginManager({
+      registries: createRegistrySet(),
+      broker: new PermissionBroker(),
+      hostApiVersion: '1.0.0',
+      logger: silentLogger(),
+      fs: {
+        listPluginDirs: async () => ['/plugins/acme.foo'],
+        readManifest:    async () => JSON.stringify(MANIFEST),
+        readEntry:       async () => 'export function activate(){}',
+        pluginEntryPath: (d, m) => `${d}/${m}`,
+      },
+      enforcement,
+    });
+    await mgr.discover();
+    await mgr.activate('acme.foo');
+    expect(mgr.get('acme.foo')!.state).toBe('active');
+  });
+});

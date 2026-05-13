@@ -110,6 +110,12 @@ export class PluginManager {
       return;
     }
     if (rec.state === 'active' || rec.state === 'activating') return;
+    if (hasBlockingFindings(rec)) {
+      rec.state = 'failed';
+      rec.errors = rec.findings.filter(f => f.severity === 'error').map(f => f.message);
+      this.opts.logger.warn('activate: blocking findings prevent activation', { id, findings: rec.errors });
+      return;
+    }
     rec.state = 'activating';
 
     // Apply granted scopes (parsed from manifest.permissions for v1 — consent dialog
