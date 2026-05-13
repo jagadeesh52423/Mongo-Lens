@@ -29,6 +29,7 @@ export interface ViewContext { container: HTMLElement; }
 export interface ViewProvider {
   id: string;
   title: string;
+  icon?: string;
   location: 'sidebar' | 'panel';
   render(container: HTMLElement, ctx: ViewContext): Disposable;
 }
