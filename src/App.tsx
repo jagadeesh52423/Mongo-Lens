@@ -1,12 +1,22 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, createElement } from 'react';
+import { createRoot } from 'react-dom/client';
 import { Panel, PanelGroup, type ImperativePanelHandle } from 'react-resizable-panels';
-import { IconRail, type PanelKey } from './components/layout/IconRail';
+import { IconRail } from './components/layout/IconRail';
 import { SidePanel } from './components/layout/SidePanel';
 import { SplashScreen } from './components/layout/SplashScreen';
 import { StatusBar } from './components/layout/StatusBar';
 import { ConnectionPanel } from './components/connections/ConnectionPanel';
 import { EditorArea } from './components/editor/EditorArea';
 import { SavedScriptsPanel } from './components/saved-scripts/SavedScriptsPanel';
+import {
+  BuiltInActivityRegistry,
+  PluginActivityRegistry,
+  CompositeActivityRegistry,
+  resolveActiveId,
+  type ActivityItem,
+} from './layout/activityBar';
+import type { Registry } from './plugins/Registry';
+import type { ViewProvider } from './plugins/api/contracts';
 import { SettingsView } from './settings/SettingsView';
 import { SplitHandle } from './components/shared/SplitHandle';
 import { AIFloatingButton } from './components/ai/AIFloatingButton';
@@ -25,6 +35,31 @@ import { chatHistoryManager } from './services/ai/ChatHistoryManager';
 
 const openSettingsDef = DEFAULT_SHORTCUTS.find((d) => d.id === 'open-settings');
 if (openSettingsDef) keyboardService.defineShortcut(openSettingsDef);
+
+function makeBuiltInRegistry(): BuiltInActivityRegistry {
+  const reg = new BuiltInActivityRegistry();
+  reg.add({
+    id: 'connections',
+    title: 'Connections',
+    icon: '⚡',
+    render: (container) => {
+      const root = createRoot(container);
+      root.render(createElement(ConnectionPanel));
+      return { dispose() { root.unmount(); } };
+    },
+  });
+  reg.add({
+    id: 'saved',
+    title: 'Saved Scripts',
+    icon: '⭐',
+    render: (container) => {
+      const root = createRoot(container);
+      root.render(createElement(SavedScriptsPanel));
+      return { dispose() { root.unmount(); } };
+    },
+  });
+  return reg;
+}
 
 export default function App() {
   const log = useLogger('components.App');
@@ -187,7 +222,42 @@ export default function App() {
     return () => { cancelled = true; };
   }, []);
 
-  const [panel, setPanel] = useState<PanelKey>('connections');
+  const persistedActiveId  = useSettingsStore(s => s.activeActivityItemId);
+  const setPersistedActive = useSettingsStore(s => s.setActiveActivityItemId);
+  const [items, setItems]  = useState<ActivityItem[]>([]);
+
+  useEffect(() => {
+    const builtIns = makeBuiltInRegistry();
+    let composite: CompositeActivityRegistry = new CompositeActivityRegistry([builtIns]);
+    setItems(composite.list());
+
+    let pluginSub: { dispose(): void } | null = null;
+    let topSub:    { dispose(): void } | null = null;
+
+    // Wait for the plugin host bootstrap to complete; it sets window.__pluginHost.
+    const trySubscribe = () => {
+      const host = (window as unknown as { __pluginHost?: { registries: { views: Registry<ViewProvider> } } }).__pluginHost;
+      if (!host) { setTimeout(trySubscribe, 50); return; }
+      const pluginReg = new PluginActivityRegistry(host.registries.views);
+      composite = new CompositeActivityRegistry([builtIns, pluginReg]);
+      setItems(composite.list());
+      pluginSub = pluginReg.onDidChange(() => setItems(composite.list()));
+      topSub = composite.onDidChange(() => setItems(composite.list()));
+    };
+    trySubscribe();
+
+    return () => {
+      pluginSub?.dispose();
+      topSub?.dispose();
+    };
+  }, []);
+
+  const activeId = resolveActiveId(items, persistedActiveId);
+
+  function onChangeActive(id: string) {
+    setPersistedActive(id);
+  }
+
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [showSplash, setShowSplash] = useState(true);
   const { connections, activeConnectionId, activeDatabase } = useConnectionsStore();
@@ -318,8 +388,9 @@ export default function App() {
       {showSplash && <SplashScreen onDone={() => setShowSplash(false)} />}
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
         <IconRail
-          active={panel}
-          onChange={setPanel}
+          items={items}
+          activeId={activeId}
+          onChange={onChangeActive}
           onSettingsOpen={() => setSettingsOpen((s) => !s)}
           settingsOpen={settingsOpen}
         />
@@ -335,10 +406,7 @@ export default function App() {
                 collapsible
                 collapsedSize={0}
               >
-                <SidePanel active={panel}>
-                  {panel === 'connections' && <ConnectionPanel />}
-                  {panel === 'saved' && <SavedScriptsPanel />}
-                </SidePanel>
+                <SidePanel item={items.find(i => i.id === activeId) ?? null} />
               </Panel>
               <SplitHandle direction="horizontal" />
               <Panel minSize={50} defaultSize={80}>
