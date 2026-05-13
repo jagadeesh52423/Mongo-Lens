@@ -15,6 +15,7 @@ import { parseScope } from './permissions';
 import { Registry } from './Registry';
 import { EnforcementRegistry } from './enforcement';
 import type { Finding } from './enforcement';
+import type { KeychainBackend, WorkspaceLike } from './config';
 
 export type PluginState =
   | 'discovered'      // manifest valid, contributions registered, not activated
@@ -45,6 +46,8 @@ interface ManagerOptions {
   hostBackend?: HostBackend;
   entryLoader?: (record: PluginRecord) => Promise<LoadedModule>;
   enforcement?: EnforcementRegistry;
+  workspace?: WorkspaceLike;
+  keychain?: KeychainBackend;
 }
 
 export class PluginManager {
@@ -88,7 +91,13 @@ export class PluginManager {
         this.opts.logger.warn('Plugin incompatible with host', { id: v.manifest.id });
         return;
       }
-      const findings = await this.enforcement.runAll({ pluginDir: dir, manifest: v.manifest, fs: this.opts.fs });
+      const findings = await this.enforcement.runAll({
+        pluginDir: dir,
+        manifest: v.manifest,
+        fs: this.opts.fs,
+        workspace: this.opts.workspace,
+        keychain: this.opts.keychain,
+      });
       this.records.set(v.manifest.id, {
         id: v.manifest.id,
         dir,
@@ -206,6 +215,18 @@ export class PluginManager {
 
   async activateStartup(): Promise<void> {
     await this.activateForEvent('onStartup');
+  }
+
+  async recheckEnforcement(pluginId: string): Promise<void> {
+    const rec = this.records.get(pluginId);
+    if (!rec || !rec.manifest) return;
+    rec.findings = await this.enforcement.runAll({
+      pluginDir: rec.dir,
+      manifest: rec.manifest,
+      fs: this.opts.fs,
+      workspace: this.opts.workspace,
+      keychain: this.opts.keychain,
+    });
   }
 
   async install(srcDir: string): Promise<string> {
