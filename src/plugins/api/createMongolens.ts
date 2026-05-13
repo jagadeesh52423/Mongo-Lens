@@ -7,6 +7,7 @@ import {
   Command, ResultViewer, ViewProvider, ExecutionModeContract,
   AITool, ConnectionProvider, ThemeContract, ExportTargetContract,
 } from './contracts';
+import type { ConfigChangeEvent } from '../config';
 
 export interface MongolensAPI {
   commands: {
@@ -26,6 +27,12 @@ export interface MongolensAPI {
   connections: HostServices['connections'];
   secrets:     HostServices['secrets'];
   workspace:   HostServices['workspace'];
+  config: {
+    get<T = unknown>(key: string): Promise<T | undefined>;
+    getAll(): Promise<Record<string, unknown>>;
+    set(key: string, value: unknown): Promise<void>;
+    onDidChange(listener: (e: ConfigChangeEvent) => void): { dispose(): void };
+  };
 }
 
 export function createMongolens(params: {
@@ -77,5 +84,11 @@ export function createMongolens(params: {
     connections: services.connections,
     secrets:     services.secrets,
     workspace:   services.workspace,
+    config: services.config ?? {
+      get:         async () => undefined,
+      getAll:      async () => ({}),
+      set:         async () => { throw new Error('Plugin has no contributes.configuration'); },
+      onDidChange: () => ({ dispose() {} }),
+    },
   };
 }
