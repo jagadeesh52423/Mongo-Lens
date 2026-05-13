@@ -1,6 +1,7 @@
 export * from './types';
 export { validateConfig } from './schemaValidator';
-export { KeychainBackend, InMemoryKeychainBackend, KeychainLockedError } from './keychainBackend';
+export type { KeychainBackend } from './keychainBackend';
+export { InMemoryKeychainBackend, KeychainLockedError } from './keychainBackend';
 export { TauriKeychainBackend } from './keychainBackend.tauri';
 export { ConfigStore } from './ConfigStore';
 export type { WorkspaceLike } from './ConfigStore';

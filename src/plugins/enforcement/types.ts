@@ -1,10 +1,13 @@
 import type { PluginManifest } from '../manifest';
 import type { PluginFs } from '../io';
+import type { KeychainBackend, WorkspaceLike } from '../config';
 
 export interface RuleContext {
   pluginDir: string;
   manifest: PluginManifest;
   fs: PluginFs;
+  workspace?: WorkspaceLike;
+  keychain?: KeychainBackend;
 }
 
 export interface Finding {
