@@ -1,5 +1,11 @@
+// Scrubbed by bare-identifier shadow only. We intentionally do NOT shadow
+// `window` / `self` / `globalThis` — bundled libraries (React DOM in
+// particular) probe those at module init and break when the binding is
+// undefined. The sandbox is a "soft" boundary: it discourages direct use
+// of network/storage/Tauri APIs by making the bare identifiers undefined,
+// but a plugin that wants to bypass via `window.fetch(...)` can — that's
+// covered by the trust-on-install model, not by the wrapper.
 const SCRUBBED_GLOBALS = [
-  'window', 'self', 'globalThis',
   'fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource',
   'localStorage', 'sessionStorage', 'indexedDB',
   '__TAURI__', '__TAURI_INVOKE__', '__TAURI_INTERNALS__',
