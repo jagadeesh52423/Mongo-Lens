@@ -3,7 +3,7 @@ import schema from './schema/manifest.schema.json';
 
 export interface CommandContribution      { id: string; title: string; category?: string }
 export interface KeybindingContribution   { command: string; mac: string; when?: string }
-export interface ViewContribution         { id: string; title: string; location: 'sidebar' | 'panel' }
+export interface ViewContribution         { id: string; title: string; icon?: string; location: 'sidebar' | 'panel' }
 export interface ResultViewerContribution { id: string; title: string; when?: string }
 export interface ExecutionModeContrib     { id: string; title: string }
 export interface AIToolContribution       { id: string; schema: string }

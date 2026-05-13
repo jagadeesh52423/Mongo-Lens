@@ -33,8 +33,14 @@ export function createMongolens(params: {
   registries: RegistrySet;
   services: HostServices;
   logger?: Logger;
+  manifest?: { contributes?: { views?: { id: string; icon?: string }[] } };
 }): MongolensAPI {
-  const { pluginId, registries: r, services } = params;
+  const { pluginId, registries: r, services, manifest } = params;
+
+  function manifestIconFor(viewId: string): string | undefined {
+    return manifest?.contributes?.views?.find(v => v.id === viewId)?.icon;
+  }
+
   return {
     commands: {
       register(id, handler) { return r.commands.register({ id, handler }, pluginId); },
@@ -53,7 +59,12 @@ export function createMongolens(params: {
         return result.value;
       },
     },
-    views:               { register: v => r.views.register(v, pluginId) },
+    views: {
+      register: v => r.views.register(
+        v.icon ? v : { ...v, icon: manifestIconFor(v.id) },
+        pluginId,
+      ),
+    },
     resultViewers:       { register: v => r.resultViewers.register(v, pluginId) },
     executionModes:      { register: v => r.executionModes.register(v, pluginId) },
     aiTools:             { register: v => r.aiTools.register(v, pluginId) },

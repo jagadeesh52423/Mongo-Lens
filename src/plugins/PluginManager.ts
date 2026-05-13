@@ -108,7 +108,7 @@ export class PluginManager {
     const ctx       = createExtensionContext({ pluginId: id, storagePath: `${rec.dir}/.data`, secrets, logger });
     const backend: HostBackend = this.opts.hostBackend ?? defaultBackend();
     const services  = createHostServices({ broker: this.opts.broker, pluginId: id, backend, secrets, workspace });
-    const api: MongolensAPI = createMongolens({ pluginId: id, registries: this.opts.registries, services, logger: this.opts.logger });
+    const api: MongolensAPI = createMongolens({ pluginId: id, registries: this.opts.registries, services, logger: this.opts.logger, manifest: rec.manifest });
     this.contexts.set(id, ctx);
 
     const result = await runInPluginSandbox(id, async () => {
