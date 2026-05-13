@@ -30,6 +30,8 @@ export interface PluginRecord {
   id: string;
   manifest?: PluginManifest;
   dir: string;
+  /** Webview-loadable URL for the plugin's icon file when one is present at its root. */
+  iconUrl?: string;
   state: PluginState;
   errors?: string[];
   /** Findings emitted by enforcement rules at discovery; empty when clean. */
@@ -114,9 +116,11 @@ export class PluginManager {
         workspace: this.opts.workspace,
         keychain: this.opts.keychain,
       });
+      const iconUrl = await resolvePluginIconUrl(this.opts.fs, dir);
       this.records.set(v.manifest.id, {
         id: v.manifest.id,
         dir,
+        iconUrl,
         manifest: v.manifest,
         state: 'discovered',
         findings,
@@ -317,6 +321,19 @@ async function defaultLoader(fs: PluginFs, rec: PluginRecord): Promise<LoadedMod
 
 export function hasBlockingFindings(rec: PluginRecord): boolean {
   return rec.findings.some((f) => f.severity === 'error');
+}
+
+const ICON_CANDIDATES = ['icon.svg', 'icon.png', 'logo.svg', 'logo.png'];
+
+async function resolvePluginIconUrl(fs: PluginFs, dir: string): Promise<string | undefined> {
+  if (!fs.pluginFileUrl) return undefined;
+  for (const candidate of ICON_CANDIDATES) {
+    try {
+      const url = await fs.pluginFileUrl(dir, candidate);
+      if (url) return url;
+    } catch { /* try next candidate */ }
+  }
+  return undefined;
 }
 
 // Re-export so consumers don't need to know the Registry generic.

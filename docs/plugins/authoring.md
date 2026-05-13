@@ -81,6 +81,10 @@ Every plugin is checked against a set of enforcement rules at discovery. Finding
 
 Write your README assuming it will be the first thing a user sees when they click on your plugin in Settings.
 
+### Plugin icon (optional)
+
+Drop one of `icon.svg`, `icon.png`, `logo.svg`, or `logo.png` at the plugin root and the host will render it in the activity bar rail in place of the first-letter fallback. Probed in that order; first match wins. Square assets sized for ~22×22 display work best.
+
 ## Install
 
 - Open Mongo Lens → Settings → Plugins → **Install from folder…**

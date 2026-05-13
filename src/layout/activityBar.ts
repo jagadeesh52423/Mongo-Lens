@@ -15,7 +15,8 @@ import type { ViewProvider } from '../plugins/api/contracts';
 export interface ActivityItem {
   id: string;
   title: string;
-  icon: string;              // 1–4 char string (emoji or label)
+  icon: string;              // 1–4 char string (emoji or label) — fallback when iconUrl is absent
+  iconUrl?: string;          // optional asset URL for plugin-provided logo (rendered as <img>)
   render(container: HTMLElement): { dispose(): void };
 }
 
@@ -50,8 +51,16 @@ export class BuiltInActivityRegistry implements ActivityRegistry {
   }
 }
 
+export interface IconLookup {
+  /** Returns the asset URL for a plugin's icon if one is known, else undefined. */
+  iconUrlFor(pluginId: string): string | undefined;
+}
+
 export class PluginActivityRegistry implements ActivityRegistry {
-  constructor(private views: Registry<ViewProvider>) {}
+  constructor(
+    private views: Registry<ViewProvider>,
+    private iconLookup?: IconLookup,
+  ) {}
 
   list(): ActivityItem[] {
     return this.views
@@ -66,10 +75,13 @@ export class PluginActivityRegistry implements ActivityRegistry {
 
   private toItem(v: ViewProvider): ActivityItem {
     const icon = v.icon && v.icon.length > 0 ? v.icon : (v.title[0] ?? '?').toUpperCase();
+    const ownerId = this.views.getOwner(v.id);
+    const iconUrl = ownerId ? this.iconLookup?.iconUrlFor(ownerId) : undefined;
     return {
       id: v.id,
       title: v.title,
       icon,
+      iconUrl,
       render: (container: HTMLElement) => v.render(container, { container }),
     };
   }

@@ -1,4 +1,6 @@
-import { BaseDirectory, readTextFile, readDir, mkdir, copyFile, remove } from '@tauri-apps/plugin-fs';
+import { BaseDirectory, readTextFile, readDir, mkdir, copyFile, remove, exists } from '@tauri-apps/plugin-fs';
+import { convertFileSrc } from '@tauri-apps/api/core';
+import { homeDir, join } from '@tauri-apps/api/path';
 import { PluginFs } from './io';
 
 const PLUGINS_REL = '.mongomacapp/plugins';
@@ -47,6 +49,17 @@ export async function createTauriPluginFs(): Promise<PluginFs & { pluginsRoot: s
         const msg = e instanceof Error ? e.message : String(e);
         if (/no such file|not found|enoent/i.test(msg)) return null;
         throw e;
+      }
+    },
+    async pluginFileUrl(dir, relativePath) {
+      try {
+        const present = await exists(`${dir}/${relativePath}`, { baseDir: BASE });
+        if (!present) return null;
+        const home = await homeDir();
+        const abs = await join(home, dir, relativePath);
+        return convertFileSrc(abs);
+      } catch {
+        return null;
       }
     },
   };

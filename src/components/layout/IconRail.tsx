@@ -48,7 +48,9 @@ export function IconRail({ items, activeId, onChange, onSettingsOpen, settingsOp
               cursor: 'pointer',
             }}
           >
-            {it.icon}
+            {it.iconUrl
+              ? <img src={it.iconUrl} alt="" style={{ width: 22, height: 22, objectFit: 'contain' }} />
+              : it.icon}
           </button>
         );
       })}
