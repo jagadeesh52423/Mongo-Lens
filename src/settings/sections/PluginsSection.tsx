@@ -27,7 +27,7 @@ function getHost(): PluginHost | null {
  */
 function PluginsSectionInner({ host }: { host: PluginHost }) {
   const records = usePluginRecords(host);
-  const getConfigService = useGetConfigService(host);
+  const { getConfigService, releaseConfigService } = useGetConfigService(host);
   const [error, setError] = useState<string | null>(null);
 
   const handleInstall = async () => {
@@ -51,7 +51,12 @@ function PluginsSectionInner({ host }: { host: PluginHost }) {
   };
 
   const handleUninstall = async (id: string) => {
-    try { await host.manager.uninstall(id); } catch (e) { setError(String(e)); }
+    try {
+      await host.manager.uninstall(id);
+      releaseConfigService(id);
+    } catch (e) {
+      setError(String(e));
+    }
   };
 
   return (

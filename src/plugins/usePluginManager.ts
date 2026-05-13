@@ -20,11 +20,18 @@ export function usePluginRecords(host: PluginHost): PluginRecord[] {
   return records;
 }
 
-/** Returns a stable `getConfigService(pluginId)` that lazily constructs and caches ConfigService instances. */
-export function useGetConfigService(host: PluginHost): (pluginId: string) => ConfigService | undefined {
+interface ConfigServiceAPI {
+  /** Lazily constructs and caches a ConfigService per plugin. */
+  getConfigService: (pluginId: string) => ConfigService | undefined;
+  /** Removes the cached ConfigService for a plugin. Call on uninstall to prevent leaks. */
+  releaseConfigService: (pluginId: string) => void;
+}
+
+/** Returns a stable `getConfigService` and `releaseConfigService` pair backed by a ref-cached Map. */
+export function useGetConfigService(host: PluginHost): ConfigServiceAPI {
   const cache = useRef<Map<string, ConfigService>>(new Map());
 
-  return useCallback((pluginId: string): ConfigService | undefined => {
+  const getConfigService = useCallback((pluginId: string): ConfigService | undefined => {
     const rec = host.manager.get(pluginId);
     const schema = rec?.manifest?.contributes?.configuration;
     if (!schema) return undefined;
@@ -35,4 +42,10 @@ export function useGetConfigService(host: PluginHost): (pluginId: string) => Con
     cache.current.set(pluginId, svc);
     return svc;
   }, [host]);
+
+  const releaseConfigService = useCallback((pluginId: string): void => {
+    cache.current.delete(pluginId);
+  }, []);
+
+  return { getConfigService, releaseConfigService };
 }
