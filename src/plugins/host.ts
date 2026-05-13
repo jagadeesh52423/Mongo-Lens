@@ -4,6 +4,7 @@ import { PermissionBroker } from './PermissionBroker';
 import { Logger } from './api/logger';
 import { PluginFs } from './io';
 import { HostBackend } from './hostServices';
+import { defaultEnforcementRegistry } from './enforcement';
 
 export interface PluginHost {
   manager: PluginManager;
@@ -29,6 +30,7 @@ export function createPluginHost(opts: {
     fs,
     pluginsRoot: opts.pluginsRoot,
     hostBackend: opts.hostBackend,
+    enforcement: defaultEnforcementRegistry,
   });
   return { manager, registries, broker, fs };
 }
