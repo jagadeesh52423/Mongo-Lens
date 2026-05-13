@@ -18,7 +18,6 @@ export function SidePanel({ item }: Props) {
     }
     return () => {
       try { disposable?.dispose(); } catch { /* never throw */ }
-      if (bodyRef.current) bodyRef.current.innerHTML = '';
     };
   }, [item?.id]);
 
