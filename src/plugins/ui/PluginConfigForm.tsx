@@ -88,10 +88,10 @@ export function PluginConfigForm(p: Props): ReactElement {
 
   const save = async () => {
     if (!canSave) return;
-    await p.onSave(values);
-    setDirtyKeys(new Set());
     undoStack.current = [];
     redoStack.current = [];
+    await p.onSave(values);
+    setDirtyKeys(new Set());
   };
 
   const cancel = () => {
