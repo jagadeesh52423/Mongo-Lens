@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { BuiltInActivityRegistry, PluginActivityRegistry, type ActivityItem } from '../activityBar';
+import { BuiltInActivityRegistry, PluginActivityRegistry, CompositeActivityRegistry, type ActivityItem } from '../activityBar';
 import { Registry } from '../../plugins/Registry';
 import type { ViewProvider } from '../../plugins/api/contracts';
 
@@ -92,5 +92,37 @@ describe('PluginActivityRegistry', () => {
     const container = document.createElement('div');
     par.list()[0]!.render(container);
     expect(inner).toHaveBeenCalledWith(container, expect.objectContaining({ container }));
+  });
+});
+
+describe('CompositeActivityRegistry', () => {
+  it('concatenates children in given order', () => {
+    const a = new BuiltInActivityRegistry();
+    a.add(itemA);
+    const b = new BuiltInActivityRegistry();
+    b.add(itemB);
+    const comp = new CompositeActivityRegistry([a, b]);
+    expect(comp.list().map(i => i.id)).toEqual(['a', 'b']);
+  });
+
+  it('onDidChange fires when any child fires', () => {
+    const a = new BuiltInActivityRegistry();
+    const b = new BuiltInActivityRegistry();
+    const comp = new CompositeActivityRegistry([a, b]);
+    const cb = vi.fn();
+    comp.onDidChange(cb);
+    a.add(itemA);
+    b.add(itemB);
+    expect(cb).toHaveBeenCalledTimes(2);
+  });
+
+  it('dispose unsubscribes from all children', () => {
+    const a = new BuiltInActivityRegistry();
+    const comp = new CompositeActivityRegistry([a]);
+    const cb = vi.fn();
+    const d = comp.onDidChange(cb);
+    d.dispose();
+    a.add(itemA);
+    expect(cb).not.toHaveBeenCalled();
   });
 });

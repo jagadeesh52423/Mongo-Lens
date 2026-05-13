@@ -64,3 +64,16 @@ export class PluginActivityRegistry implements ActivityRegistry {
     };
   }
 }
+
+export class CompositeActivityRegistry implements ActivityRegistry {
+  constructor(private children: ActivityRegistry[]) {}
+
+  list(): ActivityItem[] {
+    return this.children.flatMap(c => c.list());
+  }
+
+  onDidChange(cb: () => void): Disposable {
+    const subs = this.children.map(c => c.onDidChange(cb));
+    return toDisposable(() => { for (const s of subs) s.dispose(); });
+  }
+}
