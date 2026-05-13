@@ -11,6 +11,31 @@ export interface ConnectionProviderContrib{ id: string; title: string }
 export interface ThemeContribution        { id: string; path: string }
 export interface ExportTargetContribution { id: string; title: string; formats: string[] }
 
+// implement this interface to add a new JSON Schema property type for contributes.configuration
+export interface JSONSchemaProperty {
+  type: 'string' | 'number' | 'integer' | 'boolean' | 'array' | 'object';
+  title?: string;
+  description?: string;
+  default?: unknown;
+  enum?: Array<string | number>;
+  minimum?: number;
+  maximum?: number;
+  minLength?: number;
+  maxLength?: number;
+  pattern?: string;
+  format?: string;
+  items?: JSONSchemaProperty;
+  properties?: Record<string, JSONSchemaProperty>;
+  required?: string[];
+  'x-secret'?: boolean;
+}
+
+export interface ConfigurationContribution {
+  title: string;
+  properties: Record<string, JSONSchemaProperty>;
+  required?: string[];
+}
+
 export interface PluginManifest {
   id: string;
   name: string;
@@ -19,6 +44,7 @@ export interface PluginManifest {
   main: string;
   permissions?: string[];
   activationEvents?: string[];
+  activation?: { requireConfig?: boolean };
   contributes?: {
     commands?: CommandContribution[];
     keybindings?: KeybindingContribution[];
@@ -29,6 +55,7 @@ export interface PluginManifest {
     connectionProviders?: ConnectionProviderContrib[];
     themes?: ThemeContribution[];
     exportTargets?: ExportTargetContribution[];
+    configuration?: ConfigurationContribution;
   };
 }
 
