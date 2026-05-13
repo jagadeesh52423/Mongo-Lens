@@ -3,6 +3,11 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { PluginDetailPane } from '../plugins/ui/PluginDetailPane';
 import type { PluginRecord } from '../plugins/PluginManager';
 import type { PluginFs } from '../plugins/io';
+import { ConfigService } from '../plugins/config/ConfigService';
+import { ConfigStore } from '../plugins/config/ConfigStore';
+import { InMemoryKeychainBackend } from '../plugins/config/keychainBackend';
+import { PermissionBroker } from '../plugins/PermissionBroker';
+import type { ConfigurationContribution } from '../plugins/manifest';
 
 const rec = (over: Partial<PluginRecord> = {}): PluginRecord => ({
   id: 'acme.foo',
@@ -93,5 +98,65 @@ describe('PluginDetailPane', () => {
       onEnable={onEnable} onDisable={() => {}} onUninstall={() => {}} />);
     fireEvent.click(screen.getByRole('button', { name: /Enable/i }));
     expect(onEnable).toHaveBeenCalledWith('acme.foo');
+  });
+});
+
+// ── Task 20 additions ──────────────────────────────────────────────────────────
+
+class FakeWorkspace {
+  store = new Map<string, unknown>();
+  async get(k: string) { return this.store.get(k); }
+  async update(k: string, v: unknown) { this.store.set(k, v); }
+}
+
+function configRec(schema: ConfigurationContribution) {
+  return {
+    id: 'p', dir: '/p', state: 'discovered' as const, findings: [],
+    manifest: {
+      id: 'p', name: 'P', version: '1.0.0',
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      engines: { mongolens: '^1.0.0' } as any, main: 'm.js',
+      contributes: { configuration: schema },
+    },
+  };
+}
+
+function makeConfigService(schema: ConfigurationContribution) {
+  const ws = new FakeWorkspace();
+  const kb = new InMemoryKeychainBackend();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const store = new ConfigStore('p', schema, ws as any, kb);
+  const broker = new PermissionBroker();
+  return new ConfigService('p', schema, store, broker, { recheckEnforcement: async () => {} });
+}
+
+describe('PluginDetailPane — inline Settings section', () => {
+  const schema: ConfigurationContribution = {
+    title: 'P',
+    properties: { url: { type: 'string', title: 'URL' } },
+  };
+
+  it('renders Settings section when manifest declares contributes.configuration', async () => {
+    const cfgService = makeConfigService(schema);
+    render(<PluginDetailPane
+      record={configRec(schema)} fs={fsReturning(null)}
+      configService={cfgService}
+      onEnable={() => {}} onDisable={() => {}} onUninstall={() => {}}
+    />);
+    await screen.findByText(/Settings/i);
+    expect(screen.getByLabelText('URL')).toBeTruthy();
+  });
+
+  it('does NOT render Settings section when manifest has no configuration', () => {
+    const r = {
+      id: 'p', dir: '/p', state: 'discovered' as const, findings: [],
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      manifest: { id: 'p', name: 'P', version: '1.0.0', engines: { mongolens: '^1.0.0' } as any, main: 'm.js' },
+    };
+    render(<PluginDetailPane record={r} fs={fsReturning(null)}
+      configService={undefined}
+      onEnable={() => {}} onDisable={() => {}} onUninstall={() => {}}
+    />);
+    expect(screen.queryByText(/^Settings$/i)).toBeNull();
   });
 });

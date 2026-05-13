@@ -3,10 +3,14 @@ import type { PluginRecord } from '../PluginManager';
 import { hasBlockingFindings } from '../PluginManager';
 import type { PluginFs } from '../io';
 import { renderReadme } from './renderReadme';
+import type { ConfigService } from '../config/ConfigService';
+import type { ConfigurationContribution } from '../manifest';
+import { PluginConfigForm } from './PluginConfigForm';
 
 interface Props {
   record: PluginRecord | null;
   fs: PluginFs;
+  configService?: ConfigService;
   onEnable: (id: string) => void;
   onDisable: (id: string) => void;
   onUninstall: (id: string) => void;
@@ -66,6 +70,13 @@ export function PluginDetailPane(p: Props): ReactElement {
         </section>
       )}
 
+      {record.manifest?.contributes?.configuration && p.configService && (
+        <SettingsSection
+          schema={record.manifest.contributes.configuration}
+          configService={p.configService}
+        />
+      )}
+
       <section className="readme-section">
         <h4>README</h4>
         {readmeHtml === null && !readmeMissing && <p>Loading…</p>}
@@ -74,6 +85,34 @@ export function PluginDetailPane(p: Props): ReactElement {
           <div className="readme" dangerouslySetInnerHTML={{ __html: readmeHtml }} />
         )}
       </section>
+    </section>
+  );
+}
+
+function SettingsSection(p: {
+  schema: ConfigurationContribution;
+  configService: ConfigService;
+}): ReactElement {
+  const [initial, setInitial] = useState<Record<string, unknown> | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    p.configService.getAll().then(v => { if (!cancelled) setInitial(v); });
+    return () => { cancelled = true; };
+  }, [p.configService]);
+  if (!initial) return <section className="settings-section"><h4>Settings</h4><p>Loading…</p></section>;
+  return (
+    <section className="settings-section">
+      <h4>Settings</h4>
+      <PluginConfigForm
+        compact
+        schema={p.schema}
+        initialValues={initial}
+        onSave={async (values) => {
+          await p.configService.save(values);
+          setInitial(values);
+        }}
+        onCancel={() => {}}
+      />
     </section>
   );
 }
