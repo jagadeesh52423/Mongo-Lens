@@ -1,5 +1,17 @@
 import { describe, it, expect, vi } from 'vitest';
-import { BuiltInActivityRegistry, type ActivityItem } from '../activityBar';
+import { BuiltInActivityRegistry, PluginActivityRegistry, type ActivityItem } from '../activityBar';
+import { Registry } from '../../plugins/Registry';
+import type { ViewProvider } from '../../plugins/api/contracts';
+
+function vp(id: string, overrides: Partial<ViewProvider> = {}): ViewProvider {
+  return {
+    id,
+    title: id,
+    location: 'sidebar',
+    render: () => ({ dispose() {} }),
+    ...overrides,
+  };
+}
 
 const itemA: ActivityItem = { id: 'a', title: 'A', icon: 'A', render: () => ({ dispose: () => {} }) };
 const itemB: ActivityItem = { id: 'b', title: 'B', icon: 'B', render: () => ({ dispose: () => {} }) };
@@ -37,5 +49,48 @@ describe('BuiltInActivityRegistry', () => {
     d.dispose();
     r.add(itemA);
     expect(cb).not.toHaveBeenCalled();
+  });
+});
+
+describe('PluginActivityRegistry', () => {
+  it('returns only sidebar-location items', () => {
+    const reg = new Registry<ViewProvider>('views');
+    reg.register(vp('x', { location: 'sidebar' }), 'p1');
+    reg.register(vp('y', { location: 'panel' }),   'p1');
+    const par = new PluginActivityRegistry(reg);
+    expect(par.list().map(i => i.id)).toEqual(['x']);
+  });
+
+  it('uses register icon when set', () => {
+    const reg = new Registry<ViewProvider>('views');
+    reg.register(vp('x', { icon: '🚀' }), 'p1');
+    const par = new PluginActivityRegistry(reg);
+    expect(par.list()[0]!.icon).toBe('🚀');
+  });
+
+  it('falls back to first letter of title when icon missing', () => {
+    const reg = new Registry<ViewProvider>('views');
+    reg.register(vp('x', { title: 'datafleet' }), 'p1');
+    const par = new PluginActivityRegistry(reg);
+    expect(par.list()[0]!.icon).toBe('D');
+  });
+
+  it('onDidChange proxies the underlying registry', () => {
+    const reg = new Registry<ViewProvider>('views');
+    const par = new PluginActivityRegistry(reg);
+    const cb = vi.fn();
+    par.onDidChange(cb);
+    reg.register(vp('x'), 'p1');
+    expect(cb).toHaveBeenCalledTimes(1);
+  });
+
+  it('render delegates to ViewProvider.render', () => {
+    const inner = vi.fn(() => ({ dispose: vi.fn() }));
+    const reg = new Registry<ViewProvider>('views');
+    reg.register(vp('x', { render: inner }), 'p1');
+    const par = new PluginActivityRegistry(reg);
+    const container = document.createElement('div');
+    par.list()[0]!.render(container);
+    expect(inner).toHaveBeenCalledWith(container, expect.objectContaining({ container }));
   });
 });

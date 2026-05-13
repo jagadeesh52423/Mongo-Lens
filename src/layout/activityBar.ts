@@ -1,4 +1,6 @@
 import { Disposable, toDisposable } from '../plugins/api/disposable';
+import { Registry } from '../plugins/Registry';
+import type { ViewProvider } from '../plugins/api/contracts';
 
 export interface ActivityItem {
   id: string;
@@ -35,5 +37,30 @@ export class BuiltInActivityRegistry implements ActivityRegistry {
 
   private fire(): void {
     for (const l of this.listeners) { try { l(); } catch { /* never throw */ } }
+  }
+}
+
+export class PluginActivityRegistry implements ActivityRegistry {
+  constructor(private views: Registry<ViewProvider>) {}
+
+  list(): ActivityItem[] {
+    return this.views
+      .list()
+      .filter(v => v.location === 'sidebar')
+      .map(v => this.toItem(v));
+  }
+
+  onDidChange(cb: () => void): Disposable {
+    return this.views.onDidChange(cb);
+  }
+
+  private toItem(v: ViewProvider): ActivityItem {
+    const icon = v.icon && v.icon.length > 0 ? v.icon : (v.title[0] ?? '?').toUpperCase();
+    return {
+      id: v.id,
+      title: v.title,
+      icon,
+      render: (container: HTMLElement) => v.render(container, { container }),
+    };
   }
 }
