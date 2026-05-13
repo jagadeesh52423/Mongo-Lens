@@ -55,9 +55,23 @@ export class PluginManager {
   private contexts = new Map<string, ExtensionContext>();
   private loadedModules = new Map<string, LoadedModule>();
   private readonly enforcement: EnforcementRegistry;
+  // implement this interface to add a new change listener variant
+  private changeListeners = new Set<() => void>();
 
   constructor(private readonly opts: ManagerOptions) {
     this.enforcement = opts.enforcement ?? new EnforcementRegistry();
+  }
+
+  /** Subscribe to any record state change. Returns a disposable. */
+  onDidChange(listener: () => void): { dispose(): void } {
+    this.changeListeners.add(listener);
+    return { dispose: () => { this.changeListeners.delete(listener); } };
+  }
+
+  private fireChange(): void {
+    for (const l of this.changeListeners) {
+      try { l(); } catch { /* ignore listener errors */ }
+    }
   }
 
   list(): PluginRecord[] {
@@ -84,11 +98,13 @@ export class PluginManager {
       if (!v.ok || !v.manifest) {
         this.records.set(id, { id, dir, state: 'broken', errors: v.errors, findings: [] });
         this.opts.logger.warn('Plugin manifest invalid', { dir, errors: v.errors });
+        this.fireChange();
         return;
       }
       if (!satisfies(this.opts.hostApiVersion, v.manifest.engines.mongolens)) {
         this.records.set(v.manifest.id, { id: v.manifest.id, dir, manifest: v.manifest, state: 'incompatible', findings: [] });
         this.opts.logger.warn('Plugin incompatible with host', { id: v.manifest.id });
+        this.fireChange();
         return;
       }
       const findings = await this.enforcement.runAll({
@@ -105,10 +121,12 @@ export class PluginManager {
         state: 'discovered',
         findings,
       });
+      this.fireChange();
       // Note: command/view/etc. *contributions* are pure metadata; runtime handlers
       // are registered only at activate(). So we don't push into Registry<T> here.
     } catch (e) {
       this.records.set(id, { id, dir, state: 'broken', errors: [String(e)], findings: [] });
+      this.fireChange();
     }
   }
 
@@ -123,6 +141,7 @@ export class PluginManager {
       rec.state = 'failed';
       rec.errors = rec.findings.filter(f => f.severity === 'error').map(f => f.message);
       this.opts.logger.warn('activate: blocking findings prevent activation', { id, findings: rec.errors });
+      this.fireChange();
       return;
     }
     rec.state = 'activating';
@@ -173,9 +192,11 @@ export class PluginManager {
       this.opts.broker.clearGrants(id);
       disposeAllForPlugin(this.opts.registries, id);
       this.contexts.delete(id);
+      this.fireChange();
       return;
     }
     rec.state = 'active';
+    this.fireChange();
   }
 
   async deactivate(id: string): Promise<void> {
@@ -202,6 +223,7 @@ export class PluginManager {
     this.loadedModules.delete(id);
     this.contexts.delete(id);
     rec.state = 'disabled';
+    this.fireChange();
   }
 
   async activateForEvent(event: string): Promise<void> {
@@ -227,6 +249,7 @@ export class PluginManager {
       workspace: this.opts.workspace,
       keychain: this.opts.keychain,
     });
+    this.fireChange();
   }
 
   async install(srcDir: string): Promise<string> {

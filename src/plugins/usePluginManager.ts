@@ -7,9 +7,15 @@ import { ConfigStore } from './config/ConfigStore';
 export function usePluginRecords(host: PluginHost): PluginRecord[] {
   const [records, setRecords] = useState(() => host.manager.list());
   useEffect(() => {
+    const refresh = () => setRecords(host.manager.list());
     // Subscribe to every registry's onDidChange — change-driven UI refresh.
-    const subs = Object.values(host.registries).map(r => r.onDidChange(() => setRecords(host.manager.list())));
-    return () => subs.forEach(s => s.dispose());
+    const subs = Object.values(host.registries).map(r => r.onDidChange(refresh));
+    // Also subscribe to manager-level changes (state, findings, activation).
+    const managerSub = host.manager.onDidChange(refresh);
+    return () => {
+      subs.forEach(s => s.dispose());
+      managerSub.dispose();
+    };
   }, [host]);
   return records;
 }
