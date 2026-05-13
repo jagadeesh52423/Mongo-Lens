@@ -1,5 +1,6 @@
 import { EnforcementRegistry } from './EnforcementRegistry';
 import { readmePresentRule } from './rules/readmePresent';
+import { requiredConfigRule } from './rules/requiredConfig';
 
 export { EnforcementRegistry };
 export * from './types';
@@ -14,3 +15,4 @@ export * from './types';
  */
 export const defaultEnforcementRegistry = new EnforcementRegistry();
 defaultEnforcementRegistry.register(readmePresentRule);
+defaultEnforcementRegistry.register(requiredConfigRule);
