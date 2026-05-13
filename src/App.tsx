@@ -273,9 +273,18 @@ export default function App() {
     // Wait for the plugin host bootstrap to complete; it sets window.__pluginHost.
     const trySubscribe = () => {
       if (cancelled) return;
-      const host = (window as unknown as { __pluginHost?: { registries: { views: Registry<ViewProvider> } } }).__pluginHost;
+      const host = (window as unknown as {
+        __pluginHost?: {
+          registries: { views: Registry<ViewProvider> };
+          manager?: { get(id: string): { iconUrl?: string } | undefined };
+        };
+      }).__pluginHost;
       if (!host) { pendingTimer = setTimeout(trySubscribe, 50); return; }
-      const pluginReg = new PluginActivityRegistry(host.registries.views);
+      const manager = host.manager;
+      const iconLookup = manager
+        ? { iconUrlFor: (pluginId: string) => manager.get(pluginId)?.iconUrl }
+        : undefined;
+      const pluginReg = new PluginActivityRegistry(host.registries.views, iconLookup);
       composite = new CompositeActivityRegistry([builtIns, pluginReg]);
       setItems(composite.list());
       // composite.onDidChange fans into every child (including pluginReg),

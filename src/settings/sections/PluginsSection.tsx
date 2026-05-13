@@ -2,8 +2,16 @@ import { useState } from 'react';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { register } from '../registry';
 import { PluginsSettingsPane } from '../../plugins/ui/PluginsSettingsPane';
-import { usePluginRecords } from '../../plugins/usePluginManager';
+import { usePluginRecords, useGetConfigService } from '../../plugins/usePluginManager';
 import type { PluginHost } from '../../plugins/host';
+import type { PluginFs } from '../../plugins/io';
+
+const NO_OP_FS: PluginFs = {
+  listPluginDirs: async () => [],
+  readManifest: async () => '{}',
+  readEntry: async () => '',
+  pluginEntryPath: (d, m) => `${d}/${m}`,
+};
 
 /**
  * Returns the plugin host singleton attached to window by App.tsx at startup,
@@ -19,6 +27,7 @@ function getHost(): PluginHost | null {
  */
 function PluginsSectionInner({ host }: { host: PluginHost }) {
   const records = usePluginRecords(host);
+  const { getConfigService, releaseConfigService } = useGetConfigService(host);
   const [error, setError] = useState<string | null>(null);
 
   const handleInstall = async () => {
@@ -42,7 +51,12 @@ function PluginsSectionInner({ host }: { host: PluginHost }) {
   };
 
   const handleUninstall = async (id: string) => {
-    try { await host.manager.uninstall(id); } catch (e) { setError(String(e)); }
+    try {
+      await host.manager.uninstall(id);
+      releaseConfigService(id);
+    } catch (e) {
+      setError(String(e));
+    }
   };
 
   return (
@@ -50,10 +64,12 @@ function PluginsSectionInner({ host }: { host: PluginHost }) {
       {error && <p role="alert" style={{ color: 'red' }}>{error}</p>}
       <PluginsSettingsPane
         records={records}
+        fs={host.fs}
         onInstall={handleInstall}
         onEnable={handleEnable}
         onDisable={handleDisable}
         onUninstall={handleUninstall}
+        getConfigService={getConfigService}
       />
     </>
   );
@@ -70,6 +86,7 @@ function PluginsSection() {
     return (
       <PluginsSettingsPane
         records={[]}
+        fs={NO_OP_FS}
         onInstall={() => {}}
         onEnable={() => {}}
         onDisable={() => {}}

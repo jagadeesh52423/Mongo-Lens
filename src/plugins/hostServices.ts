@@ -26,6 +26,13 @@ export interface HostServices {
   connections: { list(): Promise<ConnectionRef[]>; updateCredentials(id: string, creds: { password: string }): Promise<void> };
   secrets:     { get(k: string): Promise<string | undefined>; store(k: string, v: string): Promise<void>; delete(k: string): Promise<void> };
   workspace:   { get(k: string): Promise<string | undefined>; set(k: string, v: string): Promise<void>; delete(k: string): Promise<void>; keys(): Promise<string[]> };
+  /** Present only when the plugin declares contributes.configuration. */
+  config?: {
+    get<T = unknown>(key: string): Promise<T | undefined>;
+    getAll(): Promise<Record<string, unknown>>;
+    set(key: string, value: unknown): Promise<void>;
+    onDidChange(listener: (e: import('./config').ConfigChangeEvent) => void): { dispose(): void };
+  };
 }
 
 export function createHostServices(params: {

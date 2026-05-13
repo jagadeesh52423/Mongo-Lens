@@ -34,3 +34,12 @@ Feature ideas for MongoMacApp, grouped by impact.
 ## Priority picks
 
 The two to prioritize: **explain plan visualizer** and **prod-write guard with environment coloring** — both are differentiators vs Compass/Studio 3T.
+
+## Plugin configuration follow-ups (from 2026-05-13 review)
+
+- `SettingsSection` / `PluginConfigRoute` should subscribe to `ConfigService.onDidChange` so a second mount sees fresh values on remount.
+- `ConfigService.fire()` payload filtering is per-plugin, not per-listener. Functionally equivalent today; revisit if the host ever subscribes.
+- Persistent workspace store: `InMemoryWorkspaceLike` in `host.ts` is non-persistent. Plain config values evaporate on restart. Add a Tauri-fs backed `WorkspaceLike` (e.g., `~/.mongomacapp/plugins-workspace/<pluginId>.json`).
+- `ConfigStore.setMany` change detection uses strict equality — switch to structural equality (JSON-stringify) when an `object` or `array` config field ships in a real plugin.
+- Add a `// must precede stringField — both match type:string` comment above the `secretField` registration in `fieldRenderers/index.ts` to harden against accidental reorder.
+- Plus the six "nits" in `CODE_REVIEW.md` if anything resurfaces.

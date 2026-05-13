@@ -3,6 +3,33 @@
   "type": "object",
   "required": ["id", "name", "version", "engines", "main"],
   "additionalProperties": false,
+  "$defs": {
+    "jsonSchemaProperty": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type":        { "enum": ["string", "number", "integer", "boolean", "array", "object"] },
+        "title":       { "type": "string" },
+        "description": { "type": "string" },
+        "default":     {},
+        "enum":        { "type": "array" },
+        "minimum":     { "type": "number" },
+        "maximum":     { "type": "number" },
+        "minLength":   { "type": "integer", "minimum": 0 },
+        "maxLength":   { "type": "integer", "minimum": 0 },
+        "pattern":     { "type": "string" },
+        "format":      { "type": "string" },
+        "items":       { "$ref": "#/$defs/jsonSchemaProperty" },
+        "properties":  {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/jsonSchemaProperty" }
+        },
+        "required":    { "type": "array", "items": { "type": "string" } },
+        "x-secret":    { "type": "boolean" }
+      }
+    }
+  },
   "properties": {
     "id":      { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*\\.[a-z0-9][a-z0-9-]*$" },
     "name":    { "type": "string", "minLength": 1 },
@@ -24,6 +51,13 @@
       "items": { "type": "string", "pattern": "^(onCommand:|onView:|onExecutionMode:|onConnectionProvider:|onExportTarget:).+|^onStartup$" },
       "uniqueItems": true
     },
+    "activation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "requireConfig": { "type": "boolean" }
+      }
+    },
     "contributes": {
       "type": "object",
       "additionalProperties": false,
@@ -36,7 +70,20 @@
         "aiTools":             { "type": "array", "items": { "type": "object", "required": ["id","schema"], "properties": { "id":{"type":"string"},"schema":{"type":"string"} } } },
         "connectionProviders": { "type": "array", "items": { "type": "object", "required": ["id","title"], "properties": { "id":{"type":"string"},"title":{"type":"string"} } } },
         "themes":              { "type": "array", "items": { "type": "object", "required": ["id","path"], "properties": { "id":{"type":"string"},"path":{"type":"string"} } } },
-        "exportTargets":       { "type": "array", "items": { "type": "object", "required": ["id","title","formats"], "properties": { "id":{"type":"string"},"title":{"type":"string"},"formats":{"type":"array","items":{"type":"string"}} } } }
+        "exportTargets":       { "type": "array", "items": { "type": "object", "required": ["id","title","formats"], "properties": { "id":{"type":"string"},"title":{"type":"string"},"formats":{"type":"array","items":{"type":"string"}} } } },
+        "configuration": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["title", "properties"],
+          "properties": {
+            "title":      { "type": "string" },
+            "properties": {
+              "type": "object",
+              "additionalProperties": { "$ref": "#/$defs/jsonSchemaProperty" }
+            },
+            "required":   { "type": "array", "items": { "type": "string" } }
+          }
+        }
       }
     }
   }

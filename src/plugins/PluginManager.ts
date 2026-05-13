@@ -13,6 +13,9 @@ import { runInPluginSandbox } from './sandbox/runInPluginSandbox';
 import { wrapPluginSource, LoadedModule } from './sandbox/moduleLoader';
 import { parseScope } from './permissions';
 import { Registry } from './Registry';
+import { EnforcementRegistry } from './enforcement';
+import type { Finding } from './enforcement';
+import type { KeychainBackend, WorkspaceLike } from './config';
 
 export type PluginState =
   | 'discovered'      // manifest valid, contributions registered, not activated
@@ -27,8 +30,12 @@ export interface PluginRecord {
   id: string;
   manifest?: PluginManifest;
   dir: string;
+  /** Webview-loadable URL for the plugin's icon file when one is present at its root. */
+  iconUrl?: string;
   state: PluginState;
   errors?: string[];
+  /** Findings emitted by enforcement rules at discovery; empty when clean. */
+  findings: Finding[];
 }
 
 interface ManagerOptions {
@@ -40,14 +47,34 @@ interface ManagerOptions {
   pluginsRoot?: string;
   hostBackend?: HostBackend;
   entryLoader?: (record: PluginRecord) => Promise<LoadedModule>;
+  enforcement?: EnforcementRegistry;
+  workspace?: WorkspaceLike;
+  keychain?: KeychainBackend;
 }
 
 export class PluginManager {
   private records = new Map<string, PluginRecord>();
   private contexts = new Map<string, ExtensionContext>();
   private loadedModules = new Map<string, LoadedModule>();
+  private readonly enforcement: EnforcementRegistry;
+  // implement this interface to add a new change listener variant
+  private changeListeners = new Set<() => void>();
 
-  constructor(private readonly opts: ManagerOptions) {}
+  constructor(private readonly opts: ManagerOptions) {
+    this.enforcement = opts.enforcement ?? new EnforcementRegistry();
+  }
+
+  /** Subscribe to any record state change. Returns a disposable. */
+  onDidChange(listener: () => void): { dispose(): void } {
+    this.changeListeners.add(listener);
+    return { dispose: () => { this.changeListeners.delete(listener); } };
+  }
+
+  private fireChange(): void {
+    for (const l of this.changeListeners) {
+      try { l(); } catch { /* ignore listener errors */ }
+    }
+  }
 
   list(): PluginRecord[] {
     return Array.from(this.records.values());
@@ -71,20 +98,39 @@ export class PluginManager {
       const parsed = JSON.parse(raw) as unknown;
       const v = validateManifest(parsed);
       if (!v.ok || !v.manifest) {
-        this.records.set(id, { id, dir, state: 'broken', errors: v.errors });
+        this.records.set(id, { id, dir, state: 'broken', errors: v.errors, findings: [] });
         this.opts.logger.warn('Plugin manifest invalid', { dir, errors: v.errors });
+        this.fireChange();
         return;
       }
       if (!satisfies(this.opts.hostApiVersion, v.manifest.engines.mongolens)) {
-        this.records.set(v.manifest.id, { id: v.manifest.id, dir, manifest: v.manifest, state: 'incompatible' });
+        this.records.set(v.manifest.id, { id: v.manifest.id, dir, manifest: v.manifest, state: 'incompatible', findings: [] });
         this.opts.logger.warn('Plugin incompatible with host', { id: v.manifest.id });
+        this.fireChange();
         return;
       }
-      this.records.set(v.manifest.id, { id: v.manifest.id, dir, manifest: v.manifest, state: 'discovered' });
+      const findings = await this.enforcement.runAll({
+        pluginDir: dir,
+        manifest: v.manifest,
+        fs: this.opts.fs,
+        workspace: this.opts.workspace,
+        keychain: this.opts.keychain,
+      });
+      const iconUrl = await resolvePluginIconUrl(this.opts.fs, dir);
+      this.records.set(v.manifest.id, {
+        id: v.manifest.id,
+        dir,
+        iconUrl,
+        manifest: v.manifest,
+        state: 'discovered',
+        findings,
+      });
+      this.fireChange();
       // Note: command/view/etc. *contributions* are pure metadata; runtime handlers
       // are registered only at activate(). So we don't push into Registry<T> here.
     } catch (e) {
-      this.records.set(id, { id, dir, state: 'broken', errors: [String(e)] });
+      this.records.set(id, { id, dir, state: 'broken', errors: [String(e)], findings: [] });
+      this.fireChange();
     }
   }
 
@@ -95,6 +141,13 @@ export class PluginManager {
       return;
     }
     if (rec.state === 'active' || rec.state === 'activating') return;
+    if (hasBlockingFindings(rec)) {
+      rec.state = 'failed';
+      rec.errors = rec.findings.filter(f => f.severity === 'error').map(f => f.message);
+      this.opts.logger.warn('activate: blocking findings prevent activation', { id, findings: rec.errors });
+      this.fireChange();
+      return;
+    }
     rec.state = 'activating';
 
     // Apply granted scopes (parsed from manifest.permissions for v1 — consent dialog
@@ -143,9 +196,11 @@ export class PluginManager {
       this.opts.broker.clearGrants(id);
       disposeAllForPlugin(this.opts.registries, id);
       this.contexts.delete(id);
+      this.fireChange();
       return;
     }
     rec.state = 'active';
+    this.fireChange();
   }
 
   async deactivate(id: string): Promise<void> {
@@ -172,6 +227,7 @@ export class PluginManager {
     this.loadedModules.delete(id);
     this.contexts.delete(id);
     rec.state = 'disabled';
+    this.fireChange();
   }
 
   async activateForEvent(event: string): Promise<void> {
@@ -185,6 +241,19 @@ export class PluginManager {
 
   async activateStartup(): Promise<void> {
     await this.activateForEvent('onStartup');
+  }
+
+  async recheckEnforcement(pluginId: string): Promise<void> {
+    const rec = this.records.get(pluginId);
+    if (!rec || !rec.manifest) return;
+    rec.findings = await this.enforcement.runAll({
+      pluginDir: rec.dir,
+      manifest: rec.manifest,
+      fs: this.opts.fs,
+      workspace: this.opts.workspace,
+      keychain: this.opts.keychain,
+    });
+    this.fireChange();
   }
 
   async install(srcDir: string): Promise<string> {
@@ -248,6 +317,23 @@ async function defaultLoader(fs: PluginFs, rec: PluginRecord): Promise<LoadedMod
   const fn = new Function('exports', 'mongolens', `${cjsSource}\nreturn exports;`);
   const exports: Record<string, unknown> = {};
   return fn(exports, (globalThis as Record<string, unknown>).mongolens) as LoadedModule;
+}
+
+export function hasBlockingFindings(rec: PluginRecord): boolean {
+  return rec.findings.some((f) => f.severity === 'error');
+}
+
+const ICON_CANDIDATES = ['icon.svg', 'icon.png', 'logo.svg', 'logo.png'];
+
+async function resolvePluginIconUrl(fs: PluginFs, dir: string): Promise<string | undefined> {
+  if (!fs.pluginFileUrl) return undefined;
+  for (const candidate of ICON_CANDIDATES) {
+    try {
+      const url = await fs.pluginFileUrl(dir, candidate);
+      if (url) return url;
+    } catch { /* try next candidate */ }
+  }
+  return undefined;
 }
 
 // Re-export so consumers don't need to know the Registry generic.

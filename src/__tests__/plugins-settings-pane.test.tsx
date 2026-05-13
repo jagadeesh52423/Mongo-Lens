@@ -1,31 +1,62 @@
-import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { describe, it, expect, vi } from 'vitest';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { PluginsSettingsPane } from '../plugins/ui/PluginsSettingsPane';
+import type { PluginRecord } from '../plugins/PluginManager';
+import type { PluginFs } from '../plugins/io';
 
-const records = [
-  { id: 'acme.foo', dir: '/p/acme.foo', state: 'discovered' as const, manifest: { id: 'acme.foo', name: 'Foo', version: '1.0.0', engines: { mongolens: '^1.0.0' }, main: 'dist/main.js', permissions: ['database:read'] } },
-  { id: 'acme.x', dir: '/p/acme.x', state: 'broken' as const, errors: ['bad'] },
-];
+const fs: PluginFs = {
+  listPluginDirs: async () => [],
+  readManifest:    async () => '{}',
+  readEntry:       async () => '',
+  pluginEntryPath: (d, m) => `${d}/${m}`,
+  readPluginFile:  async () => null,
+};
+
+const rec = (id: string, name: string): PluginRecord => ({
+  id, dir: `/p/${id}`, state: 'discovered', findings: [],
+  manifest: { id, name, version: '1.0.0',
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    engines: { mongolens: '^1.0.0' } as any, main: 'm.js' },
+});
 
 describe('PluginsSettingsPane', () => {
-  it('lists installed plugins with their state', () => {
-    render(<PluginsSettingsPane records={records} onInstall={() => {}} onEnable={() => {}} onDisable={() => {}} onUninstall={() => {}} />);
-    expect(screen.getByText('Foo')).toBeInTheDocument();
-    expect(screen.getByText(/v1\.0\.0/)).toBeInTheDocument();
-    expect(screen.getByText(/broken/i)).toBeInTheDocument();
+  it('renders the install button', () => {
+    render(<PluginsSettingsPane records={[]} fs={fs}
+      onInstall={() => {}} onEnable={() => {}} onDisable={() => {}} onUninstall={() => {}} />);
+    expect(screen.getByRole('button', { name: /Install/i })).toBeTruthy();
   });
 
-  it('clicking "Install from folder…" fires onInstall', async () => {
+  it('auto-selects the first record on mount', async () => {
+    render(<PluginsSettingsPane records={[rec('a', 'Alpha'), rec('b', 'Beta')]} fs={fs}
+      onInstall={() => {}} onEnable={() => {}} onDisable={() => {}} onUninstall={() => {}} />);
+    await waitFor(() => {
+      const detail = screen.getByLabelText(/Plugin detail/i);
+      expect(detail.textContent).toMatch(/Alpha/);
+    });
+  });
+
+  it('switches detail pane when a different list item is clicked', async () => {
+    render(<PluginsSettingsPane records={[rec('a', 'Alpha'), rec('b', 'Beta')]} fs={fs}
+      onInstall={() => {}} onEnable={() => {}} onDisable={() => {}} onUninstall={() => {}} />);
+    const items = screen.getAllByRole('listitem');
+    fireEvent.click(items[1]);
+    await waitFor(() => {
+      const detail = screen.getByLabelText(/Plugin detail/i);
+      expect(detail.textContent).toMatch(/Beta/);
+    });
+  });
+
+  it('shows empty state when there are no plugins', () => {
+    render(<PluginsSettingsPane records={[]} fs={fs}
+      onInstall={() => {}} onEnable={() => {}} onDisable={() => {}} onUninstall={() => {}} />);
+    expect(screen.getByText(/No plugins installed/i)).toBeTruthy();
+  });
+
+  it('passes through onInstall callback', () => {
     const onInstall = vi.fn();
-    render(<PluginsSettingsPane records={[]} onInstall={onInstall} onEnable={() => {}} onDisable={() => {}} onUninstall={() => {}} />);
-    await userEvent.click(screen.getByRole('button', { name: /install from folder/i }));
+    render(<PluginsSettingsPane records={[]} fs={fs}
+      onInstall={onInstall} onEnable={() => {}} onDisable={() => {}} onUninstall={() => {}} />);
+    fireEvent.click(screen.getByRole('button', { name: /Install/i }));
     expect(onInstall).toHaveBeenCalled();
-  });
-
-  it('clicking Uninstall on a row fires onUninstall with the id', async () => {
-    const onUninstall = vi.fn();
-    render(<PluginsSettingsPane records={records} onInstall={() => {}} onEnable={() => {}} onDisable={() => {}} onUninstall={onUninstall} />);
-    await userEvent.click(screen.getAllByRole('button', { name: /uninstall/i })[0]);
-    expect(onUninstall).toHaveBeenCalledWith('acme.foo');
   });
 });

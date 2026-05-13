@@ -1,3 +1,5 @@
+import { KeychainBackend, InMemoryKeychainBackend } from '../config/keychainBackend';
+
 export interface SecretStorage {
   get(key: string): Promise<string | undefined>;
   store(key: string, value: string): Promise<void>;
@@ -5,12 +7,12 @@ export interface SecretStorage {
 }
 
 export class InMemorySecretStorage implements SecretStorage {
-  private map = new Map<string, string>();
-  async get(k: string)    { return this.map.get(k); }
-  async store(k: string, v: string) { this.map.set(k, v); }
-  async delete(k: string) { this.map.delete(k); }
+  constructor(private readonly backend: KeychainBackend = new InMemoryKeychainBackend()) {}
+  async get(key: string)              { return this.backend.get(key); }
+  async store(key: string, v: string) { return this.backend.set(key, v); }
+  async delete(key: string)           { return this.backend.delete(key); }
 }
 
 export function namespaceFor(pluginId: string, key: string): string {
-  return `plugin:${pluginId}:${key}`;
+  return `plugin:${pluginId}:secret:${key}`;
 }
