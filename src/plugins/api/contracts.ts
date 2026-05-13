@@ -29,6 +29,7 @@ export interface ViewContext { container: HTMLElement; }
 export interface ViewProvider {
   id: string;
   title: string;
+  icon?: string;
   location: 'sidebar' | 'panel';
   render(container: HTMLElement, ctx: ViewContext): Disposable;
 }
@@ -74,4 +75,30 @@ export interface ExportTargetContract {
   title: string;
   formats: string[];
   export(rows: unknown[], format: string, ctx: { connectionId?: string }): Promise<void>;
+}
+
+export interface ConnectionRef {
+  id: string;
+  name: string;
+  host?: string;
+  port?: number;
+  username?: string;
+}
+
+export interface ConnectionsApi {
+  list(): Promise<ConnectionRef[]>;
+  updateCredentials(id: string, creds: { password: string }): Promise<void>;
+}
+
+export interface SecretsApi {
+  get(key: string): Promise<string | undefined>;
+  store(key: string, value: string): Promise<void>;
+  delete(key: string): Promise<void>;
+}
+
+export interface WorkspaceApi {
+  get(key: string): Promise<string | undefined>;
+  set(key: string, value: string): Promise<void>;
+  delete(key: string): Promise<void>;
+  keys(): Promise<string[]>;
 }

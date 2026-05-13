@@ -13,6 +13,14 @@ const valid = {
   },
 };
 
+const baseValid = {
+  id: 'p.test',
+  name: 'Test',
+  version: '0.0.1',
+  engines: { mongolens: '^1.0.0' },
+  main: 'index.js',
+};
+
 describe('manifest validation', () => {
   it('accepts a well-formed manifest', () => {
     const r = validateManifest(valid);
@@ -39,6 +47,34 @@ describe('manifest validation', () => {
 
   it('rejects unknown activation event prefix', () => {
     const r = validateManifest({ ...valid, activationEvents: ['onWhenever:foo'] });
+    expect(r.ok).toBe(false);
+  });
+});
+
+describe('manifest view icon', () => {
+  it('accepts a view with no icon', () => {
+    const r = validateManifest({
+      ...baseValid,
+      contributes: { views: [{ id: 'v', title: 'V', location: 'sidebar' }] },
+    });
+    expect(r.ok).toBe(true);
+  });
+
+  it('accepts a view with a 1-4 char icon', () => {
+    for (const icon of ['🚀', 'D', 'DF', 'MGOX']) {
+      const r = validateManifest({
+        ...baseValid,
+        contributes: { views: [{ id: 'v', title: 'V', icon, location: 'sidebar' }] },
+      });
+      expect(r.ok).toBe(true);
+    }
+  });
+
+  it('rejects icons longer than 4 chars', () => {
+    const r = validateManifest({
+      ...baseValid,
+      contributes: { views: [{ id: 'v', title: 'V', icon: 'TOOLONG', location: 'sidebar' }] },
+    });
     expect(r.ok).toBe(false);
   });
 });

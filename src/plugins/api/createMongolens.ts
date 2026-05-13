@@ -21,8 +21,11 @@ export interface MongolensAPI {
   themes:              { register(v: ThemeContract): Disposable };
   exportTargets:       { register(v: ExportTargetContract): Disposable };
 
-  db:  HostServices['db'];
-  net: HostServices['net'];
+  db:          HostServices['db'];
+  net:         HostServices['net'];
+  connections: HostServices['connections'];
+  secrets:     HostServices['secrets'];
+  workspace:   HostServices['workspace'];
 }
 
 export function createMongolens(params: {
@@ -30,8 +33,14 @@ export function createMongolens(params: {
   registries: RegistrySet;
   services: HostServices;
   logger?: Logger;
+  manifest?: { contributes?: { views?: { id: string; icon?: string }[] } };
 }): MongolensAPI {
-  const { pluginId, registries: r, services } = params;
+  const { pluginId, registries: r, services, manifest } = params;
+
+  function manifestIconFor(viewId: string): string | undefined {
+    return manifest?.contributes?.views?.find(v => v.id === viewId)?.icon;
+  }
+
   return {
     commands: {
       register(id, handler) { return r.commands.register({ id, handler }, pluginId); },
@@ -50,7 +59,12 @@ export function createMongolens(params: {
         return result.value;
       },
     },
-    views:               { register: v => r.views.register(v, pluginId) },
+    views: {
+      register: v => r.views.register(
+        v.icon ? v : { ...v, icon: manifestIconFor(v.id) },
+        pluginId,
+      ),
+    },
     resultViewers:       { register: v => r.resultViewers.register(v, pluginId) },
     executionModes:      { register: v => r.executionModes.register(v, pluginId) },
     aiTools:             { register: v => r.aiTools.register(v, pluginId) },
@@ -58,7 +72,10 @@ export function createMongolens(params: {
     themes:              { register: v => r.themes.register(v, pluginId) },
     exportTargets:       { register: v => r.exportTargets.register(v, pluginId) },
 
-    db:  services.db,
-    net: services.net,
+    db:          services.db,
+    net:         services.net,
+    connections: services.connections,
+    secrets:     services.secrets,
+    workspace:   services.workspace,
   };
 }

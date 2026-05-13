@@ -5,6 +5,7 @@ import { Logger } from './api/logger';
 import { PluginFs } from './io';
 import { createExtensionContext, ExtensionContext } from './ExtensionContext';
 import { InMemorySecretStorage } from './api/secretStorage';
+import { InMemoryWorkspaceStore } from './api/workspaceStore';
 import { createPluginLogger } from './api/logger';
 import { createMongolens, MongolensAPI } from './api/createMongolens';
 import { createHostServices, HostBackend } from './hostServices';
@@ -103,10 +104,11 @@ export class PluginManager {
 
     const logger    = createPluginLogger(id, this.opts.logger);
     const secrets   = new InMemorySecretStorage();
+    const workspace = new InMemoryWorkspaceStore();
     const ctx       = createExtensionContext({ pluginId: id, storagePath: `${rec.dir}/.data`, secrets, logger });
     const backend: HostBackend = this.opts.hostBackend ?? defaultBackend();
-    const services  = createHostServices({ broker: this.opts.broker, pluginId: id, backend });
-    const api: MongolensAPI = createMongolens({ pluginId: id, registries: this.opts.registries, services, logger: this.opts.logger });
+    const services  = createHostServices({ broker: this.opts.broker, pluginId: id, backend, secrets, workspace });
+    const api: MongolensAPI = createMongolens({ pluginId: id, registries: this.opts.registries, services, logger: this.opts.logger, manifest: rec.manifest });
     this.contexts.set(id, ctx);
 
     const result = await runInPluginSandbox(id, async () => {
@@ -226,6 +228,8 @@ function defaultBackend(): HostBackend {
   return {
     async dbFind() { throw new Error('Host backend not wired (test stub)'); },
     async netFetch() { throw new Error('Host backend not wired (test stub)'); },
+    async connectionsList() { return []; },
+    async connectionsUpdateCredentials() { throw new Error('Host backend not wired (test stub)'); },
   };
 }
 

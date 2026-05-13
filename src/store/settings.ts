@@ -40,6 +40,7 @@ export interface PersistedSettings {
   shortcutOverrides: Record<string, string>;
   themeOverrides: Record<string, Record<string, string>>;
   aiConfig: PersistedAIConfig;
+  activeActivityItemId: string | null;
 }
 
 export interface SettingsState {
@@ -48,12 +49,14 @@ export interface SettingsState {
   /** In-memory AI config; `apiToken` is never persisted. */
   aiConfig: AIConfig;
   activeSection: string;
+  activeActivityItemId: string | null;
   setActiveSection: (id: string) => void;
   setTheme: (id: string) => void;
   setShortcutOverride: (shortcutId: string, combo: string) => void;
   resetShortcut: (shortcutId: string) => void;
   resetAllShortcuts: () => void;
   setAIConfig: (patch: Partial<AIConfig>) => void;
+  setActiveActivityItemId: (id: string | null) => void;
 }
 
 let storePromise: Promise<Store> | null = null;
@@ -73,6 +76,7 @@ function toPersisted(state: SettingsState): PersistedSettings {
     shortcutOverrides: state.shortcutOverrides,
     themeOverrides: getAllOverrides(),
     aiConfig: persistedAi,
+    activeActivityItemId: state.activeActivityItemId,
   };
 }
 
@@ -92,6 +96,7 @@ export const useSettingsStore = create<SettingsState>()(
   shortcutOverrides: {},
   aiConfig: DEFAULT_AI_CONFIG,
   activeSection: DEFAULT_ACTIVE_SECTION,
+  activeActivityItemId: null,
 
   setActiveSection: (id) => set({ activeSection: id }),
 
@@ -120,6 +125,11 @@ export const useSettingsStore = create<SettingsState>()(
 
   setAIConfig: (patch) => {
     set((s) => ({ aiConfig: { ...s.aiConfig, ...patch } }));
+    void persist(toPersisted(get()));
+  },
+
+  setActiveActivityItemId: (id) => {
+    set({ activeActivityItemId: id });
     void persist(toPersisted(get()));
   },
   })),
@@ -156,6 +166,7 @@ export async function loadSettings(): Promise<void> {
             ? loaded.shortcutOverrides
             : {},
         aiConfig,
+        activeActivityItemId: loaded?.activeActivityItemId ?? null,
       });
     }
   } catch (err) {

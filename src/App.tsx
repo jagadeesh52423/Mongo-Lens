@@ -1,12 +1,22 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, createElement } from 'react';
+import { createRoot } from 'react-dom/client';
 import { Panel, PanelGroup, type ImperativePanelHandle } from 'react-resizable-panels';
-import { IconRail, type PanelKey } from './components/layout/IconRail';
+import { IconRail } from './components/layout/IconRail';
 import { SidePanel } from './components/layout/SidePanel';
 import { SplashScreen } from './components/layout/SplashScreen';
 import { StatusBar } from './components/layout/StatusBar';
 import { ConnectionPanel } from './components/connections/ConnectionPanel';
 import { EditorArea } from './components/editor/EditorArea';
 import { SavedScriptsPanel } from './components/saved-scripts/SavedScriptsPanel';
+import {
+  BuiltInActivityRegistry,
+  PluginActivityRegistry,
+  CompositeActivityRegistry,
+  resolveActiveId,
+  type ActivityItem,
+} from './layout/activityBar';
+import type { Registry } from './plugins/Registry';
+import type { ViewProvider } from './plugins/api/contracts';
 import { SettingsView } from './settings/SettingsView';
 import { SplitHandle } from './components/shared/SplitHandle';
 import { AIFloatingButton } from './components/ai/AIFloatingButton';
@@ -25,6 +35,52 @@ import { chatHistoryManager } from './services/ai/ChatHistoryManager';
 
 const openSettingsDef = DEFAULT_SHORTCUTS.find((d) => d.id === 'open-settings');
 if (openSettingsDef) keyboardService.defineShortcut(openSettingsDef);
+
+function makeBuiltInRegistry(): BuiltInActivityRegistry {
+  const reg = new BuiltInActivityRegistry();
+  reg.add({
+    id: 'connections',
+    title: 'Connections',
+    icon: '⚡',
+    render: (container) => {
+      // Each render gets an isolated wrapper so the old React root and the
+      // incoming new root never share the same container node.
+      const wrapper = document.createElement('div');
+      wrapper.style.cssText = 'width:100%;height:100%';
+      container.appendChild(wrapper);
+      const root = createRoot(wrapper);
+      root.render(createElement(ConnectionPanel));
+      return {
+        dispose() {
+          // Remove wrapper from the live DOM synchronously so the next render
+          // mounts into a clean container. Then unmount React deferred so we
+          // don't call root.unmount() during a React commit phase.
+          wrapper.remove();
+          queueMicrotask(() => root.unmount());
+        },
+      };
+    },
+  });
+  reg.add({
+    id: 'saved',
+    title: 'Saved Scripts',
+    icon: '⭐',
+    render: (container) => {
+      const wrapper = document.createElement('div');
+      wrapper.style.cssText = 'width:100%;height:100%';
+      container.appendChild(wrapper);
+      const root = createRoot(wrapper);
+      root.render(createElement(SavedScriptsPanel));
+      return {
+        dispose() {
+          wrapper.remove();
+          queueMicrotask(() => root.unmount());
+        },
+      };
+    },
+  });
+  return reg;
+}
 
 export default function App() {
   const log = useLogger('components.App');
@@ -152,11 +208,45 @@ export default function App() {
         const { createTauriPluginFs } = await import('./plugins/io.tauri');
         const fs = await createTauriPluginFs();
         const { createPluginHost } = await import('./plugins/host');
+        const { listConnections, updateConnection } = await import('./ipc');
         const host = createPluginHost({
           hostApiVersion: '1.0.0',
           logger: console as never,  // replace with the app's structured logger
           fs,
           pluginsRoot: fs.pluginsRoot,
+          hostBackend: {
+            async dbFind() { throw new Error('Host backend not wired'); },
+            async netFetch(url, init) {
+              // The plugin host has already enforced the network:fetch scope
+              // for this URL before reaching here. We then go through the
+              // renderer's fetch (Tauri's webview has CSP set to null so any
+              // HTTPS host is reachable). Body is parsed as JSON when the
+              // response declares it; otherwise returned as text.
+              const res = await fetch(url, init as RequestInit | undefined);
+              const ctype = res.headers.get('content-type') ?? '';
+              let body: unknown;
+              if (ctype.includes('application/json')) {
+                try { body = await res.json(); } catch { body = undefined; }
+              } else {
+                body = await res.text();
+              }
+              return { status: res.status, body };
+            },
+            async connectionsList() {
+              const all = await listConnections();
+              return all.map(c => ({
+                id: c.id, name: c.name, host: c.host, port: c.port, username: c.username,
+              }));
+            },
+            async connectionsUpdateCredentials(id, password) {
+              const all = await listConnections();
+              const current = all.find(c => c.id === id);
+              if (!current) throw new Error('Connection not found');
+              // Strip server-only fields; patch only the password
+              const { id: _id, createdAt: _createdAt, ...input } = current;
+              await updateConnection(id, { ...input, password });
+            },
+          },
         });
         (window as unknown as Record<string, unknown>).__pluginHost = host;
         await host.manager.discover();
@@ -168,7 +258,45 @@ export default function App() {
     return () => { cancelled = true; };
   }, []);
 
-  const [panel, setPanel] = useState<PanelKey>('connections');
+  const persistedActiveId  = useSettingsStore(s => s.activeActivityItemId);
+  const setPersistedActive = useSettingsStore(s => s.setActiveActivityItemId);
+  const [items, setItems]  = useState<ActivityItem[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let pendingTimer: ReturnType<typeof setTimeout> | null = null;
+    const builtIns = makeBuiltInRegistry();
+    let composite: CompositeActivityRegistry = new CompositeActivityRegistry([builtIns]);
+    setItems(composite.list());
+    let topSub: { dispose(): void } | null = null;
+
+    // Wait for the plugin host bootstrap to complete; it sets window.__pluginHost.
+    const trySubscribe = () => {
+      if (cancelled) return;
+      const host = (window as unknown as { __pluginHost?: { registries: { views: Registry<ViewProvider> } } }).__pluginHost;
+      if (!host) { pendingTimer = setTimeout(trySubscribe, 50); return; }
+      const pluginReg = new PluginActivityRegistry(host.registries.views);
+      composite = new CompositeActivityRegistry([builtIns, pluginReg]);
+      setItems(composite.list());
+      // composite.onDidChange fans into every child (including pluginReg),
+      // so a single subscription is sufficient — no need to also subscribe pluginReg.
+      topSub = composite.onDidChange(() => { if (!cancelled) setItems(composite.list()); });
+    };
+    trySubscribe();
+
+    return () => {
+      cancelled = true;
+      if (pendingTimer) clearTimeout(pendingTimer);
+      topSub?.dispose();
+    };
+  }, []);
+
+  const activeId = resolveActiveId(items, persistedActiveId);
+
+  function onChangeActive(id: string) {
+    setPersistedActive(id);
+  }
+
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [showSplash, setShowSplash] = useState(true);
   const { connections, activeConnectionId, activeDatabase } = useConnectionsStore();
@@ -299,8 +427,9 @@ export default function App() {
       {showSplash && <SplashScreen onDone={() => setShowSplash(false)} />}
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
         <IconRail
-          active={panel}
-          onChange={setPanel}
+          items={items}
+          activeId={activeId}
+          onChange={onChangeActive}
           onSettingsOpen={() => setSettingsOpen((s) => !s)}
           settingsOpen={settingsOpen}
         />
@@ -316,10 +445,7 @@ export default function App() {
                 collapsible
                 collapsedSize={0}
               >
-                <SidePanel active={panel}>
-                  {panel === 'connections' && <ConnectionPanel />}
-                  {panel === 'saved' && <SavedScriptsPanel />}
-                </SidePanel>
+                <SidePanel item={items.find(i => i.id === activeId) ?? null} />
               </Panel>
               <SplitHandle direction="horizontal" />
               <Panel minSize={50} defaultSize={80}>

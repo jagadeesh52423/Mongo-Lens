@@ -3,6 +3,7 @@ export const KNOWN_SCOPE_KINDS = [
   'network:fetch',
   'secrets:read', 'secrets:write',
   'workspace:read', 'workspace:write',
+  'connections:write',
 ] as const;
 
 export type ScopeKind = (typeof KNOWN_SCOPE_KINDS)[number];
@@ -43,16 +44,30 @@ export function matchesScope(granted: readonly Scope[], requested: Scope): boole
 const GLOB_PLACEHOLDER = 'xwildcardx';
 
 function matchUrlGlob(pattern: string, url: string): boolean {
-  // Only host glob is supported; * may appear in host only. Path/query checked as a prefix.
-  // Use a lowercase placeholder so URL's hostname lowercasing doesn't break the replacement.
+  // `*` is supported in BOTH hostname and pathname; multiple stars allowed.
+  // Host stars match one DNS label (no dots); path stars match anything,
+  // including slashes. Paths without any star keep prefix-match semantics
+  // for backward compatibility ("https://api.example.com/" still allows
+  // any path on that host).
+  //
+  // Lowercase placeholder is required because URL() lowercases hostnames.
   try {
-    const pu = new URL(pattern.replace('*', GLOB_PLACEHOLDER));
+    const pu = new URL(pattern.split('*').join(GLOB_PLACEHOLDER));
     const uu = new URL(url);
     if (pu.protocol !== uu.protocol) return false;
-    const hostPattern = pu.hostname.replace(GLOB_PLACEHOLDER, '*');
-    const hostRe = new RegExp('^' + hostPattern.split('*').map(escapeRe).join('[^.]+') + '$');
+
+    const hostParts = pu.hostname.split(GLOB_PLACEHOLDER);
+    const hostRe = new RegExp('^' + hostParts.map(escapeRe).join('[^.]+') + '$');
     if (!hostRe.test(uu.hostname)) return false;
-    if (pu.pathname !== '/' && !uu.pathname.startsWith(pu.pathname)) return false;
+
+    const pathParts = pu.pathname.split(GLOB_PLACEHOLDER);
+    if (pathParts.length === 1) {
+      // No path star — keep prefix match. "/" is treated as "any path".
+      if (pu.pathname !== '/' && !uu.pathname.startsWith(pu.pathname)) return false;
+    } else {
+      const pathRe = new RegExp('^' + pathParts.map(escapeRe).join('.*') + '$');
+      if (!pathRe.test(uu.pathname)) return false;
+    }
     return true;
   } catch {
     return false;
