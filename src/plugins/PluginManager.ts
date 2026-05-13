@@ -13,6 +13,8 @@ import { runInPluginSandbox } from './sandbox/runInPluginSandbox';
 import { wrapPluginSource, LoadedModule } from './sandbox/moduleLoader';
 import { parseScope } from './permissions';
 import { Registry } from './Registry';
+import { EnforcementRegistry, defaultEnforcementRegistry } from './enforcement';
+import type { Finding } from './enforcement';
 
 export type PluginState =
   | 'discovered'      // manifest valid, contributions registered, not activated
@@ -29,6 +31,8 @@ export interface PluginRecord {
   dir: string;
   state: PluginState;
   errors?: string[];
+  /** Findings emitted by enforcement rules at discovery; empty when clean. */
+  findings: Finding[];
 }
 
 interface ManagerOptions {
@@ -40,14 +44,18 @@ interface ManagerOptions {
   pluginsRoot?: string;
   hostBackend?: HostBackend;
   entryLoader?: (record: PluginRecord) => Promise<LoadedModule>;
+  enforcement?: EnforcementRegistry;
 }
 
 export class PluginManager {
   private records = new Map<string, PluginRecord>();
   private contexts = new Map<string, ExtensionContext>();
   private loadedModules = new Map<string, LoadedModule>();
+  private readonly enforcement: EnforcementRegistry;
 
-  constructor(private readonly opts: ManagerOptions) {}
+  constructor(private readonly opts: ManagerOptions) {
+    this.enforcement = opts.enforcement ?? new EnforcementRegistry();
+  }
 
   list(): PluginRecord[] {
     return Array.from(this.records.values());
@@ -71,20 +79,27 @@ export class PluginManager {
       const parsed = JSON.parse(raw) as unknown;
       const v = validateManifest(parsed);
       if (!v.ok || !v.manifest) {
-        this.records.set(id, { id, dir, state: 'broken', errors: v.errors });
+        this.records.set(id, { id, dir, state: 'broken', errors: v.errors, findings: [] });
         this.opts.logger.warn('Plugin manifest invalid', { dir, errors: v.errors });
         return;
       }
       if (!satisfies(this.opts.hostApiVersion, v.manifest.engines.mongolens)) {
-        this.records.set(v.manifest.id, { id: v.manifest.id, dir, manifest: v.manifest, state: 'incompatible' });
+        this.records.set(v.manifest.id, { id: v.manifest.id, dir, manifest: v.manifest, state: 'incompatible', findings: [] });
         this.opts.logger.warn('Plugin incompatible with host', { id: v.manifest.id });
         return;
       }
-      this.records.set(v.manifest.id, { id: v.manifest.id, dir, manifest: v.manifest, state: 'discovered' });
+      const findings = await this.enforcement.runAll({ pluginDir: dir, manifest: v.manifest, fs: this.opts.fs });
+      this.records.set(v.manifest.id, {
+        id: v.manifest.id,
+        dir,
+        manifest: v.manifest,
+        state: 'discovered',
+        findings,
+      });
       // Note: command/view/etc. *contributions* are pure metadata; runtime handlers
       // are registered only at activate(). So we don't push into Registry<T> here.
     } catch (e) {
-      this.records.set(id, { id, dir, state: 'broken', errors: [String(e)] });
+      this.records.set(id, { id, dir, state: 'broken', errors: [String(e)], findings: [] });
     }
   }
 
@@ -248,6 +263,10 @@ async function defaultLoader(fs: PluginFs, rec: PluginRecord): Promise<LoadedMod
   const fn = new Function('exports', 'mongolens', `${cjsSource}\nreturn exports;`);
   const exports: Record<string, unknown> = {};
   return fn(exports, (globalThis as Record<string, unknown>).mongolens) as LoadedModule;
+}
+
+export function hasBlockingFindings(rec: Pick<PluginRecord, 'findings'>): boolean {
+  return rec.findings.some((f) => f.severity === 'error');
 }
 
 // Re-export so consumers don't need to know the Registry generic.
