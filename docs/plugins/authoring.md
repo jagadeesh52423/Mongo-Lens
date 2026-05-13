@@ -38,6 +38,30 @@ export function activate(context) {
 }
 ```
 
+> ⚠️ **Capture `mongolens` once at the top of `activate()`.** The global
+> `mongolens` binding is only guaranteed to exist *during* `activate()`. Any
+> callback that fires later (view render, command handler, async work) must
+> use a closure-captured reference, not re-resolve `mongolens` each call.
+>
+> ```js
+> export function activate(context) {
+>   const ml = mongolens;          // capture once
+>   const conns = ml.connections;  // optionally narrow per-namespace
+>
+>   ml.views.register({
+>     id: 'my.view', title: 'My View', location: 'sidebar',
+>     render(container) {
+>       // BAD: () => mongolens.connections.list()  — ReferenceError later
+>       // GOOD:
+>       return renderInto(container, () => conns.list());
+>     },
+>   });
+> }
+> ```
+>
+> The host plans to keep `globalThis.mongolens` alive for the plugin's full
+> lifetime in a future release; until then, capture explicitly.
+
 ## Install
 
 - Open Mongo Lens → Settings → Plugins → **Install from folder…**
