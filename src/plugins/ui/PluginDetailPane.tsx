@@ -69,7 +69,7 @@ export function PluginDetailPane(p: Props): ReactElement {
       </header>
 
       {record.findings.length > 0 && (
-        <section role="region" aria-label="Findings" className="findings">
+        <section role="region" aria-label="Findings" className="findings" style={bodySectionStyle}>
           {record.findings.map((f, i) => (
             <div key={i} data-severity={f.severity} className={`finding finding-${f.severity}`}>
               <strong>{f.severity === 'error' ? '⛔' : '⚠'} {f.message}</strong>
@@ -80,14 +80,16 @@ export function PluginDetailPane(p: Props): ReactElement {
       )}
 
       {record.manifest?.contributes?.configuration && p.configService && (
-        <SettingsSection
-          schema={record.manifest.contributes.configuration}
-          configService={p.configService}
-          onOpenConfig={p.onOpenConfig ? () => p.onOpenConfig!(record.id) : undefined}
-        />
+        <div style={bodySectionStyle}>
+          <SettingsSection
+            schema={record.manifest.contributes.configuration}
+            configService={p.configService}
+            onOpenConfig={p.onOpenConfig ? () => p.onOpenConfig!(record.id) : undefined}
+          />
+        </div>
       )}
 
-      <section className="readme-section">
+      <section className="readme-section" style={bodySectionStyle}>
         <h4>README</h4>
         {readmeHtml === null && !readmeMissing && <p>Loading…</p>}
         {readmeMissing && <p>No README provided by this plugin.</p>}
@@ -151,6 +153,10 @@ const emptyStyle: CSSProperties = {
   color: 'var(--fg-dim)',
   fontSize: 13,
   background: 'var(--bg)',
+};
+
+const bodySectionStyle: CSSProperties = {
+  padding: '12px 16px',
 };
 
 const detailHeaderStyle: CSSProperties = {
