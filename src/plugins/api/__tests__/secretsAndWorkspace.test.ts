@@ -22,10 +22,10 @@ function setup(grants: Array<{kind: string}>) {
 }
 
 describe('secrets API', () => {
-  it('namespaces keys under plugin:<id>:', async () => {
+  it('namespaces keys under plugin:<id>:secret:', async () => {
     const { services, secrets } = setup([{kind:'secrets:read'},{kind:'secrets:write'}]);
     await services.secrets.store('k', 'v');
-    expect(await secrets.get('plugin:p1:k')).toBe('v');
+    expect(await secrets.get('plugin:p1:secret:k')).toBe('v');
     expect(await services.secrets.get('k')).toBe('v');
   });
 
