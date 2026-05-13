@@ -30,14 +30,17 @@ export { stringField } from './StringField';
 export { numberField } from './NumberField';
 export { booleanField } from './BooleanField';
 export { secretField } from './SecretField';
+export { arrayField } from './ArrayField';
 
 import { stringField } from './StringField';
 import { numberField } from './NumberField';
 import { booleanField } from './BooleanField';
 import { secretField } from './SecretField';
+import { arrayField } from './ArrayField';
 
 // Order matters: more-specific renderers register first.
 defaultFieldRendererRegistry.register(numberField);
 defaultFieldRendererRegistry.register(booleanField);
 defaultFieldRendererRegistry.register(secretField);   // before stringField
 defaultFieldRendererRegistry.register(stringField);
+defaultFieldRendererRegistry.register(arrayField);
