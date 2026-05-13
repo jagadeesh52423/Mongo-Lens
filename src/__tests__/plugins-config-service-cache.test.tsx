@@ -59,7 +59,7 @@ function makeHost(): PluginHost {
     listPluginDirs: async () => [],
     readManifest: async () => '{}',
     readEntry: async () => '',
-    pluginEntryPath: (d, m) => `${d}/${m}`,
+    pluginEntryPath: (d: string, m: string) => `${d}/${m}`,
   } } as unknown as PluginHost;
 }
 
