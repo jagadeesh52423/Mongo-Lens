@@ -13,7 +13,7 @@ import { runInPluginSandbox } from './sandbox/runInPluginSandbox';
 import { wrapPluginSource, LoadedModule } from './sandbox/moduleLoader';
 import { parseScope } from './permissions';
 import { Registry } from './Registry';
-import { EnforcementRegistry, defaultEnforcementRegistry } from './enforcement';
+import { EnforcementRegistry } from './enforcement';
 import type { Finding } from './enforcement';
 
 export type PluginState =
@@ -271,7 +271,7 @@ async function defaultLoader(fs: PluginFs, rec: PluginRecord): Promise<LoadedMod
   return fn(exports, (globalThis as Record<string, unknown>).mongolens) as LoadedModule;
 }
 
-export function hasBlockingFindings(rec: Pick<PluginRecord, 'findings'>): boolean {
+export function hasBlockingFindings(rec: PluginRecord): boolean {
   return rec.findings.some((f) => f.severity === 'error');
 }
 
