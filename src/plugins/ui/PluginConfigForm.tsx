@@ -5,6 +5,8 @@ import { defaultFieldRendererRegistry } from '../config/fieldRenderers';
 import type { FieldRendererRegistry } from '../config/fieldRenderers';
 import type { ConfigValueError } from '../config/types';
 
+const KEYCHAIN_ERROR_RE = /keychain|locked/i;
+
 interface Props {
   schema: ConfigurationContribution;
   initialValues: Record<string, unknown>;
@@ -19,6 +21,7 @@ const STACK_CAP = 50;
 export function PluginConfigForm(p: Props): ReactElement {
   const [values, setValues] = useState<Record<string, unknown>>(p.initialValues);
   const [dirtyKeys, setDirtyKeys] = useState<Set<string>>(new Set());
+  const [saveError, setSaveError] = useState<string | null>(null);
   const undoStack = useRef<Record<string, unknown>[]>([]);
   const redoStack = useRef<Record<string, unknown>[]>([]);
   const formRef = useRef<HTMLFormElement>(null);
@@ -88,10 +91,17 @@ export function PluginConfigForm(p: Props): ReactElement {
 
   const save = async () => {
     if (!canSave) return;
-    undoStack.current = [];
-    redoStack.current = [];
-    await p.onSave(values);
-    setDirtyKeys(new Set());
+    setSaveError(null);
+    try {
+      await p.onSave(values);
+      // Reset undo/redo stacks and dirty state only after successful save.
+      // If onSave throws, history is preserved so the user can undo their edits.
+      undoStack.current = [];
+      redoStack.current = [];
+      setDirtyKeys(new Set());
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : String(err));
+    }
   };
 
   const cancel = () => {
@@ -126,6 +136,14 @@ export function PluginConfigForm(p: Props): ReactElement {
           </div>
         );
       })}
+      {saveError && (
+        <div role="alert" className="save-error-banner">
+          {saveError}
+          {KEYCHAIN_ERROR_RE.test(saveError) && (
+            <span> Click Save again to retry.</span>
+          )}
+        </div>
+      )}
       <div className="form-actions">
         <button type="submit" disabled={!canSave}>Save</button>
         <button type="button" onClick={cancel}>Cancel</button>

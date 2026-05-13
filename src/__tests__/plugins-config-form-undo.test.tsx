@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi } from 'vitest';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { PluginConfigForm } from '../plugins/ui/PluginConfigForm';
 import type { ConfigurationContribution } from '../plugins/manifest';
 
@@ -55,17 +55,40 @@ describe('PluginConfigForm — undo/redo', () => {
   });
 
   it('Save clears both stacks', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
     render(<PluginConfigForm
       schema={schema} initialValues={{ a: '', b: '' }}
-      onSave={async () => {}} onCancel={() => {}}
+      onSave={onSave} onCancel={() => {}}
     />);
     const a = screen.getByLabelText('A') as HTMLInputElement;
     const form = a.closest('form')!;
     fireEvent.change(a, { target: { value: 'a1' } }); fireEvent.blur(a);
     fireEvent.click(screen.getByRole('button', { name: /save/i }));
-    // After save, undo should be a no-op.
+    // Wait for the async save to complete before testing undo state.
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
+    // After save completes, undo should be a no-op.
     undo(form);
     expect((screen.getByLabelText('A') as HTMLInputElement).value).toBe('a1');
+  });
+
+  it('undo stack survives a failed save — history is preserved so the user can undo', async () => {
+    const onSave = vi.fn().mockRejectedValue(new Error('keychain locked'));
+    render(<PluginConfigForm
+      schema={schema} initialValues={{ a: '', b: '' }}
+      onSave={onSave} onCancel={() => {}}
+    />);
+    const a = screen.getByLabelText('A') as HTMLInputElement;
+    const form = a.closest('form')!;
+
+    fireEvent.change(a, { target: { value: 'a1' } }); fireEvent.blur(a);
+    // dirtyKeys.size > 0 now, so Save is enabled
+    fireEvent.click(screen.getByRole('button', { name: /save/i }));
+    // Wait for the save attempt to reject
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
+
+    // Undo stack must still be intact after the failed save
+    undo(form);
+    expect((screen.getByLabelText('A') as HTMLInputElement).value).toBe('');
   });
 
   it('caps undo stack at 50; oldest dropped on 51st commit', () => {

@@ -60,6 +60,31 @@ describe('PluginConfigForm — base', () => {
     expect((screen.getByRole('button', { name: /save/i }) as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it('shows error banner when onSave rejects; banner clears on next successful save', async () => {
+    const onSave = vi.fn().mockRejectedValue(new Error('Keychain is locked'));
+    render(<PluginConfigForm
+      schema={schema} initialValues={{ url: 'http://x' }}
+      onSave={onSave} onCancel={() => {}}
+    />);
+    const urlInput = screen.getByLabelText('URL') as HTMLInputElement;
+    fireEvent.change(urlInput, { target: { value: 'http://new' } });
+    fireEvent.blur(urlInput);
+    await waitFor(() => expect((screen.getByRole('button', { name: /save/i }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole('button', { name: /save/i }));
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('Keychain is locked');
+    // retry hint present because message contains "Keychain"
+    expect(alert.textContent).toContain('Click Save again to retry');
+
+    // Now let save succeed — banner should disappear
+    onSave.mockResolvedValue(undefined);
+    fireEvent.change(urlInput, { target: { value: 'http://other' } });
+    fireEvent.blur(urlInput);
+    await waitFor(() => expect((screen.getByRole('button', { name: /save/i }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole('button', { name: /save/i }));
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+  });
+
   it('Cancel reverts to initial and calls onCancel', () => {
     const onCancel = vi.fn();
     render(<PluginConfigForm
