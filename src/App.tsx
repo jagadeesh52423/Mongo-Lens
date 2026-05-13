@@ -216,7 +216,22 @@ export default function App() {
           pluginsRoot: fs.pluginsRoot,
           hostBackend: {
             async dbFind() { throw new Error('Host backend not wired'); },
-            async netFetch() { throw new Error('Host backend not wired'); },
+            async netFetch(url, init) {
+              // The plugin host has already enforced the network:fetch scope
+              // for this URL before reaching here. We then go through the
+              // renderer's fetch (Tauri's webview has CSP set to null so any
+              // HTTPS host is reachable). Body is parsed as JSON when the
+              // response declares it; otherwise returned as text.
+              const res = await fetch(url, init as RequestInit | undefined);
+              const ctype = res.headers.get('content-type') ?? '';
+              let body: unknown;
+              if (ctype.includes('application/json')) {
+                try { body = await res.json(); } catch { body = undefined; }
+              } else {
+                body = await res.text();
+              }
+              return { status: res.status, body };
+            },
             async connectionsList() {
               const all = await listConnections();
               return all.map(c => ({
