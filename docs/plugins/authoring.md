@@ -70,6 +70,7 @@ Every plugin is checked against a set of enforcement rules at discovery. Finding
 | Rule id | Required file / check | Severity | Fix |
 |---------|----------------------|----------|-----|
 | `core.readme-present` | `README.md` at plugin root, non-empty | warning | Add a `README.md` describing what your plugin does, how to enable it, and any permissions it requests. |
+| `core.required-config` | All keys in `configuration.required` are set | warning, or error if `activation.requireConfig: true` | Fill in the missing fields in the Settings section. |
 
 **Severities:**
 
@@ -113,6 +114,82 @@ Trigger your command (palette, key binding, or programmatically). The host activ
 - `workspace:read`, `workspace:write`
 
 Unknown scopes fail validation at install time.
+
+## Configuration (`contributes.configuration`)
+
+Declare a JSON Schema describing your settings. The host renders a form in the
+plugin's detail pane (and a dedicated route accessible from "Configure…"), users
+fill it in, and your plugin reads values via `mongolens.config.*`.
+
+```json
+"contributes": {
+  "configuration": {
+    "title": "My Plugin",
+    "properties": {
+      "myplugin.apiUrl":   { "type": "string",  "title": "API URL", "format": "uri" },
+      "myplugin.username": { "type": "string",  "title": "Username", "minLength": 1 },
+      "myplugin.password": { "type": "string",  "title": "Password", "x-secret": true },
+      "myplugin.timeout":  { "type": "integer", "title": "Timeout", "default": 30, "minimum": 0, "maximum": 300 }
+    },
+    "required": ["myplugin.apiUrl", "myplugin.username", "myplugin.password"]
+  }
+}
+```
+
+**Supported keywords:** `type` (`string` / `number` / `integer` / `boolean` /
+`array` / `object`), `title`, `description`, `default`, `enum`, `minimum`,
+`maximum`, `minLength`, `maxLength`, `pattern`, `format`, `items` (for arrays),
+`properties` / `required` (for objects), and `x-secret: true` on strings.
+Anything else is rejected at install time.
+
+### `x-secret`
+
+Adding `"x-secret": true` to a string property routes the value through the OS
+keychain. The form renders a password input with a reveal toggle. The plugin
+must also declare `secrets:read` in `permissions` if it needs to read the value.
+
+### Required configuration
+
+If your plugin truly cannot function without certain settings (e.g. an API
+endpoint), list them in `configuration.required`. By default this produces a
+warning in the plugin's detail pane. To **block activation** until they are
+set, also declare:
+
+```json
+"activation": { "requireConfig": true }
+```
+
+The Enable button is disabled and a finding shows the user what's missing.
+
+### Plugin API
+
+```ts
+// At activate(), capture the API once (see "Capture mongolens once" above).
+const { get, getAll, set, onDidChange } = mongolens.config;
+
+const apiUrl   = await get<string>('myplugin.apiUrl');
+const username = await get<string>('myplugin.username');
+const password = await get<string>('myplugin.password');   // requires secrets:read
+
+context.subscriptions.push(onDidChange(async ({ keys }) => {
+  if (keys.some(k => k.startsWith('myplugin.'))) {
+    // re-read values and rebuild whatever depends on them
+  }
+}));
+```
+
+- `get` returns the schema default when nothing is stored.
+- `set` validates against the schema; throws on failure. Use it for migration
+  or "Reset to defaults" UX; ordinary edits flow through the host form.
+- `onDidChange` fires **once per Save** with the keys that actually changed.
+  Secret values are omitted from the event payload unless the plugin has
+  `secrets:read`.
+
+### Saving and undo
+
+The form uses explicit **Save** / **Cancel**. While editing, ⌘Z / ⌘⇧Z (or
+Ctrl+Z / Ctrl+Y) walks back and forward through field commits across the
+whole form. Stacks clear on Save and Cancel.
 
 ## Cleanup
 
