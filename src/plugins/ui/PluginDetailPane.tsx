@@ -1,4 +1,4 @@
-import { ReactElement, useEffect, useState } from 'react';
+import { CSSProperties, ReactElement, useEffect, useState } from 'react';
 import type { PluginRecord } from '../PluginManager';
 import { hasBlockingFindings } from '../PluginManager';
 import type { PluginFs } from '../io';
@@ -40,25 +40,32 @@ export function PluginDetailPane(p: Props): ReactElement {
   }, [record?.id, fs]);
 
   if (!record) {
-    return <section className="plugin-detail empty">Select a plugin to view details.</section>;
+    return (
+      <section className="plugin-detail empty" style={emptyStyle}>
+        Select a plugin to view details.
+      </section>
+    );
   }
 
   const blocked = hasBlockingFindings(record);
   const active  = record.state === 'active';
 
   return (
-    <section className="plugin-detail" aria-label="Plugin detail">
-      <header>
-        <h3>{record.manifest?.name ?? record.id}</h3>
-        {record.manifest && <span> v{record.manifest.version}</span>}
-        <span> — {record.state}</span>
-        <span>
+    <section className="plugin-detail" aria-label="Plugin detail" style={paneStyle}>
+      <header style={detailHeaderStyle}>
+        <div style={titleRowStyle}>
+          <h3 style={nameStyle}>{record.manifest?.name ?? record.id}</h3>
+          {record.manifest && <span style={metaStyle}>v{record.manifest.version}</span>}
+          <span style={stateBadgeStyle(record.state)}>{record.state}</span>
+        </div>
+        <div style={actionsStyle}>
           {active
-            ? <button onClick={() => p.onDisable(record.id)}>Disable</button>
-            : <button disabled={blocked} title={blocked ? 'Fix blocking findings before enabling' : undefined}
-                      onClick={() => p.onEnable(record.id)}>Enable</button>}
-          <button onClick={() => p.onUninstall(record.id)}>Uninstall</button>
-        </span>
+            ? <button onClick={() => p.onDisable(record.id)} style={btnStyle}>Disable</button>
+            : <button disabled={blocked}
+                      title={blocked ? 'Fix blocking findings before enabling' : undefined}
+                      onClick={() => p.onEnable(record.id)} style={primaryBtnStyle(blocked)}>Enable</button>}
+          <button onClick={() => p.onUninstall(record.id)} style={btnStyle}>Uninstall</button>
+        </div>
       </header>
 
       {record.findings.length > 0 && (
@@ -125,4 +132,100 @@ function SettingsSection(p: {
       />
     </section>
   );
+}
+
+const paneStyle: CSSProperties = {
+  flex: 1,
+  minWidth: 0,
+  display: 'flex',
+  flexDirection: 'column',
+  background: 'var(--bg)',
+  overflowY: 'auto',
+};
+
+const emptyStyle: CSSProperties = {
+  flex: 1,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  color: 'var(--fg-dim)',
+  fontSize: 13,
+  background: 'var(--bg)',
+};
+
+const detailHeaderStyle: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 12,
+  padding: '12px 16px',
+  borderBottom: '1px solid var(--border)',
+  flexShrink: 0,
+};
+
+const titleRowStyle: CSSProperties = {
+  display: 'flex',
+  alignItems: 'baseline',
+  gap: 10,
+  flex: 1,
+  minWidth: 0,
+};
+
+const nameStyle: CSSProperties = {
+  fontSize: 15,
+  fontWeight: 600,
+  margin: 0,
+  color: 'var(--fg)',
+};
+
+const metaStyle: CSSProperties = {
+  fontSize: 12,
+  color: 'var(--fg-dim)',
+};
+
+function stateBadgeStyle(state: string): CSSProperties {
+  const palette: Record<string, { bg: string; fg: string }> = {
+    active:       { bg: 'rgba(80,160,80,0.18)',  fg: '#4caf50' },
+    discovered:   { bg: 'rgba(120,140,180,0.18)', fg: 'var(--fg-dim)' },
+    failed:       { bg: 'rgba(200,80,80,0.18)',  fg: '#e57373' },
+    broken:       { bg: 'rgba(200,80,80,0.18)',  fg: '#e57373' },
+    incompatible: { bg: 'rgba(200,140,80,0.18)', fg: '#ffb74d' },
+    disabled:     { bg: 'rgba(120,120,120,0.18)', fg: 'var(--fg-dim)' },
+  };
+  const c = palette[state] ?? palette.discovered;
+  return {
+    fontSize: 11,
+    fontWeight: 500,
+    padding: '2px 8px',
+    borderRadius: 10,
+    background: c.bg,
+    color: c.fg,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  };
+}
+
+const actionsStyle: CSSProperties = {
+  display: 'flex',
+  gap: 6,
+  flexShrink: 0,
+};
+
+const btnStyle: CSSProperties = {
+  background: 'transparent',
+  border: '1px solid var(--border)',
+  borderRadius: 3,
+  color: 'var(--fg)',
+  fontSize: 12,
+  padding: '4px 10px',
+  cursor: 'pointer',
+};
+
+function primaryBtnStyle(disabled: boolean): CSSProperties {
+  return {
+    ...btnStyle,
+    borderColor: disabled ? 'var(--border)' : 'var(--accent)',
+    color: disabled ? 'var(--fg-dim)' : 'var(--accent)',
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    opacity: disabled ? 0.6 : 1,
+  };
 }

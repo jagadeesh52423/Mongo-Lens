@@ -1,4 +1,4 @@
-import { ReactElement, useEffect, useState } from 'react';
+import { CSSProperties, ReactElement, useEffect, useState } from 'react';
 import type { PluginRecord } from '../PluginManager';
 import type { PluginFs } from '../io';
 import type { ConfigService } from '../config/ConfigService';
@@ -47,15 +47,15 @@ export function PluginsSettingsPane(p: Props): ReactElement {
   const configService = selectedId ? p.getConfigService?.(selectedId) : undefined;
 
   return (
-    <section aria-label="Plugins" className="plugins-settings">
-      <header>
-        <h2>Plugins</h2>
-        <button onClick={p.onInstall}>Install from folder…</button>
+    <section aria-label="Plugins" className="plugins-settings" style={sectionStyle}>
+      <header style={headerStyle}>
+        <h2 style={titleStyle}>Plugins</h2>
+        <button onClick={p.onInstall} style={installButtonStyle}>Install from folder…</button>
       </header>
       {p.records.length === 0 ? (
-        <p className="empty-state">No plugins installed.</p>
+        <p className="empty-state" style={emptyStateStyle}>No plugins installed.</p>
       ) : (
-        <div className="plugins-master-detail" style={{ display: 'flex' }}>
+        <div className="plugins-master-detail" style={masterDetailStyle}>
           <PluginList
             records={p.records}
             selectedId={selectedId}
@@ -84,3 +84,52 @@ export function PluginsSettingsPane(p: Props): ReactElement {
     </section>
   );
 }
+
+const sectionStyle: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  height: '100%',
+  minHeight: 0,
+};
+
+const headerStyle: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 12,
+  height: 40,
+  padding: '0 14px',
+  borderBottom: '1px solid var(--border)',
+  flexShrink: 0,
+};
+
+const titleStyle: CSSProperties = {
+  fontSize: 13,
+  fontWeight: 600,
+  letterSpacing: 1,
+  textTransform: 'uppercase',
+  color: 'var(--accent)',
+  margin: 0,
+  flex: 1,
+};
+
+const installButtonStyle: CSSProperties = {
+  background: 'transparent',
+  border: '1px solid var(--border)',
+  borderRadius: 3,
+  color: 'var(--fg)',
+  fontSize: 12,
+  padding: '3px 10px',
+  cursor: 'pointer',
+};
+
+const emptyStateStyle: CSSProperties = {
+  padding: 20,
+  color: 'var(--fg-dim)',
+  fontSize: 13,
+};
+
+const masterDetailStyle: CSSProperties = {
+  display: 'flex',
+  flex: 1,
+  minHeight: 0,
+};
