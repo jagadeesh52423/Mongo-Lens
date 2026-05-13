@@ -40,6 +40,40 @@ describe('permissions', () => {
     expect(matchesScope(granted, { kind: 'network:fetch', arg: 'https://api.acme.com/v1' })).toBe(true);
     expect(matchesScope(granted, { kind: 'network:fetch', arg: 'https://evil.com/' })).toBe(false);
   });
+
+  it('matchesScope: path-only glob /* matches any path on that host', () => {
+    const granted = [parseScope('network:fetch:https://api.acme.com/*')];
+    expect(matchesScope(granted, { kind: 'network:fetch', arg: 'https://api.acme.com/datafleet' })).toBe(true);
+    expect(matchesScope(granted, { kind: 'network:fetch', arg: 'https://api.acme.com/v1/users' })).toBe(true);
+    expect(matchesScope(granted, { kind: 'network:fetch', arg: 'https://api.acme.com/' })).toBe(true);
+    expect(matchesScope(granted, { kind: 'network:fetch', arg: 'https://api.other.com/datafleet' })).toBe(false);
+  });
+
+  it('matchesScope: path-prefix glob /api/* matches that prefix only', () => {
+    const granted = [parseScope('network:fetch:https://acme.com/api/*')];
+    expect(matchesScope(granted, { kind: 'network:fetch', arg: 'https://acme.com/api/v1' })).toBe(true);
+    expect(matchesScope(granted, { kind: 'network:fetch', arg: 'https://acme.com/api/v1/x/y' })).toBe(true);
+    expect(matchesScope(granted, { kind: 'network:fetch', arg: 'https://acme.com/other' })).toBe(false);
+  });
+
+  it('matchesScope: combined host+path glob', () => {
+    const granted = [parseScope('network:fetch:https://*.acme.com/api/*')];
+    expect(matchesScope(granted, { kind: 'network:fetch', arg: 'https://x.acme.com/api/v1' })).toBe(true);
+    expect(matchesScope(granted, { kind: 'network:fetch', arg: 'https://x.acme.com/other' })).toBe(false);
+    expect(matchesScope(granted, { kind: 'network:fetch', arg: 'https://acme.com/api/v1' })).toBe(false);
+  });
+
+  it('matchesScope: path without star keeps prefix-match (backward compatible)', () => {
+    const granted = [parseScope('network:fetch:https://acme.com/datafleet')];
+    expect(matchesScope(granted, { kind: 'network:fetch', arg: 'https://acme.com/datafleet' })).toBe(true);
+    expect(matchesScope(granted, { kind: 'network:fetch', arg: 'https://acme.com/datafleet/extra' })).toBe(true);
+    expect(matchesScope(granted, { kind: 'network:fetch', arg: 'https://acme.com/other' })).toBe(false);
+  });
+
+  it('matchesScope: trailing slash "/" still matches any path (backward compatible)', () => {
+    const granted = [parseScope('network:fetch:https://acme.com/')];
+    expect(matchesScope(granted, { kind: 'network:fetch', arg: 'https://acme.com/anything' })).toBe(true);
+  });
 });
 
 describe('connections:write scope', () => {
