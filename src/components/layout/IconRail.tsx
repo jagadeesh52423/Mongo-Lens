@@ -29,7 +29,7 @@ export function IconRail({ items, activeId, onChange, onSettingsOpen, settingsOp
           flexShrink: 0,
         }}
       >
-        <img src="/logo.svg" alt="Logo" style={{ width: 24, height: 24 }} />
+        <img src="/logo.svg" alt="Logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
       </div>
       {items.map((it) => {
         const isActive = !settingsOpen && activeId === it.id;
