@@ -10,6 +10,6 @@ describe('SecretStorage', () => {
   });
 
   it('namespaceFor produces a stable plugin-scoped key', () => {
-    expect(namespaceFor('acme.foo', 'api-token')).toBe('plugin:acme.foo:api-token');
+    expect(namespaceFor('acme.foo', 'api-token')).toBe('plugin:acme.foo:secret:api-token');
   });
 });
