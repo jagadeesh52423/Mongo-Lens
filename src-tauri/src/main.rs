@@ -100,6 +100,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             commands::ai::set_ai_token,
             commands::ai::get_ai_token,
             commands::ai::delete_ai_token,
+            commands::plugin_secrets::set_plugin_secret,
+            commands::plugin_secrets::get_plugin_secret,
+            commands::plugin_secrets::delete_plugin_secret,
         ])
         .run(tauri::generate_context!())?;
     Ok(())
