@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { BuiltInActivityRegistry, PluginActivityRegistry, CompositeActivityRegistry, type ActivityItem } from '../activityBar';
+import { BuiltInActivityRegistry, PluginActivityRegistry, CompositeActivityRegistry, resolveActiveId, type ActivityItem } from '../activityBar';
 import { Registry } from '../../plugins/Registry';
 import type { ViewProvider } from '../../plugins/api/contracts';
 
@@ -124,5 +124,23 @@ describe('CompositeActivityRegistry', () => {
     d.dispose();
     a.add(itemA);
     expect(cb).not.toHaveBeenCalled();
+  });
+});
+
+describe('resolveActiveId', () => {
+  it('returns the persisted id when present in items', () => {
+    expect(resolveActiveId([itemA, itemB], 'b')).toBe('b');
+  });
+
+  it('falls back to first item when persisted id missing', () => {
+    expect(resolveActiveId([itemA, itemB], 'gone')).toBe('a');
+  });
+
+  it('falls back to first item when persisted id is null', () => {
+    expect(resolveActiveId([itemA, itemB], null)).toBe('a');
+  });
+
+  it('returns null when items is empty', () => {
+    expect(resolveActiveId([], 'anything')).toBeNull();
   });
 });

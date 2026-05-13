@@ -77,3 +77,8 @@ export class CompositeActivityRegistry implements ActivityRegistry {
     return toDisposable(() => { for (const s of subs) s.dispose(); });
   }
 }
+
+export function resolveActiveId(items: ActivityItem[], persistedId: string | null): string | null {
+  if (persistedId && items.some(i => i.id === persistedId)) return persistedId;
+  return items[0]?.id ?? null;
+}
