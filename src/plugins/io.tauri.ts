@@ -40,10 +40,13 @@ export async function createTauriPluginFs(): Promise<PluginFs & { pluginsRoot: s
     async readPluginFile(dir, relativePath) {
       try {
         return await readTextFile(`${dir}/${relativePath}`, { baseDir: BASE });
-      } catch {
-        // Tauri fs throws on missing files; treat any read failure as "absent"
-        // so rules can distinguish present-but-empty from missing via content.
-        return null;
+      } catch (e) {
+        // Only swallow "file not found" — surface permission denied and other
+        // I/O errors to the enforcement registry as synthetic findings so the
+        // user sees actionable feedback instead of a silent "no README".
+        const msg = e instanceof Error ? e.message : String(e);
+        if (/no such file|not found|enoent/i.test(msg)) return null;
+        throw e;
       }
     },
   };
