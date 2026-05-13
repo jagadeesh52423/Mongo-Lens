@@ -1,4 +1,4 @@
-import type { Rule } from './types';
+import type { Rule, RuleContext, Finding } from './types';
 
 export class EnforcementRegistry {
   private rules: Rule[] = [];
@@ -14,5 +14,23 @@ export class EnforcementRegistry {
 
   all(): readonly Rule[] {
     return this.rules;
+  }
+
+  async runAll(ctx: RuleContext): Promise<Finding[]> {
+    const out: Finding[] = [];
+    for (const rule of this.rules) {
+      try {
+        const findings = await rule.check(ctx);
+        out.push(...findings);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        out.push({
+          ruleId: rule.id,
+          severity: 'error',
+          message: `rule "${rule.id}" threw: ${msg}`,
+        });
+      }
+    }
+    return out;
   }
 }
