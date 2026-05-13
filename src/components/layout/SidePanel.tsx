@@ -27,8 +27,9 @@ export function SidePanel({ item }: Props) {
     let entry = cacheRef.current.get(item.id);
     if (!entry) {
       const el = document.createElement('div');
-      el.style.width = '100%';
-      el.style.height = '100%';
+      el.style.position = 'absolute';
+      el.style.inset = '0';
+      el.style.overflow = 'hidden';
       host.appendChild(el);
       try {
         const disposable = item.render(el);
@@ -78,7 +79,9 @@ export function SidePanel({ item }: Props) {
       <div
         ref={hostRef}
         style={{
-          flex: 1, overflow: 'auto',
+          flex: 1, minHeight: 0,
+          position: 'relative',
+          overflow: 'hidden',
           display: item && !error ? 'block' : 'none',
         }}
       />
