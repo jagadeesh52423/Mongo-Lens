@@ -37,6 +37,15 @@ export async function createTauriPluginFs(): Promise<PluginFs & { pluginsRoot: s
     async removeDir(dir) {
       await remove(dir, { baseDir: BASE, recursive: true });
     },
+    async readPluginFile(dir, relativePath) {
+      try {
+        return await readTextFile(`${dir}/${relativePath}`, { baseDir: BASE });
+      } catch {
+        // Tauri fs throws on missing files; treat any read failure as "absent"
+        // so rules can distinguish present-but-empty from missing via content.
+        return null;
+      }
+    },
   };
 
   return tauriFs;
