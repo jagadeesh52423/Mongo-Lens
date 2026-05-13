@@ -2,6 +2,16 @@ import { Disposable, toDisposable } from '../plugins/api/disposable';
 import { Registry } from '../plugins/Registry';
 import type { ViewProvider } from '../plugins/api/contracts';
 
+/**
+ * A single entry in the activity bar (icon rail + side panel).
+ *
+ * **`render` cleanup contract:** `dispose()` MUST remove every DOM node and
+ * tear down every observer the render created. The host no longer clears
+ * `container.innerHTML` after calling `dispose()` — doing so would collide
+ * with React root lifecycle tracking when the render used `createRoot`. If
+ * your render creates a React root, call `root.unmount()` inside `dispose()`;
+ * if it used plain DOM, remove those nodes explicitly.
+ */
 export interface ActivityItem {
   id: string;
   title: string;

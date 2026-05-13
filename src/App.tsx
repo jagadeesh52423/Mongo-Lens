@@ -43,9 +43,22 @@ function makeBuiltInRegistry(): BuiltInActivityRegistry {
     title: 'Connections',
     icon: '⚡',
     render: (container) => {
-      const root = createRoot(container);
+      // Each render gets an isolated wrapper so the old React root and the
+      // incoming new root never share the same container node.
+      const wrapper = document.createElement('div');
+      wrapper.style.cssText = 'width:100%;height:100%';
+      container.appendChild(wrapper);
+      const root = createRoot(wrapper);
       root.render(createElement(ConnectionPanel));
-      return { dispose() { root.unmount(); } };
+      return {
+        dispose() {
+          // Remove wrapper from the live DOM synchronously so the next render
+          // mounts into a clean container. Then unmount React deferred so we
+          // don't call root.unmount() during a React commit phase.
+          wrapper.remove();
+          queueMicrotask(() => root.unmount());
+        },
+      };
     },
   });
   reg.add({
@@ -53,9 +66,17 @@ function makeBuiltInRegistry(): BuiltInActivityRegistry {
     title: 'Saved Scripts',
     icon: '⭐',
     render: (container) => {
-      const root = createRoot(container);
+      const wrapper = document.createElement('div');
+      wrapper.style.cssText = 'width:100%;height:100%';
+      container.appendChild(wrapper);
+      const root = createRoot(wrapper);
       root.render(createElement(SavedScriptsPanel));
-      return { dispose() { root.unmount(); } };
+      return {
+        dispose() {
+          wrapper.remove();
+          queueMicrotask(() => root.unmount());
+        },
+      };
     },
   });
   return reg;
@@ -227,27 +248,30 @@ export default function App() {
   const [items, setItems]  = useState<ActivityItem[]>([]);
 
   useEffect(() => {
+    let cancelled = false;
+    let pendingTimer: ReturnType<typeof setTimeout> | null = null;
     const builtIns = makeBuiltInRegistry();
     let composite: CompositeActivityRegistry = new CompositeActivityRegistry([builtIns]);
     setItems(composite.list());
-
-    let pluginSub: { dispose(): void } | null = null;
-    let topSub:    { dispose(): void } | null = null;
+    let topSub: { dispose(): void } | null = null;
 
     // Wait for the plugin host bootstrap to complete; it sets window.__pluginHost.
     const trySubscribe = () => {
+      if (cancelled) return;
       const host = (window as unknown as { __pluginHost?: { registries: { views: Registry<ViewProvider> } } }).__pluginHost;
-      if (!host) { setTimeout(trySubscribe, 50); return; }
+      if (!host) { pendingTimer = setTimeout(trySubscribe, 50); return; }
       const pluginReg = new PluginActivityRegistry(host.registries.views);
       composite = new CompositeActivityRegistry([builtIns, pluginReg]);
       setItems(composite.list());
-      pluginSub = pluginReg.onDidChange(() => setItems(composite.list()));
-      topSub = composite.onDidChange(() => setItems(composite.list()));
+      // composite.onDidChange fans into every child (including pluginReg),
+      // so a single subscription is sufficient — no need to also subscribe pluginReg.
+      topSub = composite.onDidChange(() => { if (!cancelled) setItems(composite.list()); });
     };
     trySubscribe();
 
     return () => {
-      pluginSub?.dispose();
+      cancelled = true;
+      if (pendingTimer) clearTimeout(pendingTimer);
       topSub?.dispose();
     };
   }, []);
