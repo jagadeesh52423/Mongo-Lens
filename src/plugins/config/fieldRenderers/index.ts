@@ -25,4 +25,16 @@ export class FieldRendererRegistry {
 }
 
 export const defaultFieldRendererRegistry = new FieldRendererRegistry();
-// Concrete registrations happen in Tasks 14–17.
+
+export { stringField } from './StringField';
+export { numberField } from './NumberField';
+export { booleanField } from './BooleanField';
+
+import { stringField } from './StringField';
+import { numberField } from './NumberField';
+import { booleanField } from './BooleanField';
+
+// Order matters: more-specific renderers register first.
+defaultFieldRendererRegistry.register(numberField);
+defaultFieldRendererRegistry.register(booleanField);
+defaultFieldRendererRegistry.register(stringField);
