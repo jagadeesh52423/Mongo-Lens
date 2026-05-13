@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import type { FieldRenderer, FieldRendererProps } from './index';
 
 export const numberField: FieldRenderer = {
@@ -21,6 +21,7 @@ function NumberInput(p: Pick<FieldRendererProps, 'id' | 'error'> & {
   min?: number; max?: number;
 }) {
   const [local, setLocal] = useState(p.value === undefined ? '' : String(p.value));
+  useEffect(() => { setLocal(p.value === undefined ? '' : String(p.value)); }, [p.value]);
   return (
     <span>
       <input

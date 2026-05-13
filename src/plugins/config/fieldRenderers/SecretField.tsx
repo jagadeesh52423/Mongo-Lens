@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import type { FieldRenderer } from './index';
 
 export const secretField: FieldRenderer = {
@@ -11,6 +11,7 @@ export const secretField: FieldRenderer = {
 function SecretInput(p: { id?: string; value: string | undefined; onCommit: (v: string) => void; error?: string }) {
   const [local, setLocal] = useState(p.value ?? '');
   const [revealed, setRevealed] = useState(false);
+  useEffect(() => { setLocal(p.value ?? ''); }, [p.value]);
   return (
     <span>
       <input

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import type { FieldRenderer, FieldRendererProps } from './index';
 
 export const stringField: FieldRenderer = {
@@ -26,6 +26,7 @@ export const stringField: FieldRenderer = {
 
 function StringInput(p: Pick<FieldRendererProps, 'id' | 'error'> & { value: string | undefined; onCommit: (v: string) => void }) {
   const [local, setLocal] = useState(p.value ?? '');
+  useEffect(() => { setLocal(p.value ?? ''); }, [p.value]);
   return (
     <span>
       <input
