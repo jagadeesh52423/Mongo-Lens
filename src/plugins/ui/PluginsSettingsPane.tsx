@@ -4,6 +4,7 @@ import type { PluginFs } from '../io';
 import type { ConfigService } from '../config/ConfigService';
 import { PluginList } from './PluginList';
 import { PluginDetailPane } from './PluginDetailPane';
+import { PluginConfigRoute } from './PluginConfigRoute';
 
 interface Props {
   records: PluginRecord[];
@@ -15,8 +16,11 @@ interface Props {
   getConfigService?: (pluginId: string) => ConfigService | undefined;
 }
 
+type ViewMode = 'detail' | 'config';
+
 export function PluginsSettingsPane(p: Props): ReactElement {
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [view, setView] = useState<ViewMode>('detail');
 
   useEffect(() => {
     if (selectedId === null && p.records.length > 0) {
@@ -25,10 +29,22 @@ export function PluginsSettingsPane(p: Props): ReactElement {
     }
     if (selectedId !== null && !p.records.some(r => r.id === selectedId)) {
       setSelectedId(p.records[0]?.id ?? null);
+      setView('detail');
     }
   }, [p.records, selectedId]);
 
+  const handleSelect = (id: string) => {
+    setSelectedId(id);
+    setView('detail');
+  };
+
+  const handleOpenConfig = (pluginId: string) => {
+    setSelectedId(pluginId);
+    setView('config');
+  };
+
   const selected = p.records.find(r => r.id === selectedId) ?? null;
+  const configService = selectedId ? p.getConfigService?.(selectedId) : undefined;
 
   return (
     <section aria-label="Plugins" className="plugins-settings">
@@ -43,16 +59,26 @@ export function PluginsSettingsPane(p: Props): ReactElement {
           <PluginList
             records={p.records}
             selectedId={selectedId}
-            onSelect={setSelectedId}
+            onSelect={handleSelect}
           />
-          <PluginDetailPane
-            record={selected}
-            fs={p.fs}
-            configService={selectedId ? p.getConfigService?.(selectedId) : undefined}
-            onEnable={p.onEnable}
-            onDisable={p.onDisable}
-            onUninstall={p.onUninstall}
-          />
+          {view === 'config' && selected ? (
+            <PluginConfigRoute
+              pluginName={selected.manifest?.name ?? selected.id}
+              schema={selected.manifest?.contributes?.configuration ?? null}
+              configService={configService}
+              onBack={() => setView('detail')}
+            />
+          ) : (
+            <PluginDetailPane
+              record={selected}
+              fs={p.fs}
+              configService={configService}
+              onEnable={p.onEnable}
+              onDisable={p.onDisable}
+              onUninstall={p.onUninstall}
+              onOpenConfig={handleOpenConfig}
+            />
+          )}
         </div>
       )}
     </section>

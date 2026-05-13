@@ -14,6 +14,8 @@ interface Props {
   onEnable: (id: string) => void;
   onDisable: (id: string) => void;
   onUninstall: (id: string) => void;
+  /** Called when the user clicks "Configure…" in the Settings section header. */
+  onOpenConfig?: (pluginId: string) => void;
 }
 
 export function PluginDetailPane(p: Props): ReactElement {
@@ -74,6 +76,7 @@ export function PluginDetailPane(p: Props): ReactElement {
         <SettingsSection
           schema={record.manifest.contributes.configuration}
           configService={p.configService}
+          onOpenConfig={p.onOpenConfig ? () => p.onOpenConfig!(record.id) : undefined}
         />
       )}
 
@@ -92,6 +95,8 @@ export function PluginDetailPane(p: Props): ReactElement {
 function SettingsSection(p: {
   schema: ConfigurationContribution;
   configService: ConfigService;
+  /** When provided, renders a "Configure…" button that opens the dedicated route. */
+  onOpenConfig?: () => void;
 }): ReactElement {
   const [initial, setInitial] = useState<Record<string, unknown> | null>(null);
   useEffect(() => {
@@ -102,7 +107,12 @@ function SettingsSection(p: {
   if (!initial) return <section className="settings-section"><h4>Settings</h4><p>Loading…</p></section>;
   return (
     <section className="settings-section">
-      <h4>Settings</h4>
+      <header className="settings-section-header">
+        <h4>Settings</h4>
+        {p.onOpenConfig && (
+          <button type="button" onClick={p.onOpenConfig}>Configure…</button>
+        )}
+      </header>
       <PluginConfigForm
         compact
         schema={p.schema}
