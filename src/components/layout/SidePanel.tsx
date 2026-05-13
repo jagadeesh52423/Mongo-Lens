@@ -3,23 +3,54 @@ import type { ActivityItem } from '../../layout/activityBar';
 
 interface Props { item: ActivityItem | null }
 
+interface CachedView {
+  el: HTMLDivElement;
+  disposable: { dispose(): void } | null;
+}
+
 export function SidePanel({ item }: Props) {
-  const bodyRef = useRef<HTMLDivElement | null>(null);
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  const cacheRef = useRef<Map<string, CachedView>>(new Map());
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     setError(null);
-    if (!item || !bodyRef.current) return;
-    let disposable: { dispose(): void } | null = null;
-    try {
-      disposable = item.render(bodyRef.current);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+    const host = hostRef.current;
+    if (!host) return;
+
+    cacheRef.current.forEach(({ el }, id) => {
+      el.style.display = item && id === item.id ? '' : 'none';
+    });
+
+    if (!item) return;
+
+    let entry = cacheRef.current.get(item.id);
+    if (!entry) {
+      const el = document.createElement('div');
+      el.style.position = 'absolute';
+      el.style.inset = '0';
+      el.style.overflow = 'hidden';
+      host.appendChild(el);
+      try {
+        const disposable = item.render(el);
+        entry = { el, disposable };
+        cacheRef.current.set(item.id, entry);
+      } catch (e) {
+        host.removeChild(el);
+        setError(e instanceof Error ? e.message : String(e));
+      }
     }
-    return () => {
-      try { disposable?.dispose(); } catch { /* never throw */ }
-    };
   }, [item?.id]);
+
+  useEffect(() => {
+    const cache = cacheRef.current;
+    return () => {
+      cache.forEach(({ disposable }) => {
+        try { disposable?.dispose(); } catch { /* never throw */ }
+      });
+      cache.clear();
+    };
+  }, []);
 
   return (
     <div
@@ -40,13 +71,21 @@ export function SidePanel({ item }: Props) {
       >
         {item?.title ?? ''}
       </div>
-      {error ? (
+      {error && (
         <div role="alert" style={{ padding: 12, color: 'var(--error, red)' }}>
           View failed to render: {error}
         </div>
-      ) : item ? (
-        <div ref={bodyRef} style={{ flex: 1, overflow: 'auto' }} />
-      ) : (
+      )}
+      <div
+        ref={hostRef}
+        style={{
+          flex: 1, minHeight: 0,
+          position: 'relative',
+          overflow: 'hidden',
+          display: item && !error ? 'block' : 'none',
+        }}
+      />
+      {!item && !error && (
         <div data-testid="side-panel-empty" style={{ flex: 1, padding: 12, color: 'var(--fg-dim)' }}>
           No view selected.
         </div>
