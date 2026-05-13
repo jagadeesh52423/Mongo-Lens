@@ -9,6 +9,7 @@ export interface PluginHost {
   manager: PluginManager;
   registries: RegistrySet;
   broker: PermissionBroker;
+  fs: PluginFs;
 }
 
 export function createPluginHost(opts: {
@@ -29,7 +30,7 @@ export function createPluginHost(opts: {
     pluginsRoot: opts.pluginsRoot,
     hostBackend: opts.hostBackend,
   });
-  return { manager, registries, broker };
+  return { manager, registries, broker, fs };
 }
 
 function memFs(): PluginFs {

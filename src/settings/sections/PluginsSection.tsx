@@ -4,6 +4,14 @@ import { register } from '../registry';
 import { PluginsSettingsPane } from '../../plugins/ui/PluginsSettingsPane';
 import { usePluginRecords } from '../../plugins/usePluginManager';
 import type { PluginHost } from '../../plugins/host';
+import type { PluginFs } from '../../plugins/io';
+
+const NO_OP_FS: PluginFs = {
+  listPluginDirs: async () => [],
+  readManifest: async () => '{}',
+  readEntry: async () => '',
+  pluginEntryPath: (d, m) => `${d}/${m}`,
+};
 
 /**
  * Returns the plugin host singleton attached to window by App.tsx at startup,
@@ -50,6 +58,7 @@ function PluginsSectionInner({ host }: { host: PluginHost }) {
       {error && <p role="alert" style={{ color: 'red' }}>{error}</p>}
       <PluginsSettingsPane
         records={records}
+        fs={host.fs}
         onInstall={handleInstall}
         onEnable={handleEnable}
         onDisable={handleDisable}
@@ -70,6 +79,7 @@ function PluginsSection() {
     return (
       <PluginsSettingsPane
         records={[]}
+        fs={NO_OP_FS}
         onInstall={() => {}}
         onEnable={() => {}}
         onDisable={() => {}}
