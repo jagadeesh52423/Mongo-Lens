@@ -8,6 +8,7 @@ import {
   AITool, ConnectionProvider, ThemeContract, ExportTargetContract,
 } from './contracts';
 import type { ConfigChangeEvent } from '../config';
+import type { PluginManifest } from '../manifest';
 
 export interface MongolensAPI {
   commands: {
@@ -40,7 +41,7 @@ export function createMongolens(params: {
   registries: RegistrySet;
   services: HostServices;
   logger?: Logger;
-  manifest?: { contributes?: { views?: { id: string; icon?: string }[] } };
+  manifest?: PluginManifest | { contributes?: { views?: { id: string; icon?: string }[] } };
 }): MongolensAPI {
   const { pluginId, registries: r, services, manifest } = params;
 

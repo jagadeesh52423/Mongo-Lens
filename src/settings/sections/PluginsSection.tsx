@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { register } from '../registry';
 import { PluginsSettingsPane } from '../../plugins/ui/PluginsSettingsPane';
-import { usePluginRecords } from '../../plugins/usePluginManager';
+import { usePluginRecords, useGetConfigService } from '../../plugins/usePluginManager';
 import type { PluginHost } from '../../plugins/host';
 import type { PluginFs } from '../../plugins/io';
 
@@ -27,6 +27,7 @@ function getHost(): PluginHost | null {
  */
 function PluginsSectionInner({ host }: { host: PluginHost }) {
   const records = usePluginRecords(host);
+  const getConfigService = useGetConfigService(host);
   const [error, setError] = useState<string | null>(null);
 
   const handleInstall = async () => {
@@ -63,6 +64,7 @@ function PluginsSectionInner({ host }: { host: PluginHost }) {
         onEnable={handleEnable}
         onDisable={handleDisable}
         onUninstall={handleUninstall}
+        getConfigService={getConfigService}
       />
     </>
   );

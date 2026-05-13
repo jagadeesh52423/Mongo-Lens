@@ -1,6 +1,7 @@
 import { ReactElement, useEffect, useState } from 'react';
 import type { PluginRecord } from '../PluginManager';
 import type { PluginFs } from '../io';
+import type { ConfigService } from '../config/ConfigService';
 import { PluginList } from './PluginList';
 import { PluginDetailPane } from './PluginDetailPane';
 
@@ -11,6 +12,7 @@ interface Props {
   onEnable:    (id: string) => void;
   onDisable:   (id: string) => void;
   onUninstall: (id: string) => void;
+  getConfigService?: (pluginId: string) => ConfigService | undefined;
 }
 
 export function PluginsSettingsPane(p: Props): ReactElement {
@@ -46,6 +48,7 @@ export function PluginsSettingsPane(p: Props): ReactElement {
           <PluginDetailPane
             record={selected}
             fs={p.fs}
+            configService={selectedId ? p.getConfigService?.(selectedId) : undefined}
             onEnable={p.onEnable}
             onDisable={p.onDisable}
             onUninstall={p.onUninstall}
