@@ -6,13 +6,27 @@ import {
   deleteConnection as ipcDelete,
   connectConnection,
   disconnectConnection,
+  onSshSessionLost,
 } from '../../ipc';
 import { useConnectionsStore } from '../../store/connections';
 import { useEditorStore } from '../../store/editor';
 import { ConnectionDialog } from './ConnectionDialog';
 import { ConnectionTree } from './ConnectionTree';
 import { ContextMenu } from '../ui/ContextMenu';
+import { PassphraseDialog } from './PassphraseDialog';
+import { HostKeyDialog } from './HostKeyDialog';
 import type { Connection, ConnectionInput } from '../../types';
+
+// Pending host-key confirmation state — stored while waiting for user input.
+interface PendingHostKey {
+  connectionId: string;
+  host: string;
+  port: number;
+  algorithm: string;
+  fingerprint: string;
+  /** Passphrase already collected, if any, to re-supply on the retry call. */
+  passphrase?: string;
+}
 
 export function ConnectionPanel() {
   const {
@@ -31,6 +45,9 @@ export function ConnectionPanel() {
   const [creating, setCreating] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; connection: Connection } | null>(null);
   const [expandedConns, setExpandedConns] = useState<Set<string>>(new Set());
+  // SSH dialogs
+  const [passphraseFor, setPassphraseFor] = useState<Connection | null>(null);
+  const [pendingHostKey, setPendingHostKey] = useState<PendingHostKey | null>(null);
   const openTab = useEditorStore((s) => s.openTab);
 
   function toggleConnExpanded(id: string) {
@@ -58,6 +75,23 @@ export function ConnectionPanel() {
     listConnections().then(setConnections).catch((e) => console.error(e));
   }, [setConnections]);
 
+  // Listen for SSH session-loss events from the Rust backend and flip the
+  // connection state to disconnected so the UI reflects the drop immediately.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    onSshSessionLost(({ connectionId }) => {
+      markDisconnected(connectionId);
+      setExpandedConns((s) => {
+        const n = new Set(s);
+        n.delete(connectionId);
+        return n;
+      });
+    })
+      .then((fn) => { unlisten = fn; })
+      .catch((e) => console.error('ssh_session_lost listener error:', e));
+    return () => { unlisten?.(); };
+  }, [markDisconnected]);
+
   async function handleSave(input: ConnectionInput) {
     if (editing) {
       const updated = await ipcUpdate(editing.id, input);
@@ -76,15 +110,49 @@ export function ConnectionPanel() {
     removeConnection(c.id);
   }
 
-  async function handleConnect(c: Connection) {
+  /** Core connect logic, shared by first attempt, passphrase retry, and host-key retry. */
+  async function doConnect(c: Connection, passphrase?: string, acceptHostKey?: boolean) {
     try {
-      await connectConnection(c.id);
-      markConnected(c.id);
-      setExpandedConns((s) => new Set(s).add(c.id));
-      setActive(c.id, null);
+      const result = await connectConnection(c.id, passphrase, acceptHostKey);
+      if (result.type === 'connected') {
+        markConnected(c.id);
+        setExpandedConns((s) => new Set(s).add(c.id));
+        setActive(c.id, null);
+      } else if (result.type === 'passphraseRequired') {
+        // Prompt for passphrase; on submit retry with it.
+        setPassphraseFor(c);
+      } else if (result.type === 'hostKeyUnknown') {
+        // Prompt user to confirm fingerprint.
+        setPendingHostKey({
+          connectionId: result.connectionId,
+          host: result.host,
+          port: result.port,
+          algorithm: result.algorithm,
+          fingerprint: result.fingerprint,
+          passphrase,
+        });
+      }
     } catch (e) {
-      alert(`Error: ${(e as Error).message}`);
+      alert(`Connection error: ${(e as Error).message ?? String(e)}`);
     }
+  }
+
+  function handleConnect(c: Connection) {
+    return doConnect(c);
+  }
+
+  function handlePassphraseConfirm(passphrase: string) {
+    const c = passphraseFor;
+    setPassphraseFor(null);
+    if (c) doConnect(c, passphrase);
+  }
+
+  function handleHostKeyAccept() {
+    const pending = pendingHostKey;
+    setPendingHostKey(null);
+    if (!pending) return;
+    const c = connections.find((x) => x.id === pending.connectionId);
+    if (c) doConnect(c, pending.passphrase, true);
   }
 
   async function handleDisconnect(c: Connection) {
@@ -164,6 +232,23 @@ export function ConnectionPanel() {
             { label: 'Delete', action: () => handleDelete(contextMenu.connection) },
           ]}
           onClose={() => setContextMenu(null)}
+        />
+      )}
+      {passphraseFor && (
+        <PassphraseDialog
+          connectionName={passphraseFor.name}
+          onConfirm={handlePassphraseConfirm}
+          onCancel={() => setPassphraseFor(null)}
+        />
+      )}
+      {pendingHostKey && (
+        <HostKeyDialog
+          host={pendingHostKey.host}
+          port={pendingHostKey.port}
+          algorithm={pendingHostKey.algorithm}
+          fingerprint={pendingHostKey.fingerprint}
+          onAccept={handleHostKeyAccept}
+          onReject={() => setPendingHostKey(null)}
         />
       )}
     </div>

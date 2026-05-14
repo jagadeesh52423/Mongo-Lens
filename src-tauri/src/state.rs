@@ -1,11 +1,11 @@
+use crate::logger::tracing_impl::TracingLogger;
+use crate::logger::Logger;
+use crate::ssh::TunnelHandle;
 use mongodb::Client;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
-
-use crate::logger::tracing_impl::TracingLogger;
-use crate::logger::Logger;
 
 pub struct AppState {
     pub db_path: PathBuf,
@@ -14,6 +14,9 @@ pub struct AppState {
     /// URI variant (with any fallback query params applied) that the cached client
     /// actually connected with. Keyed by connection id, mirrors `mongo_clients`.
     pub mongo_uris: Mutex<HashMap<String, String>>,
+    /// Active SSH tunnel handles, keyed by connection id.
+    /// The Mutex is held only across insert/remove — never across an .await.
+    pub ssh_tunnels: Mutex<HashMap<String, TunnelHandle>>,
     /// Per-tab cancel flag. Set to true to signal the running script to abort.
     pub active_scripts: Mutex<HashMap<String, Arc<AtomicBool>>>,
     /// Generic logger handle used by commands and the runner executor.
@@ -31,6 +34,7 @@ impl AppState {
             logs_dir,
             mongo_clients: Mutex::new(HashMap::new()),
             mongo_uris: Mutex::new(HashMap::new()),
+            ssh_tunnels: Mutex::new(HashMap::new()),
             active_scripts: Mutex::new(HashMap::new()),
             logger,
             tracing_logger: Some(tracing_logger),

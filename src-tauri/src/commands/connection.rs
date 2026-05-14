@@ -1,10 +1,14 @@
 use crate::db::{self, connections::ConnectionRecord};
 use crate::keychain;
 use crate::logctx;
+use crate::logger::Logger;
 use crate::mongo;
+use crate::mongo::connect::{connect, ConnectOutcome};
+use crate::ssh::auth::AuthSecrets;
 use crate::state::AppState;
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use std::sync::Arc;
+use tauri::{AppHandle, Emitter, Manager, State};
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -27,6 +31,91 @@ pub struct ConnectionInput {
 pub struct TestResult {
     pub ok: bool,
     pub error: Option<String>,
+}
+
+/// Returned by `connect_connection` to let the frontend decide whether to
+/// show a passphrase dialog, a host-key confirmation dialog, or nothing.
+#[derive(Debug, Serialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum ConnectResult {
+    /// MongoDB client established; connection is live.
+    Connected,
+    /// SSH key is encrypted. Retry `connect_connection` with `passphrase` set.
+    PassphraseRequired { connection_id: String },
+    /// SSH host key unknown. Show fingerprint to user; retry with `acceptHostKey: true`.
+    HostKeyUnknown {
+        connection_id: String,
+        fingerprint: String,
+        algorithm: String,
+        host: String,
+        port: u16,
+    },
+}
+
+/// Payload for the `ssh_session_lost` Tauri event emitted when an SSH tunnel drops.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SshSessionLostPayload {
+    pub connection_id: String,
+}
+
+/// Monitors a tunnel's liveness watch channel. When it transitions to dead:
+/// 1. Removes the connection from all AppState maps (client, uri, tunnel).
+/// 2. Emits `ssh_session_lost` so the UI can flip to disconnected.
+///
+/// This runs concurrently with explicit `disconnect_connection` — both paths check
+/// for entry presence before removing, so they're idempotent.
+///
+/// State is accessed through `app_handle.state()` to avoid lifetime issues with
+/// `tauri::State` inside spawned tasks.
+async fn handle_session_loss(
+    mut alive_rx: tokio::sync::watch::Receiver<bool>,
+    connection_id: String,
+    app_handle: AppHandle,
+    log: Arc<dyn Logger>,
+) {
+    // Wait until the watch transitions (session dropped) or the sender is dropped (tunnel closed).
+    loop {
+        match alive_rx.changed().await {
+            Err(_) => break, // sender dropped — tunnel was explicitly closed, nothing to do
+            Ok(()) => {
+                if !*alive_rx.borrow() {
+                    break; // session went dead
+                }
+                // spurious true→true transition: stay in loop
+            }
+        }
+    }
+
+    // If the watch still reads true, the sender was dropped cleanly (explicit close) — not a crash.
+    if *alive_rx.borrow() {
+        return;
+    }
+
+    log.warn(
+        "ssh session lost",
+        logctx! { "connId" => connection_id.clone() },
+    );
+
+    // Access AppState through the app handle (safe from any async context).
+    let state: State<'_, AppState> = app_handle.state();
+
+    // Clean up state — same as disconnect_connection, but triggered by session drop.
+    let client: Option<mongodb::Client> = state.mongo_clients.lock().unwrap().remove(&connection_id);
+    state.mongo_uris.lock().unwrap().remove(&connection_id);
+    let tunnel: Option<crate::ssh::TunnelHandle> = state.ssh_tunnels.lock().unwrap().remove(&connection_id);
+
+    if let Some(c) = client {
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(3), c.shutdown()).await;
+    }
+    if let Some(t) = tunnel {
+        t.close().await;
+    }
+
+    // Notify the frontend.
+    let _ = app_handle.emit("ssh_session_lost", SshSessionLostPayload {
+        connection_id,
+    });
 }
 
 fn now_iso() -> String {
@@ -140,13 +229,29 @@ pub fn update_connection(
     Ok(rec)
 }
 
+/// Delete a connection record. Shuts down any live MongoDB client and SSH tunnel
+/// before removing the DB row, ensuring no leaked resources (S5).
 #[tauri::command]
-pub fn delete_connection(state: State<'_, AppState>, id: String) -> Result<(), String> {
+pub async fn delete_connection(state: State<'_, AppState>, id: String) -> Result<(), String> {
     let log = state.logger.child(logctx! {
         "logger" => "commands.connection",
         "connId" => id.clone(),
     });
     log.info("delete_connection", logctx! {});
+
+    // Drain client + tunnel first (I-2: pool before tunnel).
+    let client = state.mongo_clients.lock().unwrap().remove(&id);
+    state.mongo_uris.lock().unwrap().remove(&id);
+    let tunnel = state.ssh_tunnels.lock().unwrap().remove(&id);
+
+    if let Some(c) = client {
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(3), c.shutdown()).await;
+    }
+    if let Some(t) = tunnel {
+        t.close().await;
+        log.info("ssh tunnel closed (delete)", logctx! {});
+    }
+
     let conn = state.open_db().map_err(|e| {
         log.error("open_db failed", logctx! { "err" => e.to_string() });
         e.to_string()
@@ -156,8 +261,6 @@ pub fn delete_connection(state: State<'_, AppState>, id: String) -> Result<(), S
         e.to_string()
     })?;
     keychain::delete_password(&id, log.as_ref())?;
-    state.mongo_clients.lock().unwrap().remove(&id);
-    state.mongo_uris.lock().unwrap().remove(&id);
     Ok(())
 }
 
@@ -199,16 +302,30 @@ pub async fn test_connection(
     }
 }
 
+/// Connect to a MongoDB instance, optionally through an SSH tunnel.
+///
+/// Returns a `ConnectResult` that the frontend pattern-matches to decide whether
+/// to open a passphrase dialog (`PassphraseRequired`) or a host-key confirmation
+/// dialog (`HostKeyUnknown`) before retrying.
+///
+/// Parameters:
+/// - `id`: connection record ID
+/// - `passphrase`: SSH key passphrase (supply on retry after `PassphraseRequired`)
+/// - `accept_host_key`: pass `true` after the user accepted the fingerprint in the UI
 #[tauri::command]
 pub async fn connect_connection(
+    app_handle: AppHandle,
     state: State<'_, AppState>,
     id: String,
-) -> Result<(), String> {
+    passphrase: Option<String>,
+    accept_host_key: Option<bool>,
+) -> Result<ConnectResult, String> {
     let log = state.logger.child(logctx! {
         "logger" => "commands.connection",
         "connId" => id.clone(),
     });
     log.info("connect_connection", logctx! {});
+
     let conn = state.open_db().map_err(|e| {
         log.error("open_db failed", logctx! { "err" => e.to_string() });
         e.to_string()
@@ -223,23 +340,108 @@ pub async fn connect_connection(
             "connection not found".to_string()
         })?;
     drop(conn);
+
     let pw = keychain::get_password(&id, log.as_ref())?;
-    let uri = mongo::build_uri(&rec, pw.as_deref());
-    let (client, winning_uri) = mongo::client_for(&uri, log.as_ref()).await?;
-    state.mongo_clients.lock().unwrap().insert(id.clone(), client);
-    state.mongo_uris.lock().unwrap().insert(id, winning_uri);
-    log.info("connect_connection ok", logctx! {});
-    Ok(())
+    let log_arc: Arc<dyn crate::logger::Logger> = log.clone();
+
+    // Build AuthSecrets at the IPC boundary — wraps passphrase in Zeroizing so heap is
+    // wiped on drop. Future auth variants (password, agent) extend AuthSecrets, not this site.
+    let secrets = AuthSecrets::new(passphrase);
+
+    let outcome = connect(
+        &rec,
+        pw.as_deref(),
+        secrets,
+        accept_host_key.unwrap_or(false),
+        log_arc,
+    )
+    .await?;
+
+    match outcome {
+        ConnectOutcome::Connected {
+            client,
+            winning_uri,
+            tunnel,
+        } => {
+            // Close any previously open tunnel for this connection before replacing.
+            let old_tunnel = state.ssh_tunnels.lock().unwrap().remove(&id);
+            if let Some(old) = old_tunnel {
+                old.close().await;
+            }
+
+            state.mongo_clients.lock().unwrap().insert(id.clone(), client);
+            state.mongo_uris.lock().unwrap().insert(id.clone(), winning_uri);
+
+            if let Some(t) = tunnel {
+                // Spawn the session-loss monitor before inserting the handle into state.
+                // The monitor holds its own watch::Receiver clone; changing the receiver
+                // requires &mut self so each waiter holds its own (N-8).
+                let alive_rx = t.alive_watch();
+                let monitor_log = log.clone();
+                let monitor_id = id.clone();
+                let monitor_handle = app_handle.clone();
+                tokio::spawn(async move {
+                    handle_session_loss(alive_rx, monitor_id, monitor_handle, monitor_log).await;
+                });
+
+                state.ssh_tunnels.lock().unwrap().insert(id.clone(), t);
+            }
+            log.info("connect_connection ok", logctx! {});
+            Ok(ConnectResult::Connected)
+        }
+        ConnectOutcome::PassphraseRequired { connection_id } => {
+            log.info("connect_connection: passphrase required", logctx! {});
+            Ok(ConnectResult::PassphraseRequired { connection_id })
+        }
+        ConnectOutcome::HostKeyUnknown {
+            connection_id,
+            fingerprint,
+            algorithm,
+            host,
+            port,
+        } => {
+            log.info(
+                "connect_connection: host key unknown",
+                logctx! { "host" => host.clone(), "alg" => algorithm.clone() },
+            );
+            Ok(ConnectResult::HostKeyUnknown {
+                connection_id,
+                fingerprint,
+                algorithm,
+                host,
+                port,
+            })
+        }
+    }
 }
 
 #[tauri::command]
-pub fn disconnect_connection(state: State<'_, AppState>, id: String) -> Result<(), String> {
+pub async fn disconnect_connection(state: State<'_, AppState>, id: String) -> Result<(), String> {
     let log = state.logger.child(logctx! {
         "logger" => "commands.connection",
         "connId" => id.clone(),
     });
     log.info("disconnect_connection", logctx! {});
-    state.mongo_clients.lock().unwrap().remove(&id);
+
+    // Remove the MongoDB client first (I-2: shutdown pool before closing tunnel).
+    let client = state.mongo_clients.lock().unwrap().remove(&id);
     state.mongo_uris.lock().unwrap().remove(&id);
+
+    // Gracefully shut down the pool so pooled connections close before the tunnel drops.
+    if let Some(c) = client {
+        let _ = tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            c.shutdown(),
+        )
+        .await;
+    }
+
+    // Now close the SSH tunnel (safe since the pool is drained).
+    let tunnel = state.ssh_tunnels.lock().unwrap().remove(&id);
+    if let Some(t) = tunnel {
+        t.close().await;
+        log.info("ssh tunnel closed", logctx! {});
+    }
+
     Ok(())
 }

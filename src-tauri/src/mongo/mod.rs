@@ -5,6 +5,7 @@ use crate::state::AppState;
 use tauri::State;
 
 pub mod authz;
+pub mod connect;
 pub mod fallback;
 pub mod strategies;
 

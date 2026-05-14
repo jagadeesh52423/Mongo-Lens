@@ -2,7 +2,13 @@ use super::LogCtx;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
-const SENSITIVE_KEYS: &[&str] = &["password", "secret", "token", "authorization"];
+const SENSITIVE_KEYS: &[&str] = &[
+    "password", "secret", "token", "authorization",
+    // SSH / key material
+    "passphrase", "sshPassphrase",
+    "privateKey", "private_key", "sshKey", "pem",
+    "credential", "credentials", "creds",
+];
 const URI_KEYS: &[&str] = &["uri", "mongoUri", "connectionString"];
 
 fn redact_uri(raw: &str) -> String {

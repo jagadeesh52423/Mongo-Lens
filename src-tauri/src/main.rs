@@ -6,6 +6,7 @@ mod keychain;
 mod logger;
 mod mongo;
 mod runner;
+mod ssh;
 mod state;
 
 use state::AppState;
@@ -104,6 +105,31 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             commands::plugin_secrets::get_plugin_secret,
             commands::plugin_secrets::delete_plugin_secret,
         ])
+        .on_window_event(|window, event| {
+            // On close: shut down all MongoDB pools (parallel, 1 s each), then all tunnels
+            // (parallel, 2 s each). Parallel execution keeps total stall at max(1 s, 2 s)
+            // regardless of connection count (C4). Ordering preserves pool-before-tunnel
+            // invariant (shutdown pools first so no in-flight queries hit a dead tunnel).
+            if let tauri::WindowEvent::CloseRequested { .. } = event {
+                let state = window.state::<AppState>();
+                let clients: Vec<_> = state.mongo_clients.lock().unwrap().drain().collect();
+                let tunnels: Vec<_> = state.ssh_tunnels.lock().unwrap().drain().collect();
+                if !clients.is_empty() || !tunnels.is_empty() {
+                    tauri::async_runtime::block_on(async move {
+                        // All pools in parallel — total wait = max(1 s, slowest pool).
+                        futures_util::future::join_all(clients.into_iter().map(|(_, c)| {
+                            tokio::time::timeout(std::time::Duration::from_secs(1), c.shutdown())
+                        }))
+                        .await;
+                        // All tunnels in parallel — total wait = max(2 s, slowest tunnel).
+                        futures_util::future::join_all(
+                            tunnels.into_iter().map(|(_, t)| t.close()),
+                        )
+                        .await;
+                    });
+                }
+            }
+        })
         .run(tauri::generate_context!())?;
     Ok(())
 }
