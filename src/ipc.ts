@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import type {
   Connection,
   ConnectionInput,
@@ -27,8 +28,18 @@ export async function testConnection(id: string): Promise<{ ok: boolean; error?:
   return invoke('test_connection', { id });
 }
 
-export async function connectConnection(id: string): Promise<void> {
-  return invoke('connect_connection', { id });
+// Discriminated union returned by connect_connection.
+export type ConnectResult =
+  | { type: 'connected' }
+  | { type: 'passphraseRequired'; connectionId: string }
+  | { type: 'hostKeyUnknown'; connectionId: string; fingerprint: string; algorithm: string; host: string; port: number };
+
+export async function connectConnection(
+  id: string,
+  passphrase?: string,
+  acceptHostKey?: boolean,
+): Promise<ConnectResult> {
+  return invoke('connect_connection', { id, passphrase, acceptHostKey });
 }
 
 export async function disconnectConnection(id: string): Promise<void> {
@@ -138,4 +149,24 @@ export async function getAiToken(): Promise<string | null> {
 
 export async function deleteAiToken(): Promise<void> {
   return invoke('delete_ai_token');
+}
+
+// --- SSH session-loss events ---
+
+/** Payload for the `ssh_session_lost` Tauri event. */
+export interface SshSessionLostPayload {
+  connectionId: string;
+}
+
+/**
+ * Subscribe to `ssh_session_lost` events emitted by the Rust backend when an
+ * SSH tunnel drops unexpectedly. Returns an unlisten function to clean up the
+ * subscription on component unmount.
+ */
+export function onSshSessionLost(
+  handler: (payload: SshSessionLostPayload) => void,
+): Promise<() => void> {
+  return listen<SshSessionLostPayload>('ssh_session_lost', (event) => {
+    handler(event.payload);
+  });
 }
