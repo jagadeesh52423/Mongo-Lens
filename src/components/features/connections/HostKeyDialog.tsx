@@ -1,3 +1,6 @@
+import { Button, Dialog, Text } from '../../ui';
+import styles from './HostKeyDialog.module.css';
+
 interface HostKeyDialogProps {
   host: string;
   port: number;
@@ -22,45 +25,25 @@ export function HostKeyDialog({
   onReject,
 }: HostKeyDialogProps) {
   return (
-    <div
-      style={{
-        position: 'fixed', inset: 0, zIndex: 100,
-        background: 'rgba(0,0,0,0.5)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-      }}
-    >
-      <div
-        style={{
-          background: 'var(--surface)', border: '1px solid var(--border)',
-          borderRadius: 8, padding: 24, width: 440,
-          display: 'flex', flexDirection: 'column', gap: 16,
-        }}
-      >
-        <h3 style={{ margin: 0 }}>Unknown SSH Host Key</h3>
-        <p style={{ margin: 0, fontSize: 13, color: 'var(--fg-dim)' }}>
-          The authenticity of <strong>{host}:{port}</strong> cannot be established.
-          Its {algorithm} key fingerprint is:
-        </p>
-        <code
-          style={{
-            display: 'block', padding: '8px 12px',
-            background: 'var(--bg)', borderRadius: 4,
-            fontSize: 12, wordBreak: 'break-all',
-          }}
-        >
-          {fingerprint}
-        </code>
-        <p style={{ margin: 0, fontSize: 13, color: 'var(--fg-dim)' }}>
-          Are you sure you want to connect? If you trust this host, the key will be
-          saved and you will not be prompted again.
-        </p>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-          <button type="button" onClick={onReject}>Cancel</button>
-          <button type="button" onClick={onAccept} style={{ color: 'var(--accent-red)' }}>
-            Trust &amp; Connect
-          </button>
+    <Dialog open onClose={onReject} ariaLabel="Unknown SSH Host Key" width={440}>
+      <Dialog.Header title="Unknown SSH Host Key" onClose={onReject} />
+      <Dialog.Body>
+        <div className={styles.body}>
+          <Text variant="dim" as="p">
+            The authenticity of <strong>{host}:{port}</strong> cannot be established.
+            Its {algorithm} key fingerprint is:
+          </Text>
+          <code className={styles.fingerprint}>{fingerprint}</code>
+          <Text variant="dim" as="p">
+            Are you sure you want to connect? If you trust this host, the key will be
+            saved and you will not be prompted again.
+          </Text>
         </div>
-      </div>
-    </div>
+      </Dialog.Body>
+      <Dialog.Footer>
+        <Button onClick={onReject}>Cancel</Button>
+        <Button variant="danger" onClick={onAccept}>Trust &amp; Connect</Button>
+      </Dialog.Footer>
+    </Dialog>
   );
 }
