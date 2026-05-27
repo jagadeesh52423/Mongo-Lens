@@ -1080,9 +1080,9 @@ export default function App() {
 - Modify: `src/components/features/editor/EditorArea.tsx` (≤ 240L)
 - Possibly extract: `EditorTabBar.tsx`, `EditorEmptyState.tsx`
 
-- [ ] **Step 1: Identify substructure** (tab bar, editor host, empty state).
-- [ ] **Step 2: Extract.** Use `<Toolbar>` for tab row container.
-- [ ] **Step 3:** Commit `refactor(editor): decompose EditorArea`.
+- [x] **Step 1: Identify substructure** (tab bar, editor host, empty state).
+- [x] **Step 2: Extract.** Use `<Toolbar>` for tab row container.
+- [x] **Step 3:** Commit `refactor(editor): decompose EditorArea`.
 
 ---
 

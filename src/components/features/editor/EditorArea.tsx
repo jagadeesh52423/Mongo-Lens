@@ -1,60 +1,49 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { Panel, PanelGroup } from 'react-resizable-panels';
 import { loader } from '@monaco-editor/react';
-import { modelPathForTab } from './ScriptEditor';
+import { modelPathForTab, ScriptEditor } from './ScriptEditor';
 import { useEditorStore, DEFAULT_PANEL_SIZES } from '../../../store/editor';
 import { useConnectionsStore } from '../../../store/connections';
-import { ScriptEditor } from './ScriptEditor';
 import { ContextBar } from './ContextBar';
-import { runScript, cancelScript, createScript, updateScript } from '../../../ipc';
-import { useResultsStore } from '../../../store/results';
+import { EditorTabBar } from './EditorTabBar';
 import { ResultsPanel } from '../results/ResultsPanel';
 import { useCollectionCompletions } from '../../../hooks/useCollectionCompletions';
 import { SplitHandle } from '../../shared/SplitHandle';
 import { useTabActions } from '../../../hooks/useTabActions';
 import { newScriptTab } from '../../../utils/newScriptTab';
 import { getStatementAtCursor } from '../../../utils/statementDetection';
-import { getExecutionMode, getExecutionModes } from '../../../execution-modes';
-import { useLogger } from '../../../services/logger';
+import { getExecutionModes } from '../../../execution-modes';
+import { useEditorActions } from './useEditorActions';
+import { useResultsStore } from '../../../store/results';
 import type { EditorSelection } from '../../../types';
+import styles from './EditorArea.module.css';
 
 export function EditorArea() {
   const {
-    tabs,
-    activeTabId,
-    setActive,
-    closeTab,
-    updateContent,
-    openTab,
-    updateTab,
-    bumpScriptsVersion,
-    panelSizes,
-    setPanelSizes,
-    selections,
-    setSelection,
+    tabs, activeTabId, setActive, closeTab, updateContent, openTab, updateTab,
+    panelSizes, setPanelSizes, selections, setSelection,
   } = useEditorStore();
   const { activeConnectionId, activeDatabase } = useConnectionsStore();
-  const startRun = useResultsStore((s) => s.startRun);
-  const finishRun = useResultsStore((s) => s.finishRun);
-  const setError = useResultsStore((s) => s.setError);
   const active = tabs.find((t) => t.id === activeTabId);
   const completions = useCollectionCompletions(
     active?.connectionId ?? activeConnectionId,
     active?.database ?? activeDatabase,
   );
-  const [pageSizes, setPageSizes] = useState<Record<string, number>>({});
-  const activePageSize = active ? (pageSizes[active.id] ?? 50) : 50;
   const isRunning = useResultsStore((s) => (active ? !!s.byTab[active.id]?.isRunning : false));
-  const log = useLogger('components.EditorArea');
   useTabActions();
 
+  const actions = useEditorActions(active);
+  const {
+    activePageSize, cursorLines, handleExecute, handlePageChange, handleDocUpdated,
+    handleCancel, handleSave, handleSaveAs, setActivePageSize, setActiveCursorLine,
+  } = actions;
+
+  // Dispose Monaco models for tabs that were just removed (prevents leaks).
   const prevTabIdsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     const current = new Set(tabs.map((t) => t.id));
     const removed: string[] = [];
-    prevTabIdsRef.current.forEach((id) => {
-      if (!current.has(id)) removed.push(id);
-    });
+    prevTabIdsRef.current.forEach((id) => { if (!current.has(id)) removed.push(id); });
     prevTabIdsRef.current = current;
     if (removed.length === 0) return;
     const monaco = loader.__getMonacoInstance();
@@ -65,12 +54,8 @@ export function EditorArea() {
     }
   }, [tabs]);
 
-  const [cursorLines, setCursorLines] = useState<Record<string, number>>({});
-  const lastRunContentRef = useRef<Record<string, string>>({});
-
   const activeCursorLine = active ? (cursorLines[active.id] ?? 1) : 1;
   const activeSelection = active ? (selections[active.id] ?? null) : null;
-
   const currentStatement =
     active && active.type === 'script' && !activeSelection
       ? getStatementAtCursor(active.content, activeCursorLine)
@@ -79,182 +64,30 @@ export function EditorArea() {
     ? { startLine: currentStatement.startLine, endLine: currentStatement.endLine }
     : null;
 
-  async function executeContent(content: string, page: number, pageSize: number) {
-    if (!active || active.type !== 'script') return;
-    if (!content) return;
-    const connId = active.connectionId ?? activeConnectionId;
-    const db = active.database ?? activeDatabase;
-    if (!connId || !db) return;
-    lastRunContentRef.current[active.id] = content;
-    const runId = crypto.randomUUID();
-    log.debug('execute requested', {
-      runId,
-      tabId: active.id,
-      connId,
-      db,
-      page,
-      pageSize,
-    });
-    startRun(active.id, runId);
-    try {
-      await runScript(active.id, connId, db, content, page, pageSize, runId);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (msg === 'cancelled') return;
-      log.error('runScript failed', { runId, tabId: active.id, err: msg });
-      setError(active.id, msg);
-      finishRun(active.id, 0);
-    }
-  }
-
-  async function handleExecute(modeId: string) {
-    const mode = getExecutionMode(modeId);
-    if (!mode || !active || active.type !== 'script') return;
-    const content = mode.resolveContent({
-      content: active.content,
-      cursorLine: cursorLines[active.id] ?? 1,
-      // Execution modes only care about the selected text, not its range.
-      selection: selections[active.id]?.text ?? null,
-    });
-    if (content == null) return;
-    await executeContent(content, 0, activePageSize);
-  }
-
-  async function handlePageChange(page: number, pageSize: number) {
-    if (!active) return;
-    const last = lastRunContentRef.current[active.id] ?? active.content;
-    await executeContent(last, page, pageSize);
-  }
-
-  async function handleDocUpdated() {
-    if (!active) return;
-    const last = lastRunContentRef.current[active.id] ?? active.content;
-    await executeContent(last, 0, activePageSize);
-  }
-
-  async function handleCancel() {
-    if (!active) return;
-    await cancelScript(active.id);
-    finishRun(active.id, 0);
-  }
-
-  async function handleSave() {
-    if (!active || active.type !== 'script' || !active.savedScriptId) return;
-    try {
-      const updated = await updateScript(
-        active.savedScriptId,
-        active.title,
-        active.content,
-        active.savedScriptTags ?? '',
-        active.connectionId
-      );
-      updateTab(active.id, {
-        isDirty: false,
-        savedScriptTags: updated.tags,
-      });
-      bumpScriptsVersion();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      alert(`Failed to save: ${msg}\n\nTry "Save As" to create a new script instead.`);
-    }
-  }
-
-  async function handleSaveAs(name: string, tags: string) {
-    if (!active || active.type !== 'script') return;
-    const created = await createScript(name, active.content, tags, active.connectionId);
-    updateTab(active.id, {
-      title: name,
-      savedScriptId: created.id,
-      savedScriptTags: created.tags,
-      isDirty: false,
-    });
-    bumpScriptsVersion();
-  }
-
-  function handleNewTab() {
-    openTab(newScriptTab());
-  }
-
-  function handleCursorChange(line: number) {
-    if (!active) return;
-    setCursorLines((prev) => (prev[active.id] === line ? prev : { ...prev, [active.id]: line }));
-  }
-
   function handleSelectionChange(selection: EditorSelection | null) {
-    if (!active) return;
-    setSelection(active.id, selection);
+    if (active) setSelection(active.id, selection);
   }
 
   const activeSizes = (active && panelSizes[active.id]) || DEFAULT_PANEL_SIZES;
   const [editorDefault, resultsDefault] = activeSizes;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          background: 'var(--bg-panel)',
-          borderBottom: '1px solid var(--border)',
-          height: 32,
-          minHeight: 32,
-        }}
-      >
-        <div
-          className="tab-scroll"
-          style={{ display: 'flex', overflowX: 'auto', overflowY: 'hidden', flex: 1 }}
-        >
-          {tabs.map((t) => (
-            <div
-              key={t.id}
-              onClick={() => setActive(t.id)}
-              style={{
-                padding: '0 10px',
-                height: '100%',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                cursor: 'pointer',
-                background: t.id === activeTabId ? 'var(--accent)' : 'transparent',
-                color: t.id === activeTabId ? 'var(--bg)' : 'inherit',
-                borderRight: '1px solid var(--border)',
-                flexShrink: 0,
-                whiteSpace: 'nowrap',
-              }}
-            >
-              <span>
-                {t.title}
-                {t.isDirty && ' •'}
-              </span>
-              <span
-                onClick={(e) => {
-                  e.stopPropagation();
-                  closeTab(t.id);
-                }}
-                style={{ color: 'var(--fg-dim)' }}
-              >
-                ✕
-              </span>
-            </div>
-          ))}
-          <button onClick={handleNewTab} style={{ margin: '0 6px', flexShrink: 0 }}>
-            + New
-          </button>
-        </div>
-        {isRunning && (
-          <div style={{ paddingRight: 10 }}>
-            <button onClick={handleCancel}>✕ Cancel</button>
-          </div>
-        )}
-      </div>
+    <div className={styles.root}>
+      <EditorTabBar
+        tabs={tabs}
+        activeTabId={activeTabId}
+        isRunning={isRunning}
+        onSelect={setActive}
+        onClose={closeTab}
+        onNewTab={() => openTab(newScriptTab())}
+        onCancel={handleCancel}
+      />
       {active?.type === 'script' && (
         <ContextBar
           tabId={active.id}
           connectionId={active.connectionId}
           database={active.database}
-          onConnectionChange={(id) =>
-            updateTab(active.id, { connectionId: id, database: undefined })
-          }
+          onConnectionChange={(id) => updateTab(active.id, { connectionId: id, database: undefined })}
           onDatabaseChange={(db) => updateTab(active.id, { database: db })}
           modes={getExecutionModes()}
           onExecute={handleExecute}
@@ -264,26 +97,24 @@ export function EditorArea() {
           isRunning={isRunning}
         />
       )}
-      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-        {!active && (
-          <div style={{ padding: 20, color: 'var(--fg-dim)' }}>No editor tab open.</div>
-        )}
+      <div className={styles.body}>
+        {!active && <div className={styles.empty}>No editor tab open.</div>}
         {active?.type === 'script' && (
           <PanelGroup
             key={active.id}
             direction="vertical"
             onLayout={(sizes) => setPanelSizes(active.id, sizes as [number, number])}
-            style={{ flex: 1, minHeight: 0 }}
+            className={styles.panelGroup}
           >
             <Panel minSize={20} defaultSize={editorDefault}>
-              <div style={{ height: '100%' }}>
+              <div className={styles.scriptHost}>
                 <ScriptEditor
                   tabId={active.id}
                   value={active.content}
                   onChange={(v) => updateContent(active.id, v)}
                   modes={getExecutionModes()}
                   onExecute={handleExecute}
-                  onCursorChange={handleCursorChange}
+                  onCursorChange={setActiveCursorLine}
                   onSelectionChange={handleSelectionChange}
                   highlightRange={highlightRange}
                   collections={completions.map((c) => c.name)}
@@ -292,12 +123,12 @@ export function EditorArea() {
             </Panel>
             <SplitHandle direction="vertical" />
             <Panel minSize={20} defaultSize={resultsDefault}>
-              <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+              <div className={styles.resultsHost}>
                 <ResultsPanel
                   tabId={active.id}
                   pageSize={activePageSize}
                   onPageChange={handlePageChange}
-                  onPageSizeChange={(size) => setPageSizes((prev) => ({ ...prev, [active.id]: size }))}
+                  onPageSizeChange={setActivePageSize}
                   connectionId={active.connectionId}
                   database={active.database}
                   onDocUpdated={handleDocUpdated}
