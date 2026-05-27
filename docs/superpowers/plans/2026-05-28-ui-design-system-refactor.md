@@ -917,7 +917,7 @@ LC_ALL=C find src -name "*.ts" -o -name "*.tsx" | xargs sed -i '' \
 Same recipe as Task 15. Each gets its own commit.
 
 - [x] Migrate `HostKeyDialog.tsx` → Commit.
-- [ ] Migrate `PassphraseDialog.tsx` → Commit.
+- [x] Migrate `PassphraseDialog.tsx` → Commit.
 - [ ] Migrate `SaveScriptDialog.tsx` → Commit.
 
 ---
