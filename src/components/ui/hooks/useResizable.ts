@@ -4,10 +4,18 @@ import type { PointerEvent as ReactPointerEvent } from 'react';
 interface Options {
   initial: number; min: number; max: number;
   direction: 'horizontal' | 'vertical';
+  /**
+   * When true, pointer delta is subtracted from the start size instead of added.
+   * Use for handles that live on the *leading* edge of the resizable element —
+   * e.g. an edge-docked right panel whose drag handle is on its left edge, where
+   * dragging left (negative delta) must INCREASE width.
+   * Defaults to false (drag-right / drag-down grows the element).
+   */
+  invert?: boolean;
   storageKey?: string;
 }
 
-export function useResizable({ initial, min, max, direction, storageKey }: Options) {
+export function useResizable({ initial, min, max, direction, invert = false, storageKey }: Options) {
   const [size, setSize] = useState(() => {
     if (storageKey) {
       const v = Number(localStorage.getItem(storageKey));
@@ -29,9 +37,10 @@ export function useResizable({ initial, min, max, direction, storageKey }: Optio
     if (!dragRef.current) return;
     const cur = direction === 'horizontal' ? e.clientX : e.clientY;
     const delta = cur - dragRef.current.startPos;
-    const next = Math.max(min, Math.min(max, dragRef.current.startSize + delta));
+    const signedDelta = invert ? -delta : delta;
+    const next = Math.max(min, Math.min(max, dragRef.current.startSize + signedDelta));
     setSize(next);
-  }, [direction, min, max]);
+  }, [direction, min, max, invert]);
 
   const onPointerUp = useCallback(() => {
     if (dragRef.current && storageKey) localStorage.setItem(storageKey, String(size));
