@@ -734,7 +734,7 @@ export const FormField = Object.assign(Root, { Label, Input, Error: ErrorText })
 
 **Files:** `src/components/ui/ListRow/{ListRow.tsx, ListRow.module.css, index.ts}`
 
-- [ ] **Step 1: Implement**
+- [x] **Step 1: Implement**
 
 ```tsx
 import type { HTMLAttributes, ReactNode } from 'react';
@@ -777,7 +777,7 @@ export function ListRow({
 
 `paddingLeft` inline is a *dynamic* style (computed from a prop) — allowed by the spec rule.
 
-- [ ] **Step 2:** Commit `feat(ui): add ListRow primitive`.
+- [x] **Step 2:** Commit `feat(ui): add ListRow primitive`.
 
 ---
 
