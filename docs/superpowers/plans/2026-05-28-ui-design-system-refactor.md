@@ -1088,9 +1088,9 @@ export default function App() {
 
 ### Task 25: Refactor `SavedScriptsPanel.tsx`
 
-- [ ] Wrap in `<Panel>` + `<Panel.Header>`.
-- [ ] Convert each saved-script row to `<ListRow>` with `icon`, `trailing` (delete `IconButton`).
-- [ ] Commit `refactor(saved-scripts): use Panel + ListRow`.
+- [x] Wrap in `<Panel>` + `<Panel.Header>`.
+- [x] Convert each saved-script row to `<ListRow>` with `icon`, `trailing` (delete `IconButton`).
+- [x] Commit `refactor(saved-scripts): use Panel + ListRow`.
 
 ---
 

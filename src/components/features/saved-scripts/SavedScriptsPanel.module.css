@@ -1,0 +1,85 @@
+.searchBar {
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.searchInput {
+  flex: 1;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.rowWrap {
+  border-bottom: 1px solid var(--border);
+}
+
+.actions {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.rowWrap:hover .actions {
+  opacity: 1;
+}
+
+.tags {
+  margin-left: var(--space-2);
+  font-size: var(--fs-sm);
+  color: var(--fg-dim);
+}
+
+.duplicate:hover {
+  background: var(--accent-blue-dim);
+  color: var(--accent-blue);
+  border-color: var(--accent-blue-dim);
+}
+
+.delete:hover {
+  background: var(--accent-red-dim);
+  color: var(--accent-red);
+  border-color: var(--accent-red-dim);
+}
+
+/* Inline delete-confirmation strip that appears under a row. */
+.confirm {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  margin: 4px var(--space-3) var(--space-2);
+  font-size: var(--fs-sm);
+  color: var(--fg-dim);
+}
+
+.confirmButtons {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.confirmDelete {
+  padding: 3px 10px;
+  font-size: var(--fs-sm);
+  background: var(--accent-red-dim);
+  color: var(--accent-red);
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.confirmCancel {
+  padding: 3px 10px;
+  font-size: var(--fs-sm);
+}
