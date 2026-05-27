@@ -50,68 +50,64 @@ Command: `cd src-tauri && cargo check`
 ---
 
 # PR 2 Test Report
-Date: 2026-05-28T00:40:00Z
+Date: 2026-05-28T01:15:00Z
 Worktree: .claude/worktrees/feat-ui-design-system-pr2-dialogs-results
 Branch: worktree-feat-ui-design-system-pr2-dialogs-results
-Base: PR 1 tip (commit 38de9c2)
+HEAD: a388bed (range under test: 38de9c2..HEAD, 9 commits)
 
-## PR 2 Test Report
+## 1. vitest         — PASS (547 tests, 92 files)
+Command: `npx vitest run --no-cache --reporter=default`
+- 547 tests pass, 0 fail (+4 over PR 1's 543: regression guards from `results-nav-sort.test.tsx` and PR 2 feature coverage including the new ViewModeRegistry).
+- 92 test files (PR 1 had 90; +2 new files).
+- Duration 9.68s.
 
-## 1. vitest         — PASS (543 tests, 90 files)
-Command: `npx vitest run --reporter=default --no-cache`
-- All 543 tests pass (matches PR 1 baseline count; PR 2 modified consumers in place, no net test count delta).
-- Duration 10.60s. Zero failures.
+**Important — `--no-cache` is mandatory for this gate.** PR 1's vitest run cached resolutions against the pre-Task-14 file layout. First run without `--no-cache` after the folder move reports 9 phantom failures like `Failed to resolve import "../../store/connections" from "src/components/features/editor/ContextBar.tsx"` — but the actual source file correctly uses `../../../store/connections` (3 levels up). Verified by reading the file directly. Re-running with `--no-cache` passes cleanly with zero source changes. Future testers in this worktree (or any worktree that ran vitest before a large move) should always pass `--no-cache`.
 
-First run reported 9 failed files with errors like `Failed to resolve import "../../store/connections" from "src/components/features/editor/ContextBar.tsx"`. Investigation: the actual source file uses the correct `../../../store/connections` (3 levels up — `src/components/features/editor/` → `src/`). The error was a stale Vite dep-cache from PR 1's runs against the pre-move file structure. Re-running with `--no-cache` made all 543 tests pass with no source modifications needed. **The folder move did not break any imports** — all relative paths in moved files (`src/components/features/{ai,connections,editor,layout,results,saved-scripts}/*.tsx`) were correctly authored at depth 3.
-
-Pre-existing noise (NOT introduced by PR 2):
-- Same `layout.test.tsx` Tauri-store invoke TypeError and `act(...)` warnings as PR 1. Tests still pass.
+Pre-existing noise (NOT introduced by PR 2): same `layout.test.tsx` Tauri-store invoke TypeError and `act(...)` warnings as PR 1. Tests still pass.
 
 ## 2. tsc --noEmit   — PASS
 Command: `npx tsc --noEmit`
-Exit 0, no diagnostics. Folder rename plus consumer rewires produced no type errors.
+Exit 0, no diagnostics. Folder rename + 4 dialog migrations + ResultsPanel decomposition + ViewModeRegistry produced no type errors.
 
 ## 3. npm run build  — PASS
 Command: `npm run build` (`tsc && vite build`)
-- 507 modules transformed (same as PR 1).
-- Output: `dist/assets/index-CD4ouDeH.js` 664.98 kB (gzip 203.79 kB), `index-DwfhLJgN.css` 1.48 kB.
-- Built in 946 ms.
+- Output: `dist/assets/index-Di6t15Cx.js` 669.52 kB (gzip 206.24 kB) — +4.54 kB JS / +2.45 kB gzipped over PR 1, reasonable for the new registry + decomposition.
+- `dist/assets/index-6flhI1P_.css` 7.63 kB (gzip 2.07 kB) — +6.15 kB CSS / +1.37 kB gzipped over PR 1's 1.48 kB; expected from the new `*.module.css` files for the 4 dialogs and the decomposed results subcomponents.
+- Built in 968 ms.
 
-Pre-existing warnings (unrelated to PR 2):
-- Same static + dynamic import mix warnings for `src/ipc.ts` and `src/plugins/sandbox/moduleLoader.ts`. The `ipc.ts` warning's static-importer list now references the new `src/components/features/{connections,editor,saved-scripts}/...` paths — confirms the moved files are wired into the bundle correctly. No new chunks, no new warnings.
-- Chunk-size > 500 kB warning (pre-existing).
+Pre-existing warnings (unchanged from PR 1): static + dynamic import notice for `src/ipc.ts` and `src/plugins/sandbox/moduleLoader.ts`; chunk-size > 500 kB notice.
 
 ## 4. dev smoke      — PASS (port 1420 reachable)
 Command: `npm run dev` (Vite bound to 1420).
-- First attempt: port 1420 in use (stale Vite server from prior session). Killed `vite` processes, retried.
-- Second attempt: `VITE v5.4.21 ready in 162 ms`, `Local: http://localhost:1420/`.
+- `VITE v5.4.21 ready in 182 ms`, `Local: http://localhost:1420/`.
 - `curl -sI http://localhost:1420/` → `HTTP/1.1 200 OK`.
-- Dev server killed cleanly after probe.
+- Killed prior stale Vite first, then started fresh and killed cleanly after probe.
 
 ## 5. cargo check    — PASS
 Command: `cd src-tauri && cargo check`
-- Workspace compiled clean in `dev` profile (1m 11s).
-- Exit 0, no errors.
-- Expected no-op confirmation: PR 2 touches no `src-tauri/` files.
+- Finished in 2.71s (cached from PR 1).
+- Exit 0, no errors. PR 2 touches no `src-tauri/` files — no-op confirmation as expected.
 
 ## Visual Identity — REQUIRES HUMAN VERIFICATION (no longer no-op by construction)
-PR 2 touches consumer call-sites (dialogs and results pane), so visual delta is **possible** and cannot be ruled out headlessly. The user MUST manually verify in the running Tauri app:
+PR 2 touches consumer call-sites (4 dialogs + results pane). Visual delta is possible and cannot be ruled out headlessly. User must manually verify in the running Tauri app:
 
-**Dialog open/close + a11y** (each must: open via trigger, Escape closes, backdrop click closes, focus trapped inside, Cmd+C copies selectable text inside):
-- **ConnectionDialog** — click "Add Connection" on the Connections panel.
-- **HostKeyDialog** — trigger an SSH connect to an unseen host (or simulate the host-key prompt path).
+**Dialogs** (each: open via trigger, Escape closes, backdrop click closes, focus lands inside on open, Cancel button works, validation errors render inline, Cmd+C copies selectable text inside, focus trap holds):
+- **ConnectionDialog** — click "Add Connection" on Connections panel; also test edit-existing path. Verify the SSH `<details>` block is still collapsible and preserves host/port/user/key-path fields.
+- **HostKeyDialog** — trigger SSH connect to an untrusted host.
 - **PassphraseDialog** — connect with an encrypted SSH key.
-- **SaveScriptDialog** — "Save As" on a script tab.
+- **SaveScriptDialog** — "Save As" from an editor tab.
 
-**Results pane**:
-- Error path: run a query that errors, confirm the error message renders, select error text and Cmd+C copies it.
-- View switch: toggle Table ↔ JSON via the new `ViewModeRegistry`-driven selector; both render the same dataset correctly.
+**Results pane** (per reviewer-flagged regression hot-spots):
+- **Sorted-table arrow nav** (cycle-2 fix): load a query, click a column header to sort, click a cell, press ↓/↑/F3 — must walk user-visible row order, not insertion order. Regression guard at `src/__tests__/results-nav-sort.test.tsx` already passes in vitest, but real-app smoke is still warranted.
+- **View switch consistency**: Table → JSON → Table → arrow nav — `docsRef` should still track display order after the round-trip.
+- **Error path**: run a query that errors; error message renders; select error text and Cmd+C copies it.
+- **View switch**: toggle Table ↔ JSON via the new `ViewModeRegistry`-driven selector; both render the same dataset.
 
-Reviewer confirmed both Stage 1 (spec compliance) and Stage 2 (`/code-review:code-review`) gates passed, so the implementation is structurally sound — but pixel-level identity needs eyes-on confirmation before merge.
+Reviewer approved both Stage 1 (spec compliance) and Stage 2 (`/code-review:code-review`); see `CODE_REVIEW.md` "PR 2 — Cycle 2" section. Structural integrity confirmed — pixel-level identity needs eyes-on confirmation before merge.
 
 ## Notes
-- Vitest baseline count (543) is unchanged. The team-lead spec phrased the gate as "543 baseline + new feature tests"; the coder appears to have integrated PR 2 coverage into existing test files or refactored without net additions. All gates green, no test count regression — flagging for awareness only.
-- First-run vitest failure was a stale Vite dep-cache, NOT a code issue. If future runs in this worktree show similar `Failed to resolve` errors after large refactors, clear the Vite cache (`--no-cache` flag or evict `node_modules/.vite`).
+- Vitest test count delta: +4 (543 → 547). PR 1 baseline preserved, plus regression guards for the sorted-nav fix and new ViewModeRegistry coverage.
+- `--no-cache` requirement for vitest is a worktree-local nuisance, not a code issue. Documented above so the same trap doesn't bite the next gate run.
 
 ---
 
