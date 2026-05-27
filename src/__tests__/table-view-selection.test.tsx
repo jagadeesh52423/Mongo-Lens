@@ -3,7 +3,7 @@ import { useRef } from 'react';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
-import { TableView } from '../components/results/TableView';
+import { TableView } from '../components/features/results/TableView';
 import { CellSelectionProvider } from '../contexts/CellSelectionContext';
 import { useRecordActions } from '../hooks/useRecordActions';
 import { keyboardService } from '../services/KeyboardService';

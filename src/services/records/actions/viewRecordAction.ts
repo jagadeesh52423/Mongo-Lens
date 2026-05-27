@@ -1,6 +1,6 @@
 import { createElement } from 'react';
 import { recordActionRegistry } from '../RecordActionRegistry';
-import { JsonRecordEditor } from '../../../components/editor/JsonRecordEditor';
+import { JsonRecordEditor } from '../../../components/features/editor/JsonRecordEditor';
 
 recordActionRegistry.register({
   id: 'cell.viewRecord',

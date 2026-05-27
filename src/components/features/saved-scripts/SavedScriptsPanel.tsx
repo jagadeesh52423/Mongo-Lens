@@ -1,7 +1,7 @@
 import { CSSProperties, MouseEvent, ReactNode, useEffect, useMemo, useState } from 'react';
-import { listScripts, deleteScript, createScript } from '../../ipc';
-import { useEditorStore } from '../../store/editor';
-import type { SavedScript, EditorTab } from '../../types';
+import { listScripts, deleteScript, createScript } from '../../../ipc';
+import { useEditorStore } from '../../../store/editor';
+import type { SavedScript, EditorTab } from '../../../types';
 
 const iconBtnBase: CSSProperties = {
   background: 'transparent',

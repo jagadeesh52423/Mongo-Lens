@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, cleanup, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { EditorArea } from '../components/editor/EditorArea';
+import { EditorArea } from '../components/features/editor/EditorArea';
 import * as ipc from '../ipc';
 import { useEditorStore } from '../store/editor';
 import { useConnectionsStore } from '../store/connections';

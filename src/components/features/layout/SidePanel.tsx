@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { ActivityItem } from '../../layout/activityBar';
+import type { ActivityItem } from '../../../layout/activityBar';
 
 interface Props { item: ActivityItem | null }
 

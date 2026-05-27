@@ -2,7 +2,7 @@ import { createElement, useState, useRef } from 'react';
 import { recordActionRegistry } from '../RecordActionRegistry';
 import { confirmDiscardUnsaved } from '../../../utils/confirmDiscard';
 import { updateDocument } from '../../../ipc';
-import { JsonRecordEditor, type JsonRecordEditorHandle } from '../../../components/editor/JsonRecordEditor';
+import { JsonRecordEditor, type JsonRecordEditorHandle } from '../../../components/features/editor/JsonRecordEditor';
 
 recordActionRegistry.register({
   id: 'cell.editRecord',

@@ -1,5 +1,5 @@
 import { useState, type CSSProperties } from 'react';
-import { useAIStore } from '../../store/ai';
+import { useAIStore } from '../../../store/ai';
 
 export function AIFloatingButton() {
   const setPanelOpen = useAIStore((s) => s.setPanelOpen);

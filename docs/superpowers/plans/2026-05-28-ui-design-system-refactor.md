@@ -866,7 +866,7 @@ export * from './hooks/useFocusTrap';
 
 ### Task 14: Mechanical rename `components/<feature>/` → `components/features/<feature>/`
 
-- [ ] **Step 1: Move folders**
+- [x] **Step 1: Move folders**
 
 ```bash
 mkdir -p src/components/features
@@ -878,7 +878,7 @@ git mv src/components/saved-scripts src/components/features/saved-scripts
 git mv src/components/layout src/components/features/layout
 ```
 
-- [ ] **Step 2: Rewrite imports** — run a codemod (sed):
+- [x] **Step 2: Rewrite imports** — run a codemod (sed):
 
 ```bash
 LC_ALL=C find src -name "*.ts" -o -name "*.tsx" | xargs sed -i '' \
@@ -890,11 +890,11 @@ LC_ALL=C find src -name "*.ts" -o -name "*.tsx" | xargs sed -i '' \
   -e "s|components/layout|components/features/layout|g"
 ```
 
-- [ ] **Step 3: Adjust relative imports** inside moved folders (one level deeper now): change `../../store/*` → `../../../store/*`, `../shared/*` → `../../shared/*`, etc. Per file as needed. Verify with `npm run -s typecheck`.
+- [x] **Step 3: Adjust relative imports** inside moved folders (one level deeper now): change `../../store/*` → `../../../store/*`, `../shared/*` → `../../shared/*`, etc. Per file as needed. Verify with `npm run -s typecheck`.
 
-- [ ] **Step 4: Type check + tests pass.**
+- [x] **Step 4: Type check + tests pass.**
 
-- [ ] **Step 5:** Commit `refactor: move feature components under components/features/`.
+- [x] **Step 5:** Commit `refactor: move feature components under components/features/`.
 
 ---
 

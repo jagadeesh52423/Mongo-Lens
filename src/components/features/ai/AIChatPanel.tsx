@@ -8,9 +8,9 @@ import {
   type CSSProperties,
   type KeyboardEvent,
 } from 'react';
-import { useAIStore, type ChatMessage } from '../../store/ai';
-import { useEditorStore } from '../../store/editor';
-import { useSettingsStore } from '../../store/settings';
+import { useAIStore, type ChatMessage } from '../../../store/ai';
+import { useEditorStore } from '../../../store/editor';
+import { useSettingsStore } from '../../../store/settings';
 import { AIMessageBubble } from './AIMessageBubble';
 
 const DEFAULT_WIDTH = 380;

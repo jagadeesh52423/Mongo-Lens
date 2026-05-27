@@ -1,6 +1,6 @@
 import Editor, { OnMount } from '@monaco-editor/react';
 import { forwardRef, useImperativeHandle, useRef } from 'react';
-import { MONACO_THEME_ID } from '../../themes/applyTheme';
+import { MONACO_THEME_ID } from '../../../themes/applyTheme';
 
 export interface JsonRecordEditorHandle {
   format: () => void;

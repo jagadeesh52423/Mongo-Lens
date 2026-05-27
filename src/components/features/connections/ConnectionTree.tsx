@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { listDatabases, listCollections } from '../../ipc';
-import type { CollectionNode } from '../../types';
+import { listDatabases, listCollections } from '../../../ipc';
+import type { CollectionNode } from '../../../types';
 
 const TYPE_TO_SEARCH_RESET_MS = 600;
 

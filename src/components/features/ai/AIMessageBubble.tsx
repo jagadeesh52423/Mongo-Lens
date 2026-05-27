@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react';
-import type { ChatMessage } from '../../store/ai';
-import { parseAIContent, type AISegment } from '../../utils/aiContent';
+import type { ChatMessage } from '../../../store/ai';
+import { parseAIContent, type AISegment } from '../../../utils/aiContent';
 import { CodeBlock } from './CodeBlock';
 
 interface Props {

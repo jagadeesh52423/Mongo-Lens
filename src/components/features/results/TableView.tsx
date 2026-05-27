@@ -1,8 +1,8 @@
 import { useRef, useMemo, useState, useCallback } from 'react';
 import { renderCell } from './cellRenderers';
-import { useCellSelection } from '../../contexts/CellSelectionContext';
-import { ContextMenu, type ContextMenuItem } from '../ui/ContextMenu';
-import { keyboardService, formatKeyCombo } from '../../services/KeyboardService';
+import { useCellSelection } from '../../../contexts/CellSelectionContext';
+import { ContextMenu, type ContextMenuItem } from '../../ui/ContextMenu';
+import { keyboardService, formatKeyCombo } from '../../../services/KeyboardService';
 
 interface Props {
   docs: unknown[];

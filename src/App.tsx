@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef, useCallback, createElement, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Panel, PanelGroup, type ImperativePanelHandle } from 'react-resizable-panels';
-import { IconRail } from './components/layout/IconRail';
-import { SidePanel } from './components/layout/SidePanel';
-import { StatusBar } from './components/layout/StatusBar';
-import { ConnectionPanel } from './components/connections/ConnectionPanel';
-import { EditorArea } from './components/editor/EditorArea';
-import { SavedScriptsPanel } from './components/saved-scripts/SavedScriptsPanel';
+import { IconRail } from './components/features/layout/IconRail';
+import { SidePanel } from './components/features/layout/SidePanel';
+import { StatusBar } from './components/features/layout/StatusBar';
+import { ConnectionPanel } from './components/features/connections/ConnectionPanel';
+import { EditorArea } from './components/features/editor/EditorArea';
+import { SavedScriptsPanel } from './components/features/saved-scripts/SavedScriptsPanel';
 import {
   BuiltInActivityRegistry,
   PluginActivityRegistry,
@@ -18,8 +18,8 @@ import type { Registry } from './plugins/Registry';
 import type { ViewProvider } from './plugins/api/contracts';
 import { SettingsView } from './settings/SettingsView';
 import { SplitHandle } from './components/shared/SplitHandle';
-import { AIFloatingButton } from './components/ai/AIFloatingButton';
-import { AIChatPanel } from './components/ai/AIChatPanel';
+import { AIFloatingButton } from './components/features/ai/AIFloatingButton';
+import { AIChatPanel } from './components/features/ai/AIChatPanel';
 import { useConnectionsStore } from './store/connections';
 import { useAIStore } from './store/ai';
 import { useEditorStore } from './store/editor';

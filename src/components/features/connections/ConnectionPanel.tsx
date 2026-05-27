@@ -7,15 +7,15 @@ import {
   connectConnection,
   disconnectConnection,
   onSshSessionLost,
-} from '../../ipc';
-import { useConnectionsStore } from '../../store/connections';
-import { useEditorStore } from '../../store/editor';
+} from '../../../ipc';
+import { useConnectionsStore } from '../../../store/connections';
+import { useEditorStore } from '../../../store/editor';
 import { ConnectionDialog } from './ConnectionDialog';
 import { ConnectionTree } from './ConnectionTree';
-import { ContextMenu } from '../ui/ContextMenu';
+import { ContextMenu } from '../../ui/ContextMenu';
 import { PassphraseDialog } from './PassphraseDialog';
 import { HostKeyDialog } from './HostKeyDialog';
-import type { Connection, ConnectionInput } from '../../types';
+import type { Connection, ConnectionInput } from '../../../types';
 
 /**
  * Build a unique name for a duplicate of `source` among `existing` names.

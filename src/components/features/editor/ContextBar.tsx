@@ -1,8 +1,8 @@
 import { CSSProperties, useEffect, useRef, useState } from 'react';
 import { SaveScriptDialog } from '../saved-scripts/SaveScriptDialog';
-import { useConnectionsStore } from '../../store/connections';
-import { listDatabases } from '../../ipc';
-import type { ExecutionMode } from '../../execution-modes';
+import { useConnectionsStore } from '../../../store/connections';
+import { listDatabases } from '../../../ipc';
+import type { ExecutionMode } from '../../../execution-modes';
 
 interface Props {
   tabId: string;

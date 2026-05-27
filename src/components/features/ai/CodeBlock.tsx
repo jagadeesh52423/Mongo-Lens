@@ -1,7 +1,7 @@
 import type { CSSProperties } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { loader } from '@monaco-editor/react';
-import { useEditorBridgeStore } from '../../store/editorBridge';
+import { useEditorBridgeStore } from '../../../store/editorBridge';
 
 interface Props {
   lang: string;

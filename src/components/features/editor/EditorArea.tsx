@@ -2,21 +2,21 @@ import { useEffect, useRef, useState } from 'react';
 import { Panel, PanelGroup } from 'react-resizable-panels';
 import { loader } from '@monaco-editor/react';
 import { modelPathForTab } from './ScriptEditor';
-import { useEditorStore, DEFAULT_PANEL_SIZES } from '../../store/editor';
-import { useConnectionsStore } from '../../store/connections';
+import { useEditorStore, DEFAULT_PANEL_SIZES } from '../../../store/editor';
+import { useConnectionsStore } from '../../../store/connections';
 import { ScriptEditor } from './ScriptEditor';
 import { ContextBar } from './ContextBar';
-import { runScript, cancelScript, createScript, updateScript } from '../../ipc';
-import { useResultsStore } from '../../store/results';
+import { runScript, cancelScript, createScript, updateScript } from '../../../ipc';
+import { useResultsStore } from '../../../store/results';
 import { ResultsPanel } from '../results/ResultsPanel';
-import { useCollectionCompletions } from '../../hooks/useCollectionCompletions';
-import { SplitHandle } from '../shared/SplitHandle';
-import { useTabActions } from '../../hooks/useTabActions';
-import { newScriptTab } from '../../utils/newScriptTab';
-import { getStatementAtCursor } from '../../utils/statementDetection';
-import { getExecutionMode, getExecutionModes } from '../../execution-modes';
-import { useLogger } from '../../services/logger';
-import type { EditorSelection } from '../../types';
+import { useCollectionCompletions } from '../../../hooks/useCollectionCompletions';
+import { SplitHandle } from '../../shared/SplitHandle';
+import { useTabActions } from '../../../hooks/useTabActions';
+import { newScriptTab } from '../../../utils/newScriptTab';
+import { getStatementAtCursor } from '../../../utils/statementDetection';
+import { getExecutionMode, getExecutionModes } from '../../../execution-modes';
+import { useLogger } from '../../../services/logger';
+import type { EditorSelection } from '../../../types';
 
 export function EditorArea() {
   const {

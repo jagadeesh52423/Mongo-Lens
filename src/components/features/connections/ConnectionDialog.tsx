@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { Connection, ConnectionInput } from '../../types';
+import type { Connection, ConnectionInput } from '../../../types';
 
 interface Props {
   initial?: Connection;

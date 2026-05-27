@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { invoke } from '@tauri-apps/api/core';
-import { SavedScriptsPanel } from '../components/saved-scripts/SavedScriptsPanel';
+import { SavedScriptsPanel } from '../components/features/saved-scripts/SavedScriptsPanel';
 import { useEditorStore } from '../store/editor';
 
 const invokeMock = invoke as unknown as ReturnType<typeof vi.fn>;

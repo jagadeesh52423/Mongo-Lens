@@ -1,4 +1,4 @@
-import type { ActivityItem } from '../../layout/activityBar';
+import type { ActivityItem } from '../../../layout/activityBar';
 
 interface Props {
   items: ActivityItem[];

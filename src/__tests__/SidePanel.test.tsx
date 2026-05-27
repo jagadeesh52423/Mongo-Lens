@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { SidePanel } from '../components/layout/SidePanel';
+import { SidePanel } from '../components/features/layout/SidePanel';
 import type { ActivityItem } from '../layout/activityBar';
 
 function makeItem(id: string, body: string): ActivityItem {

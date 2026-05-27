@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { ContextBar } from '../components/editor/ContextBar';
+import { ContextBar } from '../components/features/editor/ContextBar';
 import { useConnectionsStore } from '../store/connections';
 
 vi.mock('../ipc', () => ({

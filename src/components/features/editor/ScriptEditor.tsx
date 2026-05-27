@@ -1,9 +1,9 @@
 import Editor, { OnMount } from '@monaco-editor/react';
 import { useEffect, useRef } from 'react';
-import type { ExecutionMode } from '../../execution-modes';
-import type { EditorSelection } from '../../types';
-import { MONACO_THEME_ID } from '../../themes/applyTheme';
-import { useEditorBridgeStore, type EditorController } from '../../store/editorBridge';
+import type { ExecutionMode } from '../../../execution-modes';
+import type { EditorSelection } from '../../../types';
+import { MONACO_THEME_ID } from '../../../themes/applyTheme';
+import { useEditorBridgeStore, type EditorController } from '../../../store/editorBridge';
 
 interface HighlightRange {
   startLine: number;

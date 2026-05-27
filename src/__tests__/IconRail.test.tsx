@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { IconRail } from '../components/layout/IconRail';
+import { IconRail } from '../components/features/layout/IconRail';
 
 const items = [
   { id: 'a', title: 'Alpha',  icon: 'A', render: () => ({ dispose: () => {} }) },
