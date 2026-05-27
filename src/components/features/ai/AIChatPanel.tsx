@@ -100,7 +100,7 @@ export function AIChatPanel({ onSendMessage, onOpenSettings, onClearContext }: P
   if (!panelOpen) return null;
 
   return (
-    <div className={styles.container} style={{ width }}>
+    <div className={styles.container} style={{ width: width }}>
       <div
         role="separator"
         aria-orientation="vertical"

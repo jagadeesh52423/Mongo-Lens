@@ -1016,11 +1016,11 @@ export * from './ViewModeRegistry';
 - Create: `AIChatHeader.tsx`, `AIChatMessageList.tsx`, `AIChatInput.tsx`
 - Create: matching `.module.css`
 
-- [ ] **Step 1: Extract `AIChatHeader`** — title, clear-context `IconButton`, open-settings `IconButton`, collapse `IconButton`.
-- [ ] **Step 2: Extract `AIChatMessageList`** — virtualization not needed (already scrolls). Receives `messages: ChatMessage[]`, renders `AIMessageBubble` per item.
-- [ ] **Step 3: Extract `AIChatInput`** — textarea autosize, send button, keyboard handling (Enter / Shift+Enter). Existing `MIN_TEXTAREA_ROWS`/`MAX_TEXTAREA_ROWS` constants move here.
-- [ ] **Step 4: Replace width-resize with `ResizableSplit`** at the call site, OR keep panel docked-right and use `useResizable({ direction: 'horizontal', storageKey: 'ai.panel.width' })` for the left-edge drag handle. (Decision: keep current approach using `useResizable` — `ResizableSplit` is for in-tree splits, not edge-docked panels.)
-- [ ] **Step 5:** Commit `refactor(ai): decompose AIChatPanel`.
+- [x] **Step 1: Extract `AIChatHeader`** — title, clear-context `IconButton`, open-settings `IconButton`, collapse `IconButton`.
+- [x] **Step 2: Extract `AIChatMessageList`** — virtualization not needed (already scrolls). Receives `messages: ChatMessage[]`, renders `AIMessageBubble` per item.
+- [x] **Step 3: Extract `AIChatInput`** — textarea autosize, send button, keyboard handling (Enter / Shift+Enter). Existing `MIN_TEXTAREA_ROWS`/`MAX_TEXTAREA_ROWS` constants move here.
+- [x] **Step 4: Replace width-resize with `ResizableSplit`** at the call site, OR keep panel docked-right and use `useResizable({ direction: 'horizontal', storageKey: 'ai.panel.width' })` for the left-edge drag handle. (Decision: keep current approach using `useResizable` — `ResizableSplit` is for in-tree splits, not edge-docked panels.)
+- [x] **Step 5:** Commit `refactor(ai): decompose AIChatPanel`.
 
 ---
 
@@ -1032,10 +1032,10 @@ export * from './ViewModeRegistry';
 - Create: `src/components/features/layout/AppContextProviders.tsx`
 - Create: `src/components/features/layout/AppKeyboardWiring.tsx`
 
-- [ ] **Step 1: Extract providers** — wrap children with all current context providers in `AppContextProviders`.
-- [ ] **Step 2: Extract keyboard wiring** — `useEffect` that registers shortcuts via `KeyboardService` and `recordActionRegistry`.
-- [ ] **Step 3: Extract shell** — three-column layout using `ResizableSplit` (IconRail | SidePanel | (Editor over Results)). Side-dock AIChatPanel.
-- [ ] **Step 4: `App.tsx` is now**:
+- [x] **Step 1: Extract providers** — wrap children with all current context providers in `AppContextProviders`.
+- [x] **Step 2: Extract keyboard wiring** — `useEffect` that registers shortcuts via `KeyboardService` and `recordActionRegistry`.
+- [x] **Step 3: Extract shell** — three-column layout using `ResizableSplit` (IconRail | SidePanel | (Editor over Results)). Side-dock AIChatPanel.
+- [x] **Step 4: `App.tsx` is now**:
 
 ```tsx
 export default function App() {
@@ -1048,7 +1048,7 @@ export default function App() {
 }
 ```
 
-- [ ] **Step 5:** Commit `refactor(app): decompose App.tsx into AppShell / Providers / KeyboardWiring`.
+- [x] **Step 5:** Commit `refactor(app): decompose App.tsx into AppShell / Providers / KeyboardWiring`.
 
 ---
 
@@ -1058,16 +1058,16 @@ export default function App() {
 - Modify: `src/components/features/connections/ConnectionPanel.tsx` (≤ 200L)
 - Create: `ConnectionPanelHeader.tsx`, `ConnectionSearchBar.tsx`
 
-- [ ] **Step 1: Wrap content in `<Panel>` + `<Panel.Header>`** with title and add-connection `IconButton` in `right`.
-- [ ] **Step 2: Extract search bar.**
-- [ ] **Step 3: Use `ListRow` inside `ConnectionTree`** for entries — pass `selected`, `onClick`, `onContextMenu`, `icon`, `indent` per node.
-- [ ] **Step 4:** Commit `refactor(connections): decompose ConnectionPanel`.
+- [x] **Step 1: Wrap content in `<Panel>` + `<Panel.Header>`** with title and add-connection `IconButton` in `right`.
+- [x] **Step 2: Extract search bar.**
+- [x] **Step 3: Use `ListRow` inside `ConnectionTree`** for entries — pass `selected`, `onClick`, `onContextMenu`, `icon`, `indent` per node.
+- [x] **Step 4:** Commit `refactor(connections): decompose ConnectionPanel`.
 
 ---
 
 ### Task 23: PR 3 acceptance
 
-- [ ] `wc -l src/App.tsx src/components/features/ai/AIChatPanel.tsx src/components/features/connections/ConnectionPanel.tsx` all under thresholds.
+- [x] `wc -l src/App.tsx src/components/features/ai/AIChatPanel.tsx src/components/features/connections/ConnectionPanel.tsx` all under thresholds.
 - [ ] Manual: open/close AI panel, resize it, switch tab (per-tab chat history isolated), submit AI message, clear context, open settings; resize main split; expand connection tree; search; right-click connection.
 
 ---
