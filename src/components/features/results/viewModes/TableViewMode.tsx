@@ -1,10 +1,13 @@
-import { useCallback, useEffect, useState } from 'react';
-import { TableView } from '../TableView';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { TableView, columnsOf } from '../TableView';
 import { KeyboardScopeZone } from '../../../shared/KeyboardScopeZone';
 import type { ResultViewMode } from './ViewModeRegistry';
 
 /** Table view strategy. Sort state lives here so ResultsPanel stays view-agnostic. */
-function TableViewModeComponent({ group }: Parameters<ResultViewMode['Component']>[0]) {
+function TableViewModeComponent({
+  group,
+  onRenderedDocsChange,
+}: Parameters<ResultViewMode['Component']>[0]) {
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<1 | -1>(1);
 
@@ -25,7 +28,17 @@ function TableViewModeComponent({ group }: Parameters<ResultViewMode['Component'
     });
   }, []);
 
-  const sortedDocs = sortDocs(group.docs, sortKey, sortDir);
+  const sortedDocs = useMemo(
+    () => sortDocs(group.docs, sortKey, sortDir),
+    [group.docs, sortKey, sortDir],
+  );
+  const renderedColumns = useMemo(() => columnsOf(sortedDocs), [sortedDocs]);
+
+  // Publish display-order docs/columns to the host so record-action keyboard
+  // navigation (F3/↑/↓) follows what the user actually sees.
+  useEffect(() => {
+    onRenderedDocsChange?.(sortedDocs, renderedColumns);
+  }, [sortedDocs, renderedColumns, onRenderedDocsChange]);
 
   return (
     <KeyboardScopeZone scope="results-table" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>

@@ -3,7 +3,6 @@ import type { MutableRefObject } from 'react';
 import { save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { writeTextFile } from '@tauri-apps/plugin-fs';
 import { useResultsStore } from '../../../store/results';
-import { columnsOf } from './TableView';
 import { RecordModalShell } from './RecordModalShell';
 import { toCsv, toJsonText } from '../../../utils/export';
 import { CellSelectionProvider, useCellSelection } from '../../../contexts/CellSelectionContext';
@@ -100,18 +99,26 @@ export function ResultsPanel({
 
   const { modal, setModal, host, activeContextRef } = useResultsHost({ recordContext, onDocUpdated });
 
+  // `allDocs` powers the toolbar status text and CSV/JSON export — both want
+  // the group's docs as a whole, not the per-view (potentially sorted/filtered)
+  // slice. Record-action keyboard navigation uses a separate channel: the
+  // active view publishes its display-order docs via onRenderedDocsChange
+  // (see ViewModeRegistry navigation contract).
   const allDocs = useMemo(() => activeGroup?.docs ?? [], [activeGroup]);
-  const columns = useMemo(() => columnsOf(allDocs), [allDocs]);
 
-  // Refs surface live state to the record-action keyboard handlers. They
-  // point at the active group's docs in insertion order; per-view sorting
-  // (e.g. inside TableViewMode) does not feed back into navigation.
+  // Refs surface live state to the record-action keyboard handlers. docsRef
+  // and columnsRef are written by the active view via onRenderedDocsChange
+  // so F3/↑/↓ follow the user-visible display order.
   const docsRef = useRef<unknown[]>(allDocs);
-  const columnsRef = useRef<string[]>(columns);
+  const columnsRef = useRef<string[]>([]);
   const groupsRef = useRef<ResultGroup[]>(res?.groups ?? []);
-  useEffect(() => { docsRef.current = allDocs; }, [allDocs]);
-  useEffect(() => { columnsRef.current = columns; }, [columns]);
   useEffect(() => { groupsRef.current = res?.groups ?? []; }, [res?.groups]);
+
+  // Stable callback so views' useEffect dependency arrays don't churn.
+  const handleRenderedDocsChange = useCallback((docs: unknown[], cols: string[]) => {
+    docsRef.current = docs;
+    columnsRef.current = cols;
+  }, []);
 
   // After a run completes with results, focus the results scope zone so F3/F4
   // work even when the editor previously had focus. Shortcut dispatch matches
@@ -194,7 +201,12 @@ export function ResultsPanel({
               (() => {
                 const ViewComponent = viewModeRegistry.get(view)?.Component;
                 if (!ViewComponent) return null;
-                return <ViewComponent group={activeGroup} />;
+                return (
+                  <ViewComponent
+                    group={activeGroup}
+                    onRenderedDocsChange={handleRenderedDocsChange}
+                  />
+                );
               })()
             ) : null}
           </div>

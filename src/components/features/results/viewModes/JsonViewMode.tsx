@@ -9,7 +9,10 @@ import type { ResultViewMode } from './ViewModeRegistry';
 const selectAllDef = DEFAULT_SHORTCUTS.find((d) => d.id === 'results.selectAll');
 if (selectAllDef) keyboardService.defineShortcut(selectAllDef);
 
-function JsonViewModeComponent({ group }: Parameters<ResultViewMode['Component']>[0]) {
+function JsonViewModeComponent({
+  group,
+  onRenderedDocsChange,
+}: Parameters<ResultViewMode['Component']>[0]) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   // While JSON view is mounted, Cmd+A selects the body text. The handler is
@@ -26,6 +29,12 @@ function JsonViewModeComponent({ group }: Parameters<ResultViewMode['Component']
       sel.addRange(range);
     });
   }, []);
+
+  // JSON view doesn't reorder docs and doesn't surface columns. Publish the
+  // group's docs as-is so docsRef stays consistent across Table↔JSON switches.
+  useEffect(() => {
+    onRenderedDocsChange?.(group.docs, []);
+  }, [group, onRenderedDocsChange]);
 
   return (
     <div ref={containerRef} style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>

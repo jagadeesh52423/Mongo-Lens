@@ -657,3 +657,72 @@ NITs N-1 through N-10 remain as deferred FYI for the next iteration; none requir
 ## Verdict: APPROVED
 
 
+
+
+---
+
+# PR 2 — Dialogs & Results refactor (cycle 1)
+
+Reviewer: reviewer-ui-pr2. Diff: `38de9c2..5c77d59` (PR-1 tip → coder-ui-features-pr2 head).
+8 commits. vitest 546/546 + tsc clean per coder report.
+
+## Stage 1 — Spec compliance vs plan Tasks 14–19
+
+### Checks PASSED
+
+| # | Check | Evidence |
+|---|---|---|
+| 1 | Feature folders moved | `ls src/components/features` → ai, connections, editor, layout, results, saved-scripts. Old `src/components/{ai,connections,editor,layout,results,saved-scripts}` directories gone. |
+| 2 | No stale imports to old paths | `git grep -n "components/{results,ai,connections,editor,saved-scripts,layout}" -- 'src/*' ':!*.md' ':!src/components/features/**'` → 0 hits. App.tsx:4–9,21–22 and the two `src/services/records/actions/*.ts` consumers point at the new paths. |
+| 3 | 4 dialogs use Dialog+FormField, no hand-rolled modal | ConnectionDialog.tsx:56,164–169 / HostKeyDialog.tsx:28,43–47 / PassphraseDialog.tsx:26,48–51 / SaveScriptDialog.tsx:34,56–61 — all wrap `<Dialog open onClose=…>` with `Dialog.Header/Body/Footer`. `grep -n 'role="dialog"' src/components/features/{connections,saved-scripts}` returns 0 hits (the lone `role="dialog"` in features is `results/RecordModalShell.tsx:56`, which is out-of-scope for PR 2 — slated for PR 3+). No inline color/spacing/padding/margin/border in any of the 4 dialog files; all sizing/spacing flows through their `.module.css` siblings or design-system components. |
+| 4 | ConnectionDialog preserves `<details>` SSH section | ConnectionDialog.tsx:121–157 — `<details className={styles.ssh}><summary>SSH Tunnel (optional)</summary>…` with all four SSH FormFields inside, unchanged shape. |
+| 5 | Public APIs unchanged | Diff vs PR-1 baseline for each dialog: prop names + types identical (ConnectionDialog Props initial/onSave/onCancel; HostKeyDialog host/port/algorithm/fingerprint/onAccept/onReject; PassphraseDialog connectionName/onConfirm/onCancel; SaveScriptDialog initialName/initialTags/onSave/onCancel). Caller sites in `EditorArea.tsx`, `ConnectionPanel.tsx`, `App.tsx` unmodified beyond import paths. |
+| 6 | ViewModeRegistry with required interface + extension comment | `src/components/features/results/viewModes/ViewModeRegistry.ts:1–8` JSDoc names the plugin point ("To add a new result view (Tree, Chart, …): implement `ResultViewMode`, register on module load in `viewModes/index.ts`. No edits to ResultsPanel or the registry itself are needed."). Interface lines 12–19 expose `id: string`, `label: string`, `Component: (props: { group: ResultGroup }) => ReactNode` — matches plan Task 17 exactly. Idiom mirrors `src/services/records/RecordActionRegistry.ts` (class with private map + singleton export). |
+| 7 | TableViewMode + JsonViewMode self-register on import | `src/components/features/results/viewModes/index.ts:1–6` imports the singleton + both modes and calls `viewModeRegistry.register(TableViewMode/JsonViewMode)` at module load. ResultsToolbar.tsx:26 + ResultsPanel.tsx:20 import from this barrel so registration is guaranteed to run before first render. |
+| 8 | ResultsPanel ≤ 250 lines & registry dispatch | `wc -l src/components/features/results/ResultsPanel.tsx` → 224. ResultsPanel.tsx:194–199 dispatches `const ViewComponent = viewModeRegistry.get(view)?.Component; … <ViewComponent group={activeGroup} />` — no `if (view === 'table') … else if (view === 'json')` branching remains. |
+| 9 | Toolbar/Pagination/Console/ErrorBanner extracted | ResultsToolbar.tsx (46L), ResultsPagination.tsx (84L), ConsolePanel.tsx (10L), ErrorBanner.tsx (18L) all exist as separate files. ErrorBanner.tsx:14–16 uses `<Text variant="error" selectable>` per spec. |
+| 10 | No `src/components/ui/` modifications | `git diff 38de9c2..HEAD -- src/components/ui/` → empty. FormField did not need widening. |
+| 11 | No Zustand store / src-tauri changes | `git diff 38de9c2..HEAD --name-only` shows only `src/services/records/actions/{edit,view}RecordAction.ts` outside `src/components/` — both are 1-line import-path updates (line 5 / line 3 respectively). No store, no src-tauri. |
+| 12 | Commit hygiene | 8 commits, each a logical unit with conventional prefix: `refactor: move feature components…`, `refactor(connections): migrate ConnectionDialog…`, `refactor(connections): migrate HostKeyDialog…`, `refactor(connections): migrate PassphraseDialog…`, `refactor(saved-scripts): migrate SaveScriptDialog…`, `feat(results): introduce ViewModeRegistry`, `refactor(results): decompose ResultsPanel into Toolbar/Pagination/Console/ErrorBanner`, `docs(pr2): tick Task 19 checkboxes and append implementation report`. Plan Task 16 ↔ 4 separate dialog commits ✓ (one per dialog, slightly exceeds the "3 separate dialog commits" hint in the task description — that's an improvement, not a violation). |
+| Test fixups | `editor-area.test.tsx` and `integration/save-flow.test.tsx` changes are test-only | Diff inspected line-by-line: only `within(getByRole('dialog'))` scoping + the new import path. No production module touched. The dialog button-selector `dialog.querySelector('button:last-child')` was replaced by `dialogScope.getByRole('button', { name: /^Save$/i })` — strictly more robust, same semantics. |
+
+### Checks FAILED
+
+**S1-F1 — Behavior regression: arrow-key (F3 ↑/↓ etc.) navigation no longer follows the sorted table order.** ❌ (blocks Stage 1)
+
+- File / line: `src/components/features/results/ResultsPanel.tsx:103–114` (new) vs PR-1 baseline `src/components/results/ResultsPanel.tsx:159–199` (`sortedDocs` + `docsRef.current = sortedDocs`).
+- Coder also flagged this in their handoff. Confirmed by reading both versions side-by-side.
+- Root cause: when sort state moved out of ResultsPanel into `TableViewMode`, ResultsPanel lost its view of the sorted-doc order. It now feeds `allDocs = activeGroup.docs` (insertion order) into `docsRef`. The keyboard nav handler at `src/hooks/useRecordActions.ts:142–156` does `const docs = dRef.current; … docs[nextRow]`, so arrow-key cell navigation walks insertion order while the user sees sorted order. This is a user-visible behavior regression.
+- Why this fails Stage 1: plan Task 17/18 spec is **behavior-preserving** for the ResultsPanel decomposition (the plan only allows visual/architectural changes, not semantic ones). No tests cover sorted-table + arrow nav, which is why the suite still passes despite the regression — this is a coverage gap, not a green-light.
+- Required fix (preferred): widen the `ResultViewMode.Component` contract now in PR 2 rather than carrying the regression into PR 3+. Concretely:
+
+  ```ts
+  // ViewModeRegistry.ts
+  export interface ViewRenderContext {
+    group: ResultGroup;
+    /** Views call this with the docs they actually render (sorted, filtered, …)
+     *  so the host can keep record-action navigation in display order. */
+    onRenderedDocsChange?: (docs: unknown[], columns: string[]) => void;
+  }
+  export interface ResultViewMode {
+    id: string;
+    label: string;
+    Component: (props: ViewRenderContext) => ReactNode;
+  }
+  ```
+
+  Then:
+  - `ResultsPanel.tsx`: pass `onRenderedDocsChange={(docs, cols) => { docsRef.current = docs; columnsRef.current = cols; }}` and drop the existing `useEffect(() => { docsRef.current = allDocs; …})` writes.
+  - `TableViewMode.tsx`: `useEffect(() => { onRenderedDocsChange?.(sortedDocs, columnsOf(sortedDocs)); }, [sortedDocs, onRenderedDocsChange])`.
+  - `JsonViewMode.tsx`: `useEffect(() => { onRenderedDocsChange?.(group.docs, []); }, [group, onRenderedDocsChange])` (JSON view is not navigable by arrow keys, but publishing keeps the ref consistent if the user switches view → switch back).
+
+  This is the extensibility-first move from CLAUDE.md ("Document the extension contract"): the registry should describe how a view participates in host-side state, not assume a closed contract that loses behavior on the first non-trivial migration. Comment block in `ViewModeRegistry.ts` should mention this new responsibility explicitly.
+
+- Optional minimum fix (NOT recommended): keep the registry as-is and document the regression behind a user sign-off. CLAUDE.md's "extensibility-first" + plan's "behavior-preserving" both argue against this. Flagging here per the team-lead's instruction so they can override if desired.
+
+### Status
+
+**Stage 1 cycle 1: NOT PASSED.** One blocking item (S1-F1). Sending feedback to coder-ui-features-pr2 with the required fix. Re-review on next message.
+
+Context-health: comfortable headroom, well under 50% used.
+
