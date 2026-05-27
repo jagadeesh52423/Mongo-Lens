@@ -503,7 +503,7 @@ export function Toolbar({ left, right, children, className, ...rest }: ToolbarPr
 
 **Files:** `src/components/ui/hooks/{useDisclosure.ts, useResizable.ts, useFocusTrap.ts, __tests__/}`
 
-- [ ] **Step 1: Implement `useDisclosure`**
+- [x] **Step 1: Implement `useDisclosure`**
 
 ```ts
 import { useCallback, useState } from 'react';
@@ -519,7 +519,7 @@ export function useDisclosure(initial = false) {
 }
 ```
 
-- [ ] **Step 2: Implement `useResizable`**
+- [x] **Step 2: Implement `useResizable`**
 
 ```ts
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -568,7 +568,7 @@ export function useResizable({ initial, min, max, direction, storageKey }: Optio
 }
 ```
 
-- [ ] **Step 3: Implement `useFocusTrap`**
+- [x] **Step 3: Implement `useFocusTrap`**
 
 ```ts
 import { useEffect, RefObject } from 'react';
@@ -595,9 +595,9 @@ export function useFocusTrap(ref: RefObject<HTMLElement>, active: boolean) {
 }
 ```
 
-- [ ] **Step 4: Tests for `useDisclosure`** (renderHook).
+- [x] **Step 4: Tests for `useDisclosure`** (renderHook).
 
-- [ ] **Step 5:** Commit `feat(ui): add headless hooks`.
+- [x] **Step 5:** Commit `feat(ui): add headless hooks`.
 
 ---
 
