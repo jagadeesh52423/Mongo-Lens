@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
+import { Panel } from '../../ui';
 import type { ActivityItem } from '../../../layout/activityBar';
+import styles from './SidePanel.module.css';
 
 interface Props { item: ActivityItem | null }
 
@@ -27,21 +29,18 @@ export function SidePanel({ item }: Props) {
     let entry = cacheRef.current.get(item.id);
     if (!entry) {
       const el = document.createElement('div');
-      el.style.position = 'absolute';
-      el.style.inset = '0';
       // Scrollable views get a vertical scroll container managed by the host
       // so each view doesn't have to reimplement flex+overflow scaffolding.
       // Non-scrollable views own their full layout (must fill 100% height).
-      el.style.overflowY = item.scrollable ? 'auto' : 'hidden';
-      el.style.overflowX = 'hidden';
+      el.className = `${styles.viewSlot} ${item.scrollable ? styles.viewSlotScrollable : styles.viewSlotFixed}`;
       host.appendChild(el);
       try {
         const disposable = item.render(el);
         entry = { el, disposable };
         cacheRef.current.set(item.id, entry);
-      } catch (e) {
+      } catch (renderError) {
         host.removeChild(el);
-        setError(e instanceof Error ? e.message : String(e));
+        setError(renderError instanceof Error ? renderError.message : String(renderError));
       }
     }
   }, [item?.id]);
@@ -57,43 +56,23 @@ export function SidePanel({ item }: Props) {
   }, []);
 
   return (
-    <div
-      style={{
-        width: '100%', height: '100%',
-        background: 'var(--bg-panel)',
-        borderRight: '1px solid var(--border)',
-        display: 'flex', flexDirection: 'column',
-      }}
-    >
-      <div
-        data-testid="side-panel-title"
-        style={{
-          padding: '8px 12px', fontSize: 11,
-          textTransform: 'uppercase', color: 'var(--fg-dim)',
-          letterSpacing: 1, borderBottom: '1px solid var(--border)',
-        }}
-      >
-        {item?.title ?? ''}
-      </div>
+    <Panel className={styles.shell}>
+      <Panel.Header title={<span data-testid="side-panel-title">{item?.title ?? ''}</span>} />
       {error && (
-        <div role="alert" style={{ padding: 12, color: 'var(--error, red)' }}>
+        <div role="alert" className={styles.errorMsg}>
           View failed to render: {error}
         </div>
       )}
       <div
         ref={hostRef}
-        style={{
-          flex: 1, minHeight: 0,
-          position: 'relative',
-          overflow: 'hidden',
-          display: item && !error ? 'block' : 'none',
-        }}
+        className={styles.host}
+        style={{ display: item && !error ? 'block' : 'none' }}
       />
       {!item && !error && (
-        <div data-testid="side-panel-empty" style={{ flex: 1, padding: 12, color: 'var(--fg-dim)' }}>
+        <div data-testid="side-panel-empty" className={styles.empty}>
           No view selected.
         </div>
       )}
-    </div>
+    </Panel>
   );
 }

@@ -1,0 +1,23 @@
+.bar {
+  height: 22px;
+  background: var(--bg-panel);
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 var(--space-3);
+  font-size: var(--fs-sm);
+  color: var(--fg-dim);
+  gap: 14px;
+}
+
+.dot {
+  color: var(--fg-dim);
+}
+
+.dotConnected {
+  color: var(--accent-green);
+}
+
+.spacer {
+  margin-left: auto;
+}

@@ -1,3 +1,5 @@
+import styles from './StatusBar.module.css';
+
 interface Props {
   connectionName?: string;
   database?: string;
@@ -6,27 +8,13 @@ interface Props {
 
 export function StatusBar({ connectionName, database, nodeStatus }: Props) {
   return (
-    <div
-      style={{
-        height: 22,
-        background: 'var(--bg-panel)',
-        borderTop: '1px solid var(--border)',
-        display: 'flex',
-        alignItems: 'center',
-        padding: '0 10px',
-        fontSize: 11,
-        color: 'var(--fg-dim)',
-        gap: 14,
-      }}
-    >
+    <div className={styles.bar}>
       <span>
-        <span style={{ color: connectionName ? 'var(--accent-green)' : 'var(--fg-dim)' }}>
-          ●
-        </span>{' '}
+        <span className={connectionName ? styles.dotConnected : styles.dot}>●</span>{' '}
         {connectionName ?? 'No connection'}
       </span>
       {database && <span>{database}</span>}
-      <span style={{ marginLeft: 'auto' }}>{nodeStatus ?? ''}</span>
+      <span className={styles.spacer}>{nodeStatus ?? ''}</span>
     </div>
   );
 }

@@ -1096,11 +1096,11 @@ export default function App() {
 
 ### Task 26: Refactor `ContextBar.tsx`, `IconRail.tsx`, `StatusBar.tsx`, `SidePanel.tsx`
 
-- [ ] `ContextBar` → `<Toolbar>` with breadcrumb segments as left content.
-- [ ] `IconRail` → `<VStack>` of `<IconButton pressed={…} />`.
-- [ ] `StatusBar` → `<Toolbar>` variant or its own tiny styled component (it's already 32L; just remove inline styles).
-- [ ] `SidePanel` → `<Panel>` shell that picks the active sub-panel.
-- [ ] One commit per file.
+- [x] `ContextBar` → `<Toolbar>` with breadcrumb segments as left content.
+- [x] `IconRail` → `<VStack>` of `<IconButton pressed={…} />`.
+- [x] `StatusBar` → `<Toolbar>` variant or its own tiny styled component (it's already 32L; just remove inline styles).
+- [x] `SidePanel` → `<Panel>` shell that picks the active sub-panel.
+- [x] One commit per file.
 
 ---
 

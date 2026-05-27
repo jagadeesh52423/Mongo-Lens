@@ -1,4 +1,6 @@
+import { IconButton, VStack } from '../../ui';
 import type { ActivityItem } from '../../../layout/activityBar';
+import styles from './IconRail.module.css';
 
 interface Props {
   items: ActivityItem[];
@@ -10,67 +12,36 @@ interface Props {
 
 export function IconRail({ items, activeId, onChange, onSettingsOpen, settingsOpen }: Props) {
   return (
-    <div
-      style={{
-        width: 44,
-        background: 'var(--bg-rail)',
-        display: 'flex',
-        flexDirection: 'column',
-        borderRight: '1px solid var(--border)',
-      }}
-    >
-      <div
-        style={{
-          height: 44,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          borderBottom: '1px solid var(--border)',
-          flexShrink: 0,
-        }}
-      >
-        <img src="/logo.svg" alt="Logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+    <VStack gap="none" className={styles.rail}>
+      <div className={styles.logoCell}>
+        <img src="/logo.svg" alt="Logo" className={styles.logo} />
       </div>
-      {items.map((it) => {
-        const isActive = !settingsOpen && activeId === it.id;
+      {items.map((item) => {
+        const isActive = !settingsOpen && activeId === item.id;
+        const icon = item.iconUrl
+          ? <img src={item.iconUrl} alt="" className={styles.iconImg} />
+          : item.icon;
         return (
-          <button
-            key={it.id}
-            aria-label={it.title}
-            onClick={() => onChange(it.id)}
-            style={{
-              height: 44,
-              border: 'none',
-              borderLeft: isActive ? '2px solid var(--accent)' : '2px solid transparent',
-              background: 'transparent',
-              color: isActive ? 'var(--fg)' : 'var(--fg-dim)',
-              fontSize: 18,
-              cursor: 'pointer',
-            }}
-          >
-            {it.iconUrl
-              ? <img src={it.iconUrl} alt="" style={{ width: 22, height: 22, objectFit: 'contain' }} />
-              : it.icon}
-          </button>
+          <IconButton
+            key={item.id}
+            aria-label={item.title}
+            tooltip={item.title}
+            pressed={isActive}
+            icon={icon}
+            onClick={() => onChange(item.id)}
+            className={`${styles.railBtn} ${isActive ? styles.active : ''}`}
+          />
         );
       })}
-      <div style={{ flex: 1 }} />
-      <button
+      <div className={styles.spacer} />
+      <IconButton
         aria-label="Settings"
+        tooltip="Settings"
+        pressed={settingsOpen}
+        icon="⚙"
         onClick={onSettingsOpen}
-        style={{
-          height: 44,
-          border: 'none',
-          borderLeft: settingsOpen ? '2px solid var(--accent)' : '2px solid transparent',
-          background: 'transparent',
-          color: settingsOpen ? 'var(--fg)' : 'var(--fg-dim)',
-          fontSize: 18,
-          cursor: 'pointer',
-          flexShrink: 0,
-        }}
-      >
-        ⚙
-      </button>
-    </div>
+        className={`${styles.railBtn} ${settingsOpen ? styles.active : ''}`}
+      />
+    </VStack>
   );
 }

@@ -1,8 +1,10 @@
-import { CSSProperties, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { Toolbar } from '../../ui';
 import { SaveScriptDialog } from '../saved-scripts/SaveScriptDialog';
 import { useConnectionsStore } from '../../../store/connections';
 import { listDatabases } from '../../../ipc';
 import type { ExecutionMode } from '../../../execution-modes';
+import styles from './ContextBar.module.css';
 
 interface Props {
   tabId: string;
@@ -18,24 +20,12 @@ interface Props {
   isRunning: boolean;
 }
 
-function buttonStyleFor(style: ExecutionMode['buttonStyle'], canRun: boolean): CSSProperties {
-  const common: CSSProperties = {
-    opacity: canRun ? 1 : 0.5,
-    cursor: canRun ? 'pointer' : 'not-allowed',
-  };
-  if (style === 'filled') {
-    return {
-      ...common,
-      background: 'var(--accent-green)',
-      color: 'var(--bg)',
-    };
-  }
-  return {
-    ...common,
-    background: 'transparent',
-    border: '1px solid var(--accent-green)',
-    color: 'var(--accent-green)',
-  };
+function modeButtonClass(style: ExecutionMode['buttonStyle'], canRun: boolean): string {
+  return [
+    styles.modeBtn,
+    style === 'filled' ? styles.modeBtnFilled : styles.modeBtnOutlined,
+    !canRun && styles.modeBtnDisabled,
+  ].filter(Boolean).join(' ');
 }
 
 export function ContextBar({
@@ -101,71 +91,49 @@ export function ContextBar({
   const canRun = !!connectionId && !!database && !isRunning;
   const [saving, setSaving] = useState(false);
 
-  return (
+  const left = !hasConnections ? (
+    <span className={styles.empty}>No connections — connect in sidebar</span>
+  ) : (
     <>
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 8,
-        padding: '6px 10px',
-        background: 'var(--bg-panel)',
-        borderBottom: '1px solid var(--border)',
-        minHeight: 36,
-      }}
-      data-tab-id={tabId}
-    >
-      {!hasConnections ? (
-        <span style={{ color: 'var(--fg-dim)', fontStyle: 'italic' }}>
-          No connections — connect in sidebar
-        </span>
-      ) : (
-        <>
-          <label style={{ color: 'var(--fg-dim)', fontSize: 12 }}>Connection</label>
-          <select
-            value={connectionId ?? ''}
-            onChange={(e) => onConnectionChange(e.target.value)}
-            style={{ minWidth: 160 }}
-          >
-            <option value="" disabled>
-              Select connection…
-            </option>
-            {connectedList.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-          <label style={{ color: 'var(--fg-dim)', fontSize: 12, marginLeft: 4 }}>Database</label>
-          <select
-            value={database ?? ''}
-            onChange={(e) => onDatabaseChange(e.target.value)}
-            disabled={!connectionId || dbsLoading || !!dbsError}
-            style={{ minWidth: 160 }}
-          >
-            <option value="" disabled>
-              {!connectionId
-                ? 'Pick a connection first'
-                : dbsLoading
-                ? 'Loading…'
-                : dbsError
-                ? 'Failed to load'
-                : 'Pick a database…'}
-            </option>
-            {dbs.map((d) => (
-              <option key={d} value={d}>
-                {d}
-              </option>
-            ))}
-          </select>
-          {dbsError && (
-            <span style={{ color: 'var(--accent-red)', fontSize: 12 }} title={dbsError}>
-              ⚠
-            </span>
-          )}
-        </>
+      <label className={styles.label}>Connection</label>
+      <select
+        value={connectionId ?? ''}
+        onChange={(e) => onConnectionChange(e.target.value)}
+        className={styles.picker}
+      >
+        <option value="" disabled>Select connection…</option>
+        {connectedList.map((c) => (
+          <option key={c.id} value={c.id}>{c.name}</option>
+        ))}
+      </select>
+      <label className={`${styles.label} ${styles.labelOffset}`}>Database</label>
+      <select
+        value={database ?? ''}
+        onChange={(e) => onDatabaseChange(e.target.value)}
+        disabled={!connectionId || dbsLoading || !!dbsError}
+        className={styles.picker}
+      >
+        <option value="" disabled>
+          {!connectionId
+            ? 'Pick a connection first'
+            : dbsLoading
+            ? 'Loading…'
+            : dbsError
+            ? 'Failed to load'
+            : 'Pick a database…'}
+        </option>
+        {dbs.map((d) => (
+          <option key={d} value={d}>{d}</option>
+        ))}
+      </select>
+      {dbsError && (
+        <span className={styles.errIcon} title={dbsError}>⚠</span>
       )}
-      <div style={{ flex: 1 }} />
+    </>
+  );
+
+  const right = (
+    <>
       {hasSavedScript && (
         <button onClick={async () => { await onSave(); }}>Save</button>
       )}
@@ -175,18 +143,23 @@ export function ContextBar({
           key={mode.id}
           onClick={() => onExecute(mode.id)}
           disabled={!canRun}
-          style={buttonStyleFor(mode.buttonStyle, canRun)}
+          className={modeButtonClass(mode.buttonStyle, canRun)}
         >
           {mode.label}
         </button>
       ))}
-    </div>
-    {saving && (
-      <SaveScriptDialog
-        onSave={async (name, tags) => { await onSaveAs(name, tags); setSaving(false); }}
-        onCancel={() => setSaving(false)}
-      />
-    )}
-  </>
+    </>
+  );
+
+  return (
+    <>
+      <Toolbar data-tab-id={tabId} left={left} right={right} />
+      {saving && (
+        <SaveScriptDialog
+          onSave={async (name, tags) => { await onSaveAs(name, tags); setSaving(false); }}
+          onCancel={() => setSaving(false)}
+        />
+      )}
+    </>
   );
 }
