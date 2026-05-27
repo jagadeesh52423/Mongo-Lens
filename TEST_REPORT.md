@@ -197,3 +197,96 @@ ResultsPanel is comfortably under the plan's ≤250-line target. The four dialog
 - ✅ No edits to `src/styles/tokens.css` or `src/styles/globals.css`.
 - ✅ No edits to `src/store/*`, `src/services/*`, or `src-tauri/`.
 - ✅ No `--no-verify` used on any commit.
+
+# PR 3 Test Report
+Date: 2026-05-28T02:00:00Z
+Tester: tester-ui-pr3
+Worktree: .claude/worktrees/feat-ui-design-system-pr3-chat-shell
+Branch: worktree-feat-ui-design-system-pr3-chat-shell
+HEAD: 4b6d50f (range under test: 96557db..HEAD, 6 commits)
+
+## 1. vitest         — PASS (553 tests, 93 files)
+Command: `npx vitest run --no-cache --reporter=default`
+- 553 tests pass, 0 fail (+6 over PR 2's 547: new coverage for AIChatPanel decomposition, ConnectionPanel decomposition, App.tsx Shell/Providers/KeyboardWiring split, useResizable invert option).
+- 93 test files (PR 2 had 92; +1 new).
+- Duration 9.47s.
+- `--no-cache` used per worktree convention; ran cleanly first attempt.
+- Pre-existing noise unchanged from PR 1/PR 2: `layout.test.tsx` Tauri-store invoke TypeError + React `act(...)` warnings. Tests still pass.
+
+## 2. tsc --noEmit   — PASS
+Command: `npx tsc --noEmit`
+- Clean exit, no diagnostics.
+
+## 3. npm run build  — PASS
+Command: `npm run build` (tsc + vite build)
+- 581 modules transformed (PR 2: not recorded; PR 1: ~similar).
+- Output:
+  - `dist/assets/index-BrdNX5Mh.js` **668.86 kB (gzip 206.86 kB)**
+  - `dist/assets/index-sHW6-Pzb.css` **12.31 kB (gzip 3.09 kB)**
+  - `dist/index.html` 3.91 kB (gzip 1.21 kB)
+- Built in 960 ms.
+
+**Gzip delta vs PR 2 baseline (`index-CD4ouDeH.js` 664.98 kB / gzip 203.79 kB; `index-DwfhLJgN.css` 1.48 kB):**
+- JS: **+3.88 kB raw / +3.07 kB gzip** (≈ +1.5% gzip). Expected from invert-option useResizable additions, AIChatPanel/ConnectionPanel decomposition wiring, KeyboardWiring extraction.
+- CSS: **+10.83 kB raw / ≈ +1.6 kB gzip**. PR 2's tiny CSS bundle was an outlier from that build's cache; PR 3 numbers align with PR 1-era CSS volume. No new tokens or globals were added — the size shift is consolidation of co-located module CSS into the main stylesheet by Vite.
+
+Pre-existing warnings (unchanged from PR 1/PR 2):
+- Static + dynamic import mix on `src/ipc.ts` and `src/plugins/sandbox/moduleLoader.ts`.
+- Chunk-size > 500 kB warning.
+
+## 4. dev smoke      — PASS (port 1420 reachable)
+Command: `npm run dev`
+- `VITE v5.4.21 ready in 161 ms` on `http://localhost:1420/`.
+- `curl -sI http://localhost:1420/` → `HTTP/1.1 200 OK`.
+- Dev server killed cleanly after probe.
+
+## 5. cargo check    — PASS (no-op as expected)
+Command: `cd src-tauri && cargo check`
+- PR 3 touches no `src-tauri/` files; ran for completeness.
+- `Finished dev profile in 59.60s`, exit 0, no errors.
+
+## Manual visual / interaction checklist (requires user confirmation — UI changes are headlessly unverifiable)
+
+PR 3 reshapes the app shell, AI chat panel, and connections panel. The automated suite covers logic; the items below need a human at the running app.
+
+### App shell (AppShell / Shell / Providers / KeyboardWiring)
+- [ ] App boots; all three panes visible (side panel, editor area, results).
+- [ ] Primary split is draggable; resize is smooth.
+- [ ] **Splitter size persists across restart** — close dev server, restart `npm run dev`, panel widths match prior session.
+- [ ] **Side panel collapses to zero** by dragging the splitter all the way left (react-resizable-panels behavior preserved — reviewer flagged as critical).
+- [ ] App-level keyboard shortcuts work: open-settings shortcut opens Settings dialog; Escape suppression behaves correctly when a modal is open.
+
+### AI chat panel (AIChatPanel + Header/MessageList/Input + useAIChatOrchestrator)
+- [ ] Panel opens and closes via toggle.
+- [ ] **Edge-drag resize** — drag handle on **LEFT edge** of panel; **dragging left INCREASES width** (this is the `invert` option on useResizable — reviewer-flagged).
+- [ ] Resized width **persists across reload** via `ai.panel.width` localStorage key.
+- [ ] Per-tab history isolation — switch editor tabs, chat history changes with the tab.
+- [ ] Send message works (text appears in MessageList, AI response renders).
+- [ ] Clear context button empties the conversation.
+- [ ] Settings button opens AI settings.
+- [ ] **Close panel while a request is in flight** — request must abort; no zombie network calls or unhandled state (reviewer-flagged).
+
+### Connection panel (ConnectionPanel + Dialog + ListRow + ConnectionTree)
+- [ ] Header IconButtons functional (add, refresh, etc.).
+- [ ] Search input filters tree live as you type.
+- [ ] Expand/collapse of tree nodes works.
+- [ ] Right-click on a ConnectionTree entry shows context menu.
+- [ ] Double-click on an entry opens the database.
+- [ ] ConnectionDialog opens (New + Edit) and saves correctly.
+- [ ] **ConnectionTree keyboard nav** — arrow keys move selection; type-to-search jumps to matching node; selected row scrolls into view (reviewer-flagged).
+
+### PR 1/PR 2 regression sweep (must still work)
+- [ ] All dialogs (Connection, HostKey, Passphrase, SaveScript, Settings) still open from their respective triggers.
+- [ ] ResultsPanel renders Table + JSON views; pagination + sort still functional.
+- [ ] **Sorted-Table record nav** — sort a column, then ↑/↓ in record actions moves through display (sorted) order, not insertion order (PR 2 fix at a388bed).
+- [ ] ErrorBanner appears on query error; Cmd+C copies error text.
+- [ ] Console tab appears when script calls `print()`.
+
+## Risks / non-blocking notes
+- 6 non-blocking review findings logged in `CODE_REVIEW.md` "PR 3" section; none gated this test cycle.
+- JS gzip is now within ~3 kB of the 500 kB warning headroom but well under the 1 MB ceiling. No action needed for PR 3; revisit chunking if PR 4 adds significantly.
+
+## Hard-constraint compliance
+- ✅ No edits to `src-tauri/` (cargo check confirms no rebuild required).
+- ✅ No `--no-verify` used on any commit.
+- ✅ `--no-cache` used on first vitest run per worktree convention.
