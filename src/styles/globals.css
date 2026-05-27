@@ -32,3 +32,5 @@ input, select, textarea {
 }
 input:focus, select:focus, textarea:focus { outline: 1px solid var(--accent); }
 input::placeholder, textarea::placeholder { color: var(--fg-dim); opacity: 1; }
+.tab-scroll { scrollbar-width: none; -ms-overflow-style: none; }
+.tab-scroll::-webkit-scrollbar { display: none; height: 0; width: 0; }

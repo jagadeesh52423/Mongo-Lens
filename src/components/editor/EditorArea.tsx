@@ -200,7 +200,10 @@ export function EditorArea() {
           minHeight: 32,
         }}
       >
-        <div style={{ display: 'flex', overflow: 'auto', flex: 1 }}>
+        <div
+          className="tab-scroll"
+          style={{ display: 'flex', overflowX: 'auto', overflowY: 'hidden', flex: 1 }}
+        >
           {tabs.map((t) => (
             <div
               key={t.id}
@@ -215,6 +218,8 @@ export function EditorArea() {
                 background: t.id === activeTabId ? 'var(--accent)' : 'transparent',
                 color: t.id === activeTabId ? 'var(--bg)' : 'inherit',
                 borderRight: '1px solid var(--border)',
+                flexShrink: 0,
+                whiteSpace: 'nowrap',
               }}
             >
               <span>
@@ -232,7 +237,7 @@ export function EditorArea() {
               </span>
             </div>
           ))}
-          <button onClick={handleNewTab} style={{ margin: '0 6px' }}>
+          <button onClick={handleNewTab} style={{ margin: '0 6px', flexShrink: 0 }}>
             + New
           </button>
         </div>
