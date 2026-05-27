@@ -36,6 +36,34 @@ async function bootSettings(): Promise<void> {
   }
 }
 
+// Wall-clock anchor for the splash's minimum visible duration. Set at module
+// load (i.e. as soon as the JS bundle starts executing) so we measure from
+// roughly when the user first sees the splash, not from when bootSettings
+// finishes.
+const BOOT_SPLASH_MIN_MS = 1700;
+const bootSplashStart = performance.now();
+
+function dismissBootSplash(): void {
+  const el = document.getElementById('boot-splash');
+  if (!el) return;
+  const elapsed = performance.now() - bootSplashStart;
+  const wait = Math.max(0, BOOT_SPLASH_MIN_MS - elapsed);
+  setTimeout(() => {
+    // Two RAFs ensures the first React paint has flushed before we start the
+    // fade — otherwise a slow first render can briefly flash an unstyled app
+    // behind the still-opaque splash.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        el.classList.add('hide');
+        const remove = () => el.remove();
+        el.addEventListener('transitionend', remove, { once: true });
+        // Safety net in case transitionend never fires (e.g. reduced motion).
+        setTimeout(remove, 800);
+      });
+    });
+  }, wait);
+}
+
 void bootSettings().finally(() => {
   ReactDOM.createRoot(document.getElementById('root')!).render(
     <React.StrictMode>
@@ -49,4 +77,6 @@ void bootSettings().finally(() => {
     (state) => state.shortcutOverrides,
     (overrides) => keyboardService.applyOverrides(overrides),
   );
+
+  dismissBootSplash();
 });

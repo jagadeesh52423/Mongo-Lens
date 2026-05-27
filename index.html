@@ -5,8 +5,109 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Mongo Lens</title>
+    <style>
+      html, body {
+        margin: 0;
+        padding: 0;
+        background-color: #001E2B;
+      }
+      #boot-splash {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: radial-gradient(ellipse at center, rgba(0, 237, 100, 0.12) 0%, #001E2B 65%);
+        background-color: #001E2B;
+        opacity: 1;
+        transition: opacity 450ms ease;
+        overflow: hidden;
+      }
+      #boot-splash.hide {
+        opacity: 0;
+        pointer-events: none;
+      }
+      #boot-splash.hide .boot-logo {
+        animation: bootLogoOut 450ms cubic-bezier(0.4, 0, 1, 1) forwards;
+      }
+      #boot-splash.hide .boot-glow {
+        animation: bootGlowOut 450ms ease-out forwards;
+      }
+      #boot-splash .boot-logo {
+        /* 50vmin = the logo fills 50% of the viewport's smaller dimension at
+           full size. We animate scale, not width, so the growth is GPU-cheap
+           and stays smooth on cold start. */
+        width: 50vmin;
+        opacity: 0;
+        transform: scale(0.05);
+        transform-origin: center center;
+        animation:
+          bootLogoIn 1200ms cubic-bezier(0.22, 1, 0.36, 1) forwards,
+          bootLogoPulse 2400ms ease-in-out 1200ms infinite;
+        filter: drop-shadow(0 0 24px rgba(0, 237, 100, 0.4));
+        will-change: transform, opacity;
+      }
+      #boot-splash .boot-glow {
+        position: absolute;
+        width: 70vmin;
+        height: 70vmin;
+        border-radius: 50%;
+        background: radial-gradient(circle, rgba(0, 237, 100, 0.28) 0%, rgba(0, 237, 100, 0) 70%);
+        opacity: 0;
+        transform: scale(0.1);
+        animation:
+          bootGlowIn 1200ms cubic-bezier(0.22, 1, 0.36, 1) forwards,
+          bootGlow 2400ms ease-in-out 1200ms infinite;
+        pointer-events: none;
+        will-change: transform, opacity;
+      }
+      @keyframes bootLogoIn {
+        0%   { opacity: 0; transform: scale(0.05); }
+        60%  { opacity: 1; transform: scale(1.08); }
+        100% { opacity: 1; transform: scale(1); }
+      }
+      @keyframes bootLogoOut {
+        0%   { opacity: 1; transform: scale(1); }
+        100% { opacity: 0; transform: scale(1.4); }
+      }
+      @keyframes bootGlowIn {
+        0%   { opacity: 0; transform: scale(0.1); }
+        100% { opacity: 0.55; transform: scale(1); }
+      }
+      @keyframes bootGlowOut {
+        0%   { opacity: 0.55; transform: scale(1); }
+        100% { opacity: 0; transform: scale(1.5); }
+      }
+      @keyframes bootLogoPulse {
+        0%, 100% {
+          transform: scale(1);
+          filter: drop-shadow(0 0 20px rgba(0, 237, 100, 0.35));
+        }
+        50% {
+          transform: scale(1.04);
+          filter: drop-shadow(0 0 36px rgba(0, 237, 100, 0.6));
+        }
+      }
+      @keyframes bootGlow {
+        0%, 100% { opacity: 0.45; transform: scale(0.95); }
+        50%      { opacity: 0.8;  transform: scale(1.1); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #boot-splash .boot-logo,
+        #boot-splash .boot-glow {
+          animation: none;
+        }
+        #boot-splash .boot-logo { opacity: 1; transform: none; }
+        #boot-splash .boot-glow { opacity: 0.5; transform: none; }
+      }
+    </style>
   </head>
   <body>
+    <div id="boot-splash">
+      <div class="boot-glow"></div>
+      <img class="boot-logo" src="/logo_with_text.svg" alt="Mongo Lens" />
+    </div>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
