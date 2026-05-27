@@ -605,9 +605,9 @@ export function useFocusTrap(ref: RefObject<HTMLElement>, active: boolean) {
 
 **Files:** `src/components/ui/Dialog/{Dialog.tsx, Dialog.module.css, index.ts, __tests__/Dialog.test.tsx}`
 
-- [ ] **Step 1: Test** — opens, traps focus, Escape calls `onClose`, backdrop click calls `onClose`, body content rendered in portal, footer rendered at bottom.
+- [x] **Step 1: Test** — opens, traps focus, Escape calls `onClose`, backdrop click calls `onClose`, body content rendered in portal, footer rendered at bottom.
 
-- [ ] **Step 2: Implement**
+- [x] **Step 2: Implement**
 
 ```tsx
 import { useEffect, useRef, type ReactNode } from 'react';
@@ -684,7 +684,7 @@ export const Dialog = Object.assign(DialogRoot, { Header: DialogHeader, Body: Di
 }
 ```
 
-- [ ] **Step 3:** Commit `feat(ui): add Dialog compound primitive`.
+- [x] **Step 3:** Commit `feat(ui): add Dialog compound primitive`.
 
 ---
 
