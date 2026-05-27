@@ -1,28 +1,25 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { MutableRefObject, ReactNode } from 'react';
+import type { MutableRefObject } from 'react';
 import { save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { writeTextFile } from '@tauri-apps/plugin-fs';
 import { useResultsStore } from '../../../store/results';
-import { JsonView } from './JsonView';
-import { TableView, columnsOf } from './TableView';
+import { columnsOf } from './TableView';
 import { RecordModalShell } from './RecordModalShell';
 import { toCsv, toJsonText } from '../../../utils/export';
 import { CellSelectionProvider, useCellSelection } from '../../../contexts/CellSelectionContext';
 import { useRecordActions } from '../../../hooks/useRecordActions';
 import { KeyboardScopeZone } from '../../shared/KeyboardScopeZone';
-import { keyboardService } from '../../../services/KeyboardService';
-import { DEFAULT_SHORTCUTS } from '../../../shortcuts/defaults';
-import { recordActionRegistry } from '../../../services/records/RecordActionRegistry';
 import type { RecordContext } from '../../../services/records/RecordContext';
 import type { RecordActionHost } from '../../../services/records/RecordActionHost';
 import type { ResultGroup } from '../../../types';
-
-interface ModalState {
-  title: string;
-  body: ReactNode;
-  footer: ReactNode;
-  beforeClose?: () => boolean | Promise<boolean>;
-}
+import { ErrorBanner } from './ErrorBanner';
+import { ResultsToolbar } from './ResultsToolbar';
+import { ResultsPagination } from './ResultsPagination';
+import { ConsolePanel } from './ConsolePanel';
+import { GroupTabs } from './GroupTabs';
+import { viewModeRegistry } from './viewModes';
+import { useResultsHost } from './useResultsHost';
+import styles from './ResultsPanel.module.css';
 
 function RecordActionsRegistrar({
   context,
@@ -49,11 +46,6 @@ function SelectionClearer({ tabId, isRunning }: { tabId: string; isRunning: bool
   return null;
 }
 
-const PAGE_SIZE_OPTIONS = [5, 10, 20, 50, 100, 200] as const;
-
-const selectAllDef = DEFAULT_SHORTCUTS.find((d) => d.id === 'results.selectAll');
-if (selectAllDef) keyboardService.defineShortcut(selectAllDef);
-
 interface Props {
   tabId: string;
   pageSize: number;
@@ -69,31 +61,13 @@ export function ResultsPanel({
   connectionId, database, onDocUpdated,
 }: Props) {
   const res = useResultsStore((s) => s.byTab[tabId]);
-  const [view, setView] = useState<'json' | 'table'>('table');
-  const [modal, setModal] = useState<ModalState | null>(null);
-  // Mirrors `modal` so host.close (called from action code, e.g., the Cancel
-  // button in EditBody) can consult beforeClose without re-rendering through
-  // a stale closure.
-  const modalRef = useRef<ModalState | null>(null);
-  modalRef.current = modal;
-  const onDocUpdatedRef = useRef(onDocUpdated);
-  onDocUpdatedRef.current = onDocUpdated;
+  const [view, setView] = useState<string>('table');
 
   const pagination = res?.pagination;
-  const totalPages = pagination && pagination.total >= 0
-    ? Math.max(1, Math.ceil(pagination.total / pageSize))
-    : -1;
-
-  // 1-indexed input synced to pagination.page
-  const [inputPage, setInputPage] = useState(1);
-  useEffect(() => {
-    if (pagination) setInputPage(pagination.page + 1);
-  }, [pagination?.page]);
-
   const groupCount = res?.groups.length ?? 0;
   const logs = res?.logs ?? [];
-  const hasLogs = logs.length > 0;
   const runId = res?.runId;
+
   // Active selection is either a query-group index or the synthetic 'console'
   // tab that surfaces print() output. 'console' is opt-in and never auto-
   // selected so existing query workflows are unaffected.
@@ -106,15 +80,13 @@ export function ResultsPanel({
     typeof activeGroupIndex === 'number' && activeGroupIndex < groupCount
       ? activeGroupIndex
       : 0;
-
   const activeGroup = res?.groups[safeActiveIndex];
 
   // Collection + category come exclusively from the active result group's
   // runtime-resolved metadata (QueryTypeRegistry classification). No fallback
   // to tab-creation-time provenance: if the classifier couldn't extract a
-  // collection, F4 must stay disabled — falling back would re-introduce the
-  // exact stale-collection bug this refactor fixes. Category gates
-  // availability of actions like F4 (see editRecordAction.canExecute).
+  // collection, F4 must stay disabled. Category gates availability of actions
+  // like F4 (see editRecordAction.canExecute).
   const recordContext = useMemo<RecordContext>(
     () => ({
       doc: {},
@@ -126,109 +98,26 @@ export function ResultsPanel({
     [connectionId, database, activeGroup?.collection, activeGroup?.category],
   );
 
-  // Tracks the context of the currently-active action so executeAction (e.g., view → edit handoff)
-  // can re-dispatch with the same doc without the caller threading it through.
-  const activeContextRef = useRef<RecordContext>(recordContext);
+  const { modal, setModal, host, activeContextRef } = useResultsHost({ recordContext, onDocUpdated });
 
-  const host = useMemo<RecordActionHost>(() => {
-    const h: RecordActionHost = {
-      openModal(title, body, footer, options) {
-        setModal({ title, body, footer, beforeClose: options?.beforeClose });
-      },
-      async close() {
-        const gate = modalRef.current?.beforeClose;
-        if (gate) {
-          const result = await gate();
-          if (result === false) return;
-        }
-        setModal(null);
-      },
-      triggerDocUpdate() {
-        onDocUpdatedRef.current?.();
-      },
-      executeAction(id) {
-        const action = recordActionRegistry.getById(id);
-        if (!action) return;
-        const ctx = activeContextRef.current;
-        if (!action.canExecute(ctx)) return;
-        action.execute(ctx, h);
-      },
-    };
-    return h;
-  }, []);
+  const allDocs = useMemo(() => activeGroup?.docs ?? [], [activeGroup]);
+  const columns = useMemo(() => columnsOf(allDocs), [allDocs]);
 
-  const allDocs = useMemo(() => {
-    if (!res) return [];
-    const group = res.groups[safeActiveIndex];
-    return group ? group.docs : [];
-  }, [res, safeActiveIndex]);
-
-  const [sortKey, setSortKey] = useState<string | null>(null);
-  const [sortDir, setSortDir] = useState<1 | -1>(1);
-  // Reset sort when switching tabs (across script tabs or between queries).
-  useEffect(() => { setSortKey(null); setSortDir(1); }, [tabId, safeActiveIndex]);
-
-  const sortedDocs = useMemo(() => {
-    if (!sortKey) return allDocs;
-    const arr = [...allDocs];
-    arr.sort((a, b) => {
-      const av = (a as Record<string, unknown>)[sortKey] as unknown;
-      const bv = (b as Record<string, unknown>)[sortKey] as unknown;
-      if (av === bv) return 0;
-      if (av === undefined || av === null) return 1;
-      if (bv === undefined || bv === null) return -1;
-      return String(av) < String(bv) ? -sortDir : sortDir;
-    });
-    return arr;
-  }, [allDocs, sortKey, sortDir]);
-
-  const handleToggleSort = useCallback((colKey: string) => {
-    setSortKey((prevKey) => {
-      if (prevKey === colKey) {
-        setSortDir((d) => (d === 1 ? -1 : 1));
-        return prevKey;
-      }
-      setSortDir(1);
-      return colKey;
-    });
-  }, []);
-
-  const columns = useMemo(() => columnsOf(sortedDocs), [sortedDocs]);
-
-  const docsRef = useRef<unknown[]>(sortedDocs);
+  // Refs surface live state to the record-action keyboard handlers. They
+  // point at the active group's docs in insertion order; per-view sorting
+  // (e.g. inside TableViewMode) does not feed back into navigation.
+  const docsRef = useRef<unknown[]>(allDocs);
   const columnsRef = useRef<string[]>(columns);
   const groupsRef = useRef<ResultGroup[]>(res?.groups ?? []);
-  useEffect(() => { docsRef.current = sortedDocs; }, [sortedDocs]);
+  useEffect(() => { docsRef.current = allDocs; }, [allDocs]);
   useEffect(() => { columnsRef.current = columns; }, [columns]);
   useEffect(() => { groupsRef.current = res?.groups ?? []; }, [res?.groups]);
 
   // After a run completes with results, focus the results scope zone so F3/F4
   // work even when the editor previously had focus. Shortcut dispatch matches
-  // strictly against the focused element's scope chain (no sticky fallback),
-  // so without this auto-focus a freshly-loaded script's results would not
-  // receive any panel shortcuts until the user clicked into the panel.
+  // strictly against the focused element's scope chain (no sticky fallback).
   const resultsScopeRef = useRef<HTMLDivElement>(null);
-  const jsonViewRef = useRef<HTMLDivElement>(null);
   const prevIsRunningRef = useRef(false);
-
-  // Cmd+A inside results: select JSON body text in JSON view; in table view,
-  // the keyboard service already preventDefaults on match, so this is a no-op
-  // (suppresses the browser's page-wide select-all).
-  const viewRef = useRef(view);
-  viewRef.current = view;
-  useEffect(() => {
-    return keyboardService.register('results.selectAll', () => {
-      if (viewRef.current !== 'json') return;
-      const el = jsonViewRef.current;
-      if (!el) return;
-      const sel = window.getSelection();
-      if (!sel) return;
-      const range = document.createRange();
-      range.selectNodeContents(el);
-      sel.removeAllRanges();
-      sel.addRange(range);
-    });
-  }, []);
   const isRunning = !!res?.isRunning;
   useEffect(() => {
     if (prevIsRunningRef.current && !isRunning && allDocs.length > 0 && view === 'table') {
@@ -237,24 +126,29 @@ export function ResultsPanel({
     prevIsRunningRef.current = isRunning;
   }, [isRunning, allDocs.length, view]);
 
-  async function exportAs(kind: 'csv' | 'json') {
+  const handleExport = useCallback(async (kind: 'csv' | 'json') => {
     const suggested = kind === 'csv' ? 'results.csv' : 'results.json';
     const path = await saveDialog({ defaultPath: suggested });
     if (!path) return;
     const content = kind === 'csv' ? toCsv(allDocs) : toJsonText(allDocs);
     await writeTextFile(path as string, content);
-  }
+  }, [allDocs]);
 
-  function handlePageInputKey(e: React.KeyboardEvent<HTMLInputElement>) {
-    if (e.key !== 'Enter') return;
-    const parsed = parseInt(String(inputPage), 10);
-    if (isNaN(parsed)) return;
-    const clamped = Math.max(1, totalPages > 0 ? Math.min(parsed, totalPages) : parsed);
-    setInputPage(clamped);
-    onPageChange?.(clamped - 1, pageSize); // convert to 0-indexed
-  }
+  const statusText = useMemo(() => {
+    if (!res) return '';
+    if (res.isRunning) return 'Running…';
+    const ms = res.executionMs ?? 0;
+    if (pagination && pagination.total >= 0 && allDocs.length > 0) {
+      const startIndex = pagination.page * pageSize + 1;
+      const endIndex = startIndex + allDocs.length - 1;
+      return `${startIndex} - ${endIndex} / ${pagination.total} docs · ${ms} ms`;
+    }
+    return `${allDocs.length} docs · ${ms} ms`;
+  }, [res, pagination, pageSize, allDocs.length]);
 
-  const isEmpty = !res || (res.groups.length === 0 && logs.length === 0 && !res.isRunning && !res.lastError && !res.pagination);
+  const isEmpty = !res || (
+    res.groups.length === 0 && logs.length === 0 && !res.isRunning && !res.lastError && !res.pagination
+  );
 
   return (
     <CellSelectionProvider>
@@ -269,205 +163,62 @@ export function ResultsPanel({
       />
       {isEmpty ? (
         <KeyboardScopeZone scope="results">
-          <div style={{ padding: 12, color: 'var(--fg-dim)' }}>
-            Run a script to see results.
-          </div>
+          <div className={styles.empty}>Run a script to see results.</div>
         </KeyboardScopeZone>
       ) : (
-      <KeyboardScopeZone ref={resultsScopeRef} scope="results" tabIndex={-1} style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, outline: 'none' }}>
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-          padding: '4px 8px',
-          borderBottom: '1px solid var(--border)',
-          background: 'var(--bg-panel)',
-        }}
-      >
-        <button onClick={() => setView('json')} disabled={view === 'json'}>JSON</button>
-        <button onClick={() => setView('table')} disabled={view === 'table'}>Table</button>
-        <button onClick={() => exportAs('csv')} disabled={allDocs.length === 0}>Export CSV</button>
-        <button onClick={() => exportAs('json')} disabled={allDocs.length === 0}>Export JSON</button>
-        <span style={{ marginLeft: 'auto', color: 'var(--fg-dim)', fontSize: 11 }}>
-          {res.isRunning ? 'Running…' : (() => {
-            const ms = res.executionMs ?? 0;
-            if (pagination && pagination.total >= 0 && allDocs.length > 0) {
-              const startIndex = pagination.page * pageSize + 1;
-              const endIndex = startIndex + allDocs.length - 1;
-              return `${startIndex} - ${endIndex} / ${pagination.total} docs · ${ms} ms`;
-            }
-            return `${allDocs.length} docs · ${ms} ms`;
-          })()}
-        </span>
-      </div>
-      {(groupCount > 1 || hasLogs) && (
-        <div
-          role="tablist"
-          style={{
-            display: 'flex',
-            alignItems: 'stretch',
-            gap: 0,
-            padding: '0 8px',
-            borderBottom: '1px solid var(--border)',
-            background: 'var(--bg-panel)',
-            overflowX: 'auto',
-          }}
+        <KeyboardScopeZone
+          ref={resultsScopeRef}
+          scope="results"
+          tabIndex={-1}
+          style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, outline: 'none' }}
         >
-          {res.groups.map((_, idx) => {
-            const isActive = !isConsoleActive && idx === safeActiveIndex;
-            return (
-              <button
-                key={idx}
-                role="tab"
-                aria-selected={isActive}
-                onClick={() => setActiveGroupIndex(idx)}
-                style={{
-                  background: 'transparent',
-                  border: 'none',
-                  padding: '6px 12px',
-                  fontSize: 12,
-                  fontWeight: isActive ? 600 : 400,
-                  color: isActive ? 'var(--accent)' : 'var(--fg-dim)',
-                  borderBottom: isActive ? '2px solid var(--accent)' : '2px solid transparent',
-                  cursor: 'pointer',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                Query {idx + 1}
-              </button>
-            );
-          })}
-          {hasLogs && (
-            <button
-              key="console"
-              role="tab"
-              aria-selected={isConsoleActive}
-              onClick={() => setActiveGroupIndex('console')}
-              style={{
-                background: 'transparent',
-                border: 'none',
-                padding: '6px 12px',
-                fontSize: 12,
-                fontWeight: isConsoleActive ? 600 : 400,
-                color: isConsoleActive ? 'var(--accent)' : 'var(--fg-dim)',
-                borderBottom: isConsoleActive ? '2px solid var(--accent)' : '2px solid transparent',
-                cursor: 'pointer',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              Console ({logs.length})
-            </button>
-          )}
-        </div>
-      )}
-      {res.lastError && (
-        <div style={{ padding: 8, color: 'var(--accent-red)', fontFamily: 'var(--font-mono)' }}>
-          {res.lastError}
-        </div>
-      )}
-      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-        {isConsoleActive ? (
-          <pre
-            style={{
-              flex: 1,
-              minHeight: 0,
-              margin: 0,
-              padding: 8,
-              overflow: 'auto',
-              fontFamily: 'var(--font-mono)',
-              fontSize: 12,
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word',
-              background: 'var(--bg-panel)',
-              color: 'var(--fg)',
-            }}
-          >
-            {logs.join('\n')}
-          </pre>
-        ) : view === 'json' ? (
-          <div ref={jsonViewRef} style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
-            <JsonView docs={allDocs} />
-          </div>
-        ) : (
-          <KeyboardScopeZone scope="results-table" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-            <TableView
-              docs={sortedDocs}
-              sortKey={sortKey}
-              sortDir={sortDir}
-              onToggleSort={handleToggleSort}
-              groupIndex={safeActiveIndex}
-            />
-          </KeyboardScopeZone>
-        )}
-      </div>
-      {pagination && (
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            padding: '4px 8px',
-            borderTop: '1px solid var(--border)',
-            background: 'var(--bg-panel)',
-            fontSize: 12,
-          }}
-        >
-          <button
-            aria-label="Prev page"
-            onClick={() => onPageChange?.(pagination.page - 1, pageSize)}
-            disabled={pagination.page === 0 || res.isRunning}
-          >
-            ← Prev
-          </button>
-          <span>Page</span>
-          <input
-            type="number"
-            value={inputPage}
-            min={1}
-            max={totalPages > 0 ? totalPages : undefined}
-            onChange={(e) => setInputPage(Number(e.target.value))}
-            onKeyDown={handlePageInputKey}
-            style={{ width: 48, textAlign: 'center' }}
+          <ResultsToolbar
+            view={view}
+            onChangeView={setView}
+            onExportCsv={() => handleExport('csv')}
+            onExportJson={() => handleExport('json')}
+            exportDisabled={allDocs.length === 0}
+            statusText={statusText}
           />
-          <span>
-            of {totalPages > 0 ? totalPages : '?'}
-          </span>
-          <button
-            aria-label="Next page"
-            onClick={() => onPageChange?.(pagination.page + 1, pageSize)}
-            disabled={(totalPages > 0 && pagination.page >= totalPages - 1) || res.isRunning}
-          >
-            Next →
-          </button>
-          <select
-            value={pageSize}
-            onChange={(e) => {
-              const next = Number(e.target.value);
-              onPageSizeChange?.(next);
-              onPageChange?.(0, next);
-            }}
-            disabled={res.isRunning}
-            style={{ marginLeft: 'auto' }}
-          >
-            {PAGE_SIZE_OPTIONS.map((n) => (
-              <option key={n} value={n}>{n}</option>
-            ))}
-          </select>
-          <span>per page</span>
-        </div>
+          <GroupTabs
+            groupCount={groupCount}
+            logsCount={logs.length}
+            active={activeGroupIndex}
+            onChange={setActiveGroupIndex}
+          />
+          {res!.lastError && <ErrorBanner message={res!.lastError} />}
+          <div className={styles.body}>
+            {isConsoleActive ? (
+              <ConsolePanel logs={logs} />
+            ) : activeGroup ? (
+              (() => {
+                const ViewComponent = viewModeRegistry.get(view)?.Component;
+                if (!ViewComponent) return null;
+                return <ViewComponent group={activeGroup} />;
+              })()
+            ) : null}
+          </div>
+          {pagination && (
+            <ResultsPagination
+              page={pagination.page}
+              pageSize={pageSize}
+              total={pagination.total}
+              busy={!!res?.isRunning}
+              onPageChange={(p, ps) => onPageChange?.(p, ps)}
+              onPageSizeChange={(ps) => onPageSizeChange?.(ps)}
+            />
+          )}
+        </KeyboardScopeZone>
       )}
-    </KeyboardScopeZone>
-    )}
-    {modal && (
-      <RecordModalShell
-        title={modal.title}
-        body={modal.body}
-        footer={modal.footer}
-        onClose={() => setModal(null)}
-        beforeClose={modal.beforeClose}
-      />
-    )}
+      {modal && (
+        <RecordModalShell
+          title={modal.title}
+          body={modal.body}
+          footer={modal.footer}
+          onClose={() => setModal(null)}
+          beforeClose={modal.beforeClose}
+        />
+      )}
     </CellSelectionProvider>
   );
 }

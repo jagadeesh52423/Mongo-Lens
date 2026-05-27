@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, cleanup, waitFor } from '@testing-library/react';
+import { render, screen, cleanup, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { EditorArea } from '../components/features/editor/EditorArea';
 import * as ipc from '../ipc';
@@ -203,14 +203,14 @@ describe('EditorArea Save/Save As handlers', () => {
     await userEvent.click(saveAsButton);
 
     // Dialog should appear
-    await waitFor(() => screen.getByRole('dialog'));
+    const dialog = await screen.findByRole('dialog');
+    const dialogScope = within(dialog);
 
-    const inputs = screen.getAllByRole('textbox');
-    const nameInput = inputs[0];
+    const nameInput = dialogScope.getAllByRole('textbox')[0];
     await userEvent.clear(nameInput);
     await userEvent.type(nameInput, 'New Script Name');
 
-    const saveDialogButton = screen.getByRole('button', { name: /^Save$/i });
+    const saveDialogButton = dialogScope.getByRole('button', { name: /^Save$/i });
     await userEvent.click(saveDialogButton);
 
     await waitFor(() => {

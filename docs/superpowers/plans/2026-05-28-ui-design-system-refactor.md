@@ -983,19 +983,19 @@ export * from './ViewModeRegistry';
 - Create: `*.module.css` per file
 - Test: extend existing tests under `src/components/features/results/__tests__/`
 
-- [ ] **Step 1: Extract `ErrorBanner`** — wraps `<Text variant="error" selectable>` in a padded container. Props: `message: string`. The current `{res.lastError && <div style={…}>{res.lastError}</div>}` block becomes `<ErrorBanner message={res.lastError} />`.
+- [x] **Step 1: Extract `ErrorBanner`** — wraps `<Text variant="error" selectable>` in a padded container. Props: `message: string`. The current `{res.lastError && <div style={…}>{res.lastError}</div>}` block becomes `<ErrorBanner message={res.lastError} />`.
 
-- [ ] **Step 2: Extract `ResultsToolbar`** — view-mode selector (driven by `viewModeRegistry.list()`), export-CSV button, export-JSON button, refresh, etc.
+- [x] **Step 2: Extract `ResultsToolbar`** — view-mode selector (driven by `viewModeRegistry.list()`), export-CSV button, export-JSON button, refresh, etc.
 
-- [ ] **Step 3: Extract `ResultsPagination`** — page-size dropdown, page nav buttons, "showing X-Y of Z".
+- [x] **Step 3: Extract `ResultsPagination`** — page-size dropdown, page nav buttons, "showing X-Y of Z".
 
-- [ ] **Step 4: Extract `ConsolePanel`** — the `<pre>` log output.
+- [x] **Step 4: Extract `ConsolePanel`** — the `<pre>` log output.
 
-- [ ] **Step 5: Trim `ResultsPanel.tsx`** — orchestrates: stores, modal, registers `RecordActions`, dispatches active view via `viewModeRegistry.get(view)?.Component`.
+- [x] **Step 5: Trim `ResultsPanel.tsx`** — orchestrates: stores, modal, registers `RecordActions`, dispatches active view via `viewModeRegistry.get(view)?.Component`.
 
-- [ ] **Step 6: Run tests + smoke** — open results, switch views, paginate, view error, copy error with Cmd+C.
+- [x] **Step 6: Run tests + smoke** — open results, switch views, paginate, view error, copy error with Cmd+C.
 
-- [ ] **Step 7:** Commit `refactor(results): decompose ResultsPanel into ResultsToolbar/ResultsPagination/ConsolePanel/ErrorBanner`.
+- [x] **Step 7:** Commit `refactor(results): decompose ResultsPanel into ResultsToolbar/ResultsPagination/ConsolePanel/ErrorBanner`.
 
 ---
 

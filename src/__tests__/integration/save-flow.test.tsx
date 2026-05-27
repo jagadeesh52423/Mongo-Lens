@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { EditorArea } from '../../components/features/editor/EditorArea';
 import * as ipc from '../../ipc';
@@ -133,10 +133,11 @@ describe('Save/Save As integration flow', () => {
 
     // Click Save As — opens the dialog
     await user.click(screen.getByRole('button', { name: /Save As/i }));
-    await waitFor(() => screen.getByRole('dialog'));
+    const dialog1 = await screen.findByRole('dialog');
+    const dialogScope1 = within(dialog1);
 
     // Fill in the dialog
-    const inputs = screen.getAllByRole('textbox');
+    const inputs = dialogScope1.getAllByRole('textbox');
     const nameInput = inputs[0];
     const tagsInput = inputs[1];
     await user.clear(nameInput);
@@ -145,8 +146,7 @@ describe('Save/Save As integration flow', () => {
     await user.type(tagsInput, 'admin');
 
     // Click the Save button inside the dialog
-    const dialogSaveBtn = screen.getByRole('dialog').querySelector('button:last-child')!;
-    await user.click(dialogSaveBtn);
+    await user.click(dialogScope1.getByRole('button', { name: /^Save$/i }));
 
     await waitFor(() => {
       expect(ipc.createScript).toHaveBeenCalledWith(
@@ -205,16 +205,16 @@ describe('Save/Save As integration flow', () => {
     });
 
     await user.click(screen.getByRole('button', { name: /Save As/i }));
-    await waitFor(() => screen.getByRole('dialog'));
+    const dialog2 = await screen.findByRole('dialog');
+    const dialogScope2 = within(dialog2);
 
-    const inputs = screen.getAllByRole('textbox');
+    const inputs = dialogScope2.getAllByRole('textbox');
     await user.clear(inputs[0]);
     await user.type(inputs[0], 'Orders Query');
     await user.clear(inputs[1]);
     await user.type(inputs[1], 'orders');
 
-    const dialogSaveBtn = screen.getByRole('dialog').querySelector('button:last-child')!;
-    await user.click(dialogSaveBtn);
+    await user.click(dialogScope2.getByRole('button', { name: /^Save$/i }));
 
     await waitFor(() => {
       expect(ipc.createScript).toHaveBeenCalledWith(
