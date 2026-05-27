@@ -832,7 +832,7 @@ export function ResizableSplit({ direction, initial, min, max, storageKey, child
 
 **Files:** `src/components/ui/index.ts`
 
-- [ ] **Step 1: Add re-exports**
+- [x] **Step 1: Add re-exports**
 
 ```ts
 export * from './Button';
@@ -850,13 +850,13 @@ export * from './hooks/useResizable';
 export * from './hooks/useFocusTrap';
 ```
 
-- [ ] **Step 2: Type check** — `npm run -s typecheck` (or `tsc --noEmit`) — PASS.
+- [x] **Step 2: Type check** — `npm run -s typecheck` (or `tsc --noEmit`) — PASS.
 
-- [ ] **Step 3: Vitest** — `npx vitest run` — all existing + new tests PASS.
+- [x] **Step 3: Vitest** — `npx vitest run` — all existing + new tests PASS.
 
-- [ ] **Step 4: Smoke test** — `npm run dev`, load app — no visual change.
+- [x] **Step 4: Smoke test** — `npm run dev`, load app — no visual change.
 
-- [ ] **Step 5:** Commit `feat(ui): barrel export design-system primitives`.
+- [x] **Step 5:** Commit `feat(ui): barrel export design-system primitives`.
 
 ---
 
