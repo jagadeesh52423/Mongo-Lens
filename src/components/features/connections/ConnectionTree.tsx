@@ -1,85 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { listDatabases, listCollections } from '../../../ipc';
+import { ListRow } from '../../ui';
 import type { CollectionNode } from '../../../types';
+import styles from './ConnectionTree.module.css';
 
 const TYPE_TO_SEARCH_RESET_MS = 600;
 
 interface Props {
   connectionId: string;
   onOpenCollection: (database: string, collection: string) => void;
-}
-
-type GuideKind = 'line' | 'branch' | 'last' | 'empty';
-
-const GUIDE_STYLE = `
-.t-row {
-  display: flex;
-  align-items: stretch;
-  min-height: 22px;
-  cursor: pointer;
-  user-select: none;
-  font-size: 13px;
-}
-.t-row:hover { background: rgba(255,255,255,0.06); }
-.t-row.t-selected { background: rgba(80,140,220,0.28); }
-.t-wrap:focus { outline: none; }
-.t-wrap:focus .t-row.t-selected { background: rgba(80,140,220,0.45); }
-.t-guide {
-  width: 16px;
-  flex-shrink: 0;
-  position: relative;
-  align-self: stretch;
-}
-.t-guide-line::before,
-.t-guide-branch::before,
-.t-guide-last::before {
-  content: '';
-  position: absolute;
-  left: 7px;
-  width: 1px;
-  background: var(--border);
-}
-.t-guide-line::before   { top: 0; bottom: 0; }
-.t-guide-branch::before { top: 0; bottom: 0; }
-.t-guide-last::before   { top: 0; height: 50%; }
-.t-guide-branch::after,
-.t-guide-last::after {
-  content: '';
-  position: absolute;
-  top: 50%;
-  left: 7px;
-  width: 8px;
-  height: 1px;
-  background: var(--border);
-}
-.t-label {
-  display: flex;
-  align-items: center;
-  padding: 3px 6px;
-  flex: 1;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.t-caret {
-  display: flex;
-  align-items: center;
-  width: 14px;
-  font-size: 10px;
-  color: var(--fg-dim);
-}
-`;
-
-function Guide({ kind }: { kind: GuideKind }) {
-  const cls =
-    kind === 'line'
-      ? 't-guide t-guide-line'
-      : kind === 'branch'
-      ? 't-guide t-guide-branch'
-      : kind === 'last'
-      ? 't-guide t-guide-last'
-      : 't-guide';
-  return <div className={cls} />;
 }
 
 export function ConnectionTree({ connectionId, onOpenCollection }: Props) {
@@ -179,38 +108,35 @@ export function ConnectionTree({ connectionId, onOpenCollection }: Props) {
   return (
     <div
       ref={wrapperRef}
-      className="t-wrap"
-      style={{ padding: 4, outline: 'none' }}
+      className={styles.wrap}
       tabIndex={0}
       onKeyDown={handleKeyDown}
     >
-      <style>{GUIDE_STYLE}</style>
-      {err && <div style={{ color: 'var(--accent-red)', padding: 6 }}>{err}</div>}
-      {dbs.map((db, dbIdx) => {
-        const isLastDb = dbIdx === dbs.length - 1;
-        const dbGuide: GuideKind = isLastDb ? 'last' : 'branch';
+      {err && <div className={styles.error}>{err}</div>}
+      {dbs.map((db) => {
         const cols = collections[db];
         return (
           <div key={db}>
-            <div className="t-row" onClick={() => toggle(db)}>
-              <Guide kind={dbGuide} />
-              <span className="t-caret">{expanded[db] ? '▼' : '▶'}</span>
-              <span className="t-label">{db}</span>
-            </div>
-            {expanded[db] && cols &&
-              cols.map((c, cIdx) => {
-                const isLastCol = cIdx === cols.length - 1;
-                const connGuide: GuideKind = isLastDb ? 'empty' : 'line';
-                const colGuide: GuideKind = isLastCol ? 'last' : 'branch';
-                const isSelected =
-                  selected?.db === db && selected?.col === c.name;
-                return (
-                  <div
-                    key={c.name}
-                    ref={(el) => {
-                      rowRefs.current.set(`${db}::${c.name}`, el);
-                    }}
-                    className={`t-row${isSelected ? ' t-selected' : ''}`}
+            <ListRow
+              icon={<span className={styles.caret}>{expanded[db] ? '▼' : '▶'}</span>}
+              indent={0}
+              onClick={() => toggle(db)}
+            >
+              {db}
+            </ListRow>
+            {expanded[db] && cols && cols.map((c) => {
+              const isSelected = selected?.db === db && selected?.col === c.name;
+              return (
+                <div
+                  key={c.name}
+                  ref={(el) => {
+                    rowRefs.current.set(`${db}::${c.name}`, el);
+                  }}
+                >
+                  <ListRow
+                    indent={1}
+                    selected={isSelected}
+                    className={isSelected ? 'list-row-focused' : undefined}
                     onClick={() => {
                       setActiveDb(db);
                       setSelected({ db, col: c.name });
@@ -219,12 +145,11 @@ export function ConnectionTree({ connectionId, onOpenCollection }: Props) {
                     }}
                     onDoubleClick={() => onOpenCollection(db, c.name)}
                   >
-                    <Guide kind={connGuide} />
-                    <Guide kind={colGuide} />
-                    <span className="t-label t-col">{c.name}</span>
-                  </div>
-                );
-              })}
+                    {c.name}
+                  </ListRow>
+                </div>
+              );
+            })}
           </div>
         );
       })}

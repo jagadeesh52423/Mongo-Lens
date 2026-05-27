@@ -1,0 +1,27 @@
+.wrap {
+  padding: var(--space-1);
+  outline: none;
+}
+
+.wrap:focus {
+  outline: none;
+}
+
+.error {
+  color: var(--accent-red);
+  padding: 6px;
+}
+
+.caret {
+  display: inline-flex;
+  align-items: center;
+  width: 14px;
+  font-size: 10px;
+  color: var(--fg-dim);
+}
+
+/* Stronger highlight when the tree wrapper is keyboard-focused so the
+   selected collection is clearly distinguishable from a mouse hover. */
+.wrap:focus :global(.list-row-focused) {
+  background: rgba(80, 140, 220, 0.45);
+}

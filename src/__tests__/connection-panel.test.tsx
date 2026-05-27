@@ -28,7 +28,7 @@ describe('ConnectionPanel', () => {
     invokeMock.mockResolvedValueOnce([]);
     const user = userEvent.setup();
     render(<ConnectionPanel />);
-    await user.click(screen.getByText('+ Add'));
+    await user.click(screen.getByLabelText('Add connection'));
     expect(screen.getByText('New Connection')).toBeInTheDocument();
   });
 
