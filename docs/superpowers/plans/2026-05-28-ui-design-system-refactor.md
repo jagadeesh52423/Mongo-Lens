@@ -464,7 +464,7 @@ export const Panel = Object.assign(PanelRoot, { Header: PanelHeader, Body: Panel
 
 **Files:** `src/components/ui/Toolbar/{Toolbar.tsx, Toolbar.module.css, index.ts}`
 
-- [ ] **Step 1: Implement**
+- [x] **Step 1: Implement**
 
 ```tsx
 import type { ReactNode, HTMLAttributes } from 'react';
@@ -495,7 +495,7 @@ export function Toolbar({ left, right, children, className, ...rest }: ToolbarPr
 .section { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
 ```
 
-- [ ] **Step 2:** Commit `feat(ui): add Toolbar primitive`.
+- [x] **Step 2:** Commit `feat(ui): add Toolbar primitive`.
 
 ---
 
