@@ -12,6 +12,7 @@ mod state;
 use state::AppState;
 use std::fs;
 use std::path::PathBuf;
+use tauri::menu::Menu;
 use tauri::Manager;
 
 fn main() {
@@ -26,6 +27,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_store::Builder::default().build())
+        .menu(|handle| Menu::default(handle))
         .setup(|app| {
             let base = dirs_dir()?;
             fs::create_dir_all(&base)

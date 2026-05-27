@@ -106,6 +106,18 @@ export class KeyboardService {
   }
 
   dispatch(e: KeyboardEvent): void {
+    // Defer bare Cmd/Ctrl+C to the platform when the user has a real text
+    // selection — matches every native text editor. Without this, scoped
+    // shortcuts like cell.copyValue swallow the keystroke and the user's
+    // visible selection silently fails to copy.
+    if (
+      e.key.toLowerCase() === 'c' &&
+      (e.metaKey || e.ctrlKey) &&
+      !e.shiftKey && !e.altKey &&
+      (window.getSelection()?.toString().length ?? 0) > 0
+    ) {
+      return;
+    }
     const scopes = this.resolveScopes(document.activeElement);
     for (const [id, handler] of this.handlers.entries()) {
       const def = this.definitions.get(id);
