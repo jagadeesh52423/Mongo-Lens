@@ -1,0 +1,38 @@
+/* src/styles/tokens.css
+ * Design tokens for the UI layer.
+ * To add a new token: append under the matching category. Never reference
+ * these values as JS string literals — read them through CSS variables only.
+ */
+:root {
+  /* color tokens — copied from globals.css so this file is self-contained */
+  --bg: #001e2b;
+  --bg-panel: #0d2d3c;
+  --bg-rail: #022e45;
+  --bg-hover: #1a3d4f;
+  --fg: #d4d4d4;
+  --fg-dim: #858585;
+  --border: #1e4d63;
+  --accent: #00ed64;
+  --accent-green: #00ed64;
+  --accent-red: #f48771;
+
+  /* fonts */
+  --font-mono: "SF Mono", Menlo, Consolas, monospace;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+
+  /* spacing — 4px base */
+  --space-1: 4px;  --space-2: 8px;  --space-3: 12px;
+  --space-4: 16px; --space-5: 20px; --space-6: 24px;
+
+  /* radii */
+  --radius-sm: 3px; --radius-md: 6px; --radius-lg: 10px;
+
+  /* font sizes */
+  --fs-xs: 11px; --fs-sm: 12px; --fs-md: 13px; --fs-lg: 15px;
+
+  /* z-index scale */
+  --z-dropdown: 80; --z-dialog: 100; --z-tooltip: 120;
+
+  /* shadows */
+  --shadow-dialog: 0 12px 32px rgba(0, 0, 0, 0.4);
+}

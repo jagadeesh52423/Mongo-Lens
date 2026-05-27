@@ -56,7 +56,7 @@ Note on the old `src/components/ui/` folder (`ContextMenu.tsx` lives here): in P
 - Create: `src/styles/tokens.css`
 - Modify: `src/styles/globals.css`
 
-- [ ] **Step 1: Create tokens file**
+- [x] **Step 1: Create tokens file**
 
 ```css
 /* src/styles/tokens.css
@@ -99,7 +99,7 @@ Note on the old `src/components/ui/` folder (`ContextMenu.tsx` lives here): in P
 }
 ```
 
-- [ ] **Step 2: Replace `globals.css` color/font block with `@import 'tokens.css'`**
+- [x] **Step 2: Replace `globals.css` color/font block with `@import 'tokens.css'`**
 
 Keep resets, button defaults, tab-scroll utility. Remove the `:root { … }` block (now in tokens.css).
 
@@ -131,11 +131,11 @@ input::placeholder, textarea::placeholder { color: var(--fg-dim); opacity: 1; }
 .tab-scroll::-webkit-scrollbar { display: none; height: 0; width: 0; }
 ```
 
-- [ ] **Step 3: Verify**
+- [x] **Step 3: Verify**
 
 Run: `npm run dev` and load the app. Expected: visual output unchanged.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```
 chore(styles): extract design tokens into tokens.css

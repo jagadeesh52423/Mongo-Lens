@@ -1,34 +1,23 @@
-:root {
-  --bg: #001e2b;
-  --bg-panel: #0d2d3c;
-  --bg-rail: #022e45;
-  --bg-hover: #1a3d4f;
-  --fg: #d4d4d4;
-  --fg-dim: #858585;
-  --border: #1e4d63;
-  --accent: #00ed64;
-  --accent-green: #00ed64;
-  --accent-red: #f48771;
-  --font-mono: "SF Mono", Menlo, Consolas, monospace;
-  --font-sans: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
-}
+/* src/styles/globals.css */
+@import './tokens.css';
+
 * { box-sizing: border-box; }
 html, body, #root { margin: 0; padding: 0; height: 100%; width: 100%; }
 body {
   background: var(--bg); color: var(--fg);
-  font-family: var(--font-sans); font-size: 13px;
+  font-family: var(--font-sans); font-size: var(--fs-md);
   -webkit-font-smoothing: antialiased;
 }
 button {
   font: inherit; color: inherit; background: transparent;
-  border: 1px solid var(--border); padding: 4px 10px;
-  border-radius: 3px; cursor: pointer;
+  border: 1px solid var(--border); padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-sm); cursor: pointer;
 }
 button:hover { background: var(--bg-hover); }
 input, select, textarea {
   font: inherit; color: inherit;
   background: var(--bg); border: 1px solid var(--border);
-  padding: 4px 8px; border-radius: 3px;
+  padding: var(--space-1) var(--space-2); border-radius: var(--radius-sm);
 }
 input:focus, select:focus, textarea:focus { outline: 1px solid var(--accent); }
 input::placeholder, textarea::placeholder { color: var(--fg-dim); opacity: 1; }
