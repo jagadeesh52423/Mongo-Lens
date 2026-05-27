@@ -148,7 +148,7 @@ chore(styles): extract design tokens into tokens.css
 **Files:**
 - Create: `src/components/ui/Button/Button.tsx`, `Button.module.css`, `index.ts`, `__tests__/Button.test.tsx`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```tsx
 // __tests__/Button.test.tsx
@@ -176,9 +176,9 @@ describe('Button', () => {
 });
 ```
 
-- [ ] **Step 2: Run** `npx vitest run src/components/ui/Button` → FAIL (module not found).
+- [x] **Step 2: Run** `npx vitest run src/components/ui/Button` → FAIL (module not found).
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 ```tsx
 // Button.tsx
@@ -259,9 +259,9 @@ export { Button } from './Button';
 export type { ButtonProps, ButtonVariant, ButtonSize } from './Button';
 ```
 
-- [ ] **Step 4: Run tests** → PASS.
+- [x] **Step 4: Run tests** → PASS.
 
-- [ ] **Step 5: Commit** `feat(ui): add Button primitive`
+- [x] **Step 5: Commit** `feat(ui): add Button primitive`
 
 ---
 
