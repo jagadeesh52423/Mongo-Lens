@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Button, Dialog, FormField } from '../../ui';
 
 interface Props {
   initialName?: string;
@@ -30,31 +31,34 @@ export function SaveScriptDialog({ initialName = '', initialTags = '', onSave, o
   }
 
   return (
-    <div
-      role="dialog"
-      aria-label="Save Script"
-      style={{
-        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100,
-      }}
-    >
-      <div
-        style={{
-          background: 'var(--bg-panel)', border: '1px solid var(--border)', borderRadius: 6,
-          padding: 20, width: 360,
-        }}
-      >
-        <h3 style={{ margin: '0 0 12px' }}>Save Script</h3>
-        <div style={{ fontSize: 11, color: 'var(--fg-dim)' }}>Name</div>
-        <input value={name} onChange={(e) => setName(e.target.value)} style={{ width: '100%', marginBottom: 10 }} />
-        <div style={{ fontSize: 11, color: 'var(--fg-dim)' }}>Tags (comma-separated)</div>
-        <input value={tags} onChange={(e) => setTags(e.target.value)} style={{ width: '100%' }} />
-        {err && <div style={{ color: 'var(--accent-red)', marginTop: 8 }}>{err}</div>}
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
-          <button onClick={onCancel} disabled={busy}>Cancel</button>
-          <button onClick={submit} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
-        </div>
-      </div>
-    </div>
+    <Dialog open onClose={onCancel} ariaLabel="Save Script" width={360}>
+      <Dialog.Header title="Save Script" onClose={onCancel} />
+      <Dialog.Body>
+        <FormField>
+          <FormField.Label htmlFor="save-script-name">Name</FormField.Label>
+          <FormField.Input
+            id="save-script-name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            autoFocus
+          />
+        </FormField>
+        <FormField>
+          <FormField.Label htmlFor="save-script-tags">Tags (comma-separated)</FormField.Label>
+          <FormField.Input
+            id="save-script-tags"
+            value={tags}
+            onChange={(e) => setTags(e.target.value)}
+          />
+        </FormField>
+        <FormField.Error>{err}</FormField.Error>
+      </Dialog.Body>
+      <Dialog.Footer>
+        <Button onClick={onCancel} disabled={busy}>Cancel</Button>
+        <Button variant="primary" onClick={submit} disabled={busy}>
+          {busy ? 'Saving…' : 'Save'}
+        </Button>
+      </Dialog.Footer>
+    </Dialog>
   );
 }

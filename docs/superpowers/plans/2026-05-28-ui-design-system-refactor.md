@@ -918,7 +918,7 @@ Same recipe as Task 15. Each gets its own commit.
 
 - [x] Migrate `HostKeyDialog.tsx` → Commit.
 - [x] Migrate `PassphraseDialog.tsx` → Commit.
-- [ ] Migrate `SaveScriptDialog.tsx` → Commit.
+- [x] Migrate `SaveScriptDialog.tsx` → Commit.
 
 ---
 
