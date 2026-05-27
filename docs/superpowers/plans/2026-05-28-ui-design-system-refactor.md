@@ -316,7 +316,7 @@ export function IconButton({ icon, pressed, size = 'md', tooltip, className, ...
 
 **Files:** `src/components/ui/Stack/{Stack.tsx, Stack.module.css, index.ts}`
 
-- [ ] **Step 1: Implement** (no tests needed for pure layout primitive)
+- [x] **Step 1: Implement** (no tests needed for pure layout primitive)
 
 ```tsx
 import type { HTMLAttributes, ReactNode } from 'react';
@@ -360,7 +360,7 @@ export const VStack = makeStack('column');
 .justify-end { justify-content: flex-end; } .justify-space-between { justify-content: space-between; }
 ```
 
-- [ ] **Step 2:** Commit `feat(ui): add HStack / VStack primitives`.
+- [x] **Step 2:** Commit `feat(ui): add HStack / VStack primitives`.
 
 ---
 
