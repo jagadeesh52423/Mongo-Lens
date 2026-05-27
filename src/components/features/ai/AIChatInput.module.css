@@ -1,0 +1,69 @@
+.area {
+  border-top: 1px solid var(--border);
+  padding: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  flex-shrink: 0;
+}
+
+.row {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.textarea {
+  flex: 1;
+  resize: none;
+  padding: 6px 8px;
+  font-size: var(--fs-md);
+  line-height: 18px;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  overflow-y: auto;
+  /* min height = one row (18px) + vertical padding budget (16px). Max height
+     mirrors the JS clamp (5 rows × 18px + 16px). Keep these literals in sync
+     with MIN_TEXTAREA_ROWS / MAX_TEXTAREA_ROWS in AIChatInput.tsx. */
+  min-height: 34px;
+  max-height: 106px;
+}
+
+.sendButton {
+  padding: 6px var(--space-3);
+  font-size: var(--fs-sm);
+  border-radius: var(--radius-sm);
+  height: 30px;
+  cursor: pointer;
+  background: var(--accent-green);
+  color: var(--bg);
+  border: none;
+  opacity: 1;
+}
+
+.sendButton:disabled {
+  background: var(--bg-panel);
+  color: var(--fg-dim);
+  border: 1px solid var(--border);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.clearLink {
+  align-self: flex-start;
+  background: transparent;
+  border: none;
+  color: var(--fg-dim);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+  padding: 2px 0;
+  text-decoration: underline;
+}
+
+.clearLink:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}

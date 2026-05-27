@@ -2,24 +2,6 @@ import { renderHook, act } from '@testing-library/react';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { useResizable } from '../useResizable';
 
-// jsdom in this project exposes `localStorage` as a plain `{}`. Install a
-// minimal Storage-compatible shim so persistence assertions can use real
-// getItem/setItem/removeItem semantics.
-function installLocalStorageShim() {
-  const store = new Map<string, string>();
-  const shim = {
-    getItem: (k: string) => (store.has(k) ? store.get(k)! : null),
-    setItem: (k: string, v: string) => { store.set(k, String(v)); },
-    removeItem: (k: string) => { store.delete(k); },
-    clear: () => { store.clear(); },
-    key: (i: number) => Array.from(store.keys())[i] ?? null,
-    get length() { return store.size; },
-  };
-  Object.defineProperty(globalThis, 'localStorage', { value: shim, configurable: true, writable: true });
-  Object.defineProperty(window, 'localStorage', { value: shim, configurable: true, writable: true });
-}
-installLocalStorageShim();
-
 type PointerLike = {
   clientX: number; clientY: number; pointerId: number;
   target: { setPointerCapture: (id: number) => void };
