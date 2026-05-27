@@ -17,6 +17,13 @@ export interface ActivityItem {
   title: string;
   icon: string;              // 1–4 char string (emoji or label) — fallback when iconUrl is absent
   iconUrl?: string;          // optional asset URL for plugin-provided logo (rendered as <img>)
+  /**
+   * If true, the SidePanel host wraps this item in a vertically scrollable
+   * container. The view's render() should produce natural-height content and
+   * NOT set its own height/overflow. If false/absent, the view owns its full
+   * layout (it must fill 100% height and handle internal scrolling itself).
+   */
+  scrollable?: boolean;
   render(container: HTMLElement): { dispose(): void };
 }
 
@@ -82,6 +89,7 @@ export class PluginActivityRegistry implements ActivityRegistry {
       title: v.title,
       icon,
       iconUrl,
+      scrollable: v.scrollable,
       render: (container: HTMLElement) => v.render(container, { container }),
     };
   }

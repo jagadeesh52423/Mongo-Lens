@@ -29,7 +29,11 @@ export function SidePanel({ item }: Props) {
       const el = document.createElement('div');
       el.style.position = 'absolute';
       el.style.inset = '0';
-      el.style.overflow = 'hidden';
+      // Scrollable views get a vertical scroll container managed by the host
+      // so each view doesn't have to reimplement flex+overflow scaffolding.
+      // Non-scrollable views own their full layout (must fill 100% height).
+      el.style.overflowY = item.scrollable ? 'auto' : 'hidden';
+      el.style.overflowX = 'hidden';
       host.appendChild(el);
       try {
         const disposable = item.render(el);

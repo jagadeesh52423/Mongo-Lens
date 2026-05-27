@@ -31,6 +31,13 @@ export interface ViewProvider {
   title: string;
   icon?: string;
   location: 'sidebar' | 'panel';
+  /**
+   * If true, the host wraps the view in a vertically scrollable container.
+   * The view should render natural-height content without imposing its own
+   * height constraints or overflow rules. Defaults to false (the view owns
+   * its layout and any scrolling within it).
+   */
+  scrollable?: boolean;
   render(container: HTMLElement, ctx: ViewContext): Disposable;
 }
 

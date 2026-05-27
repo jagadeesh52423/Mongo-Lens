@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, createElement } from 'react';
+import { useState, useEffect, useRef, useCallback, createElement, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Panel, PanelGroup, type ImperativePanelHandle } from 'react-resizable-panels';
 import { IconRail } from './components/layout/IconRail';
@@ -36,48 +36,52 @@ import { chatHistoryManager } from './services/ai/ChatHistoryManager';
 const openSettingsDef = DEFAULT_SHORTCUTS.find((d) => d.id === 'open-settings');
 if (openSettingsDef) keyboardService.defineShortcut(openSettingsDef);
 
+/**
+ * Mount a React component into the SidePanel's container. For scrollable
+ * views, the wrapper must NOT pin height to 100% — the host container handles
+ * vertical scroll, and the wrapper needs to grow with natural content height
+ * to expand scrollHeight beyond the viewport. Non-scrollable views fill the
+ * container fully and own their internal layout.
+ */
+function mountReactView(
+  container: HTMLElement,
+  component: () => ReactNode,
+  scrollable: boolean,
+): { dispose(): void } {
+  // Each render gets an isolated wrapper so the old React root and the
+  // incoming new root never share the same container node.
+  const wrapper = document.createElement('div');
+  wrapper.style.width = '100%';
+  if (!scrollable) wrapper.style.height = '100%';
+  container.appendChild(wrapper);
+  const root = createRoot(wrapper);
+  root.render(createElement(component));
+  return {
+    dispose() {
+      // Remove wrapper from the live DOM synchronously so the next render
+      // mounts into a clean container. Then unmount React deferred so we
+      // don't call root.unmount() during a React commit phase.
+      wrapper.remove();
+      queueMicrotask(() => root.unmount());
+    },
+  };
+}
+
 function makeBuiltInRegistry(): BuiltInActivityRegistry {
   const reg = new BuiltInActivityRegistry();
   reg.add({
     id: 'connections',
     title: 'Connections',
     icon: '⚡',
-    render: (container) => {
-      // Each render gets an isolated wrapper so the old React root and the
-      // incoming new root never share the same container node.
-      const wrapper = document.createElement('div');
-      wrapper.style.cssText = 'width:100%;height:100%';
-      container.appendChild(wrapper);
-      const root = createRoot(wrapper);
-      root.render(createElement(ConnectionPanel));
-      return {
-        dispose() {
-          // Remove wrapper from the live DOM synchronously so the next render
-          // mounts into a clean container. Then unmount React deferred so we
-          // don't call root.unmount() during a React commit phase.
-          wrapper.remove();
-          queueMicrotask(() => root.unmount());
-        },
-      };
-    },
+    scrollable: true,
+    render: (container) => mountReactView(container, ConnectionPanel, true),
   });
   reg.add({
     id: 'saved',
     title: 'Saved Scripts',
     icon: '⭐',
-    render: (container) => {
-      const wrapper = document.createElement('div');
-      wrapper.style.cssText = 'width:100%;height:100%';
-      container.appendChild(wrapper);
-      const root = createRoot(wrapper);
-      root.render(createElement(SavedScriptsPanel));
-      return {
-        dispose() {
-          wrapper.remove();
-          queueMicrotask(() => root.unmount());
-        },
-      };
-    },
+    scrollable: true,
+    render: (container) => mountReactView(container, SavedScriptsPanel, true),
   });
   return reg;
 }
