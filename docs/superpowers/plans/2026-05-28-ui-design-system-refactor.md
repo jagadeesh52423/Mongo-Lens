@@ -785,7 +785,7 @@ export function ListRow({
 
 **Files:** `src/components/ui/ResizableSplit/{ResizableSplit.tsx, ResizableSplit.module.css, index.ts}`
 
-- [ ] **Step 1: Implement**
+- [x] **Step 1: Implement**
 
 ```tsx
 import { Children, type ReactNode } from 'react';
@@ -824,7 +824,7 @@ export function ResizableSplit({ direction, initial, min, max, storageKey, child
 .handleV:hover { background: var(--border); }
 ```
 
-- [ ] **Step 2:** Commit `feat(ui): add ResizableSplit primitive`.
+- [x] **Step 2:** Commit `feat(ui): add ResizableSplit primitive`.
 
 ---
 
