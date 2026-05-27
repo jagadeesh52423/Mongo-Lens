@@ -17,6 +17,27 @@ import { PassphraseDialog } from './PassphraseDialog';
 import { HostKeyDialog } from './HostKeyDialog';
 import type { Connection, ConnectionInput } from '../../types';
 
+/**
+ * Build a unique name for a duplicate of `source` among `existing` names.
+ * Strips a trailing `(N)` from `source` to find the base, then returns
+ * `base(K)` where K is one greater than the highest existing K for that base
+ * (treating the bare base as K=0). Example: ["test", "test(2)"] + "test" → "test(3)".
+ */
+export function nextDuplicateName(source: string, existing: readonly string[]): string {
+  const m = source.match(/^(.*?)\((\d+)\)$/);
+  const base = m ? m[1] : source;
+  const escaped = base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`^${escaped}(?:\\((\\d+)\\))?$`);
+  let max = 0;
+  for (const name of existing) {
+    const hit = name.match(re);
+    if (!hit) continue;
+    const n = hit[1] ? parseInt(hit[1], 10) : 0;
+    if (n > max) max = n;
+  }
+  return `${base}(${max + 1})`;
+}
+
 // Pending host-key confirmation state — stored while waiting for user input.
 interface PendingHostKey {
   connectionId: string;
@@ -48,6 +69,7 @@ export function ConnectionPanel() {
   // SSH dialogs
   const [passphraseFor, setPassphraseFor] = useState<Connection | null>(null);
   const [pendingHostKey, setPendingHostKey] = useState<PendingHostKey | null>(null);
+  const [connectError, setConnectError] = useState<string | null>(null);
   const openTab = useEditorStore((s) => s.openTab);
 
   function toggleConnExpanded(id: string) {
@@ -104,6 +126,23 @@ export function ConnectionPanel() {
     setCreating(false);
   }
 
+  async function handleDuplicate(c: Connection) {
+    const input: ConnectionInput = {
+      name: nextDuplicateName(c.name, connections.map((x) => x.name)),
+      host: c.host,
+      port: c.port,
+      authDb: c.authDb,
+      username: c.username,
+      connString: c.connString,
+      sshHost: c.sshHost,
+      sshPort: c.sshPort,
+      sshUser: c.sshUser,
+      sshKeyPath: c.sshKeyPath,
+    };
+    const created = await createConnection(input);
+    addConnection(created);
+  }
+
   async function handleDelete(c: Connection) {
     if (!confirm(`Delete connection "${c.name}"?`)) return;
     await ipcDelete(c.id);
@@ -133,7 +172,7 @@ export function ConnectionPanel() {
         });
       }
     } catch (e) {
-      alert(`Connection error: ${(e as Error).message ?? String(e)}`);
+      setConnectError((e as Error).message ?? String(e));
     }
   }
 
@@ -229,6 +268,7 @@ export function ConnectionPanel() {
           y={contextMenu.y}
           items={[
             { label: 'Edit', action: () => setEditing(contextMenu.connection) },
+            { label: 'Duplicate', action: () => handleDuplicate(contextMenu.connection) },
             { label: 'Delete', action: () => handleDelete(contextMenu.connection) },
           ]}
           onClose={() => setContextMenu(null)}
@@ -240,6 +280,44 @@ export function ConnectionPanel() {
           onConfirm={handlePassphraseConfirm}
           onCancel={() => setPassphraseFor(null)}
         />
+      )}
+      {connectError && (
+        <div
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="connect-error-title"
+          onClick={() => setConnectError(null)}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 200,
+            background: 'rgba(0,0,0,0.5)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: 'var(--surface)', border: '1px solid var(--border)',
+              borderRadius: 8, padding: 20, width: 480, maxWidth: '90vw',
+              display: 'flex', flexDirection: 'column', gap: 12,
+            }}
+          >
+            <h3 id="connect-error-title" style={{ margin: 0 }}>Connection error</h3>
+            <pre
+              style={{
+                margin: 0, padding: 10,
+                background: 'var(--bg-panel)', border: '1px solid var(--border)',
+                borderRadius: 4, fontSize: 12,
+                maxHeight: 240, overflow: 'auto',
+                whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+              }}
+            >
+              {connectError}
+            </pre>
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <button autoFocus onClick={() => setConnectError(null)}>OK</button>
+            </div>
+          </div>
+        </div>
       )}
       {pendingHostKey && (
         <HostKeyDialog
