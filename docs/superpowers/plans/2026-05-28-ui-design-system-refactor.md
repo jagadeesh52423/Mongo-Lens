@@ -692,7 +692,7 @@ export const Dialog = Object.assign(DialogRoot, { Header: DialogHeader, Body: Di
 
 **Files:** `src/components/ui/FormField/{FormField.tsx, FormField.module.css, index.ts}`
 
-- [ ] **Step 1: Implement**
+- [x] **Step 1: Implement**
 
 ```tsx
 import type { InputHTMLAttributes, LabelHTMLAttributes, ReactNode } from 'react';
@@ -726,7 +726,7 @@ export const FormField = Object.assign(Root, { Label, Input, Error: ErrorText })
 .error { font-size: var(--fs-xs); color: var(--accent-red); }
 ```
 
-- [ ] **Step 2:** Commit `feat(ui): add FormField compound primitive`.
+- [x] **Step 2:** Commit `feat(ui): add FormField compound primitive`.
 
 ---
 
