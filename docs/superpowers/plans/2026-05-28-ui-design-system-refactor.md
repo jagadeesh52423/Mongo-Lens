@@ -368,7 +368,7 @@ export const VStack = makeStack('column');
 
 **Files:** `src/components/ui/Text/{Text.tsx, Text.module.css, index.ts}`
 
-- [ ] **Step 1: Implement**
+- [x] **Step 1: Implement**
 
 ```tsx
 import type { HTMLAttributes, ElementType, ReactNode } from 'react';
@@ -402,7 +402,7 @@ export function Text({
 .selectable { user-select: text; -webkit-user-select: text; cursor: text; }
 ```
 
-- [ ] **Step 2:** Commit `feat(ui): add Text primitive`.
+- [x] **Step 2:** Commit `feat(ui): add Text primitive`.
 
 ---
 

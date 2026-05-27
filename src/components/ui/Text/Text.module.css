@@ -1,0 +1,7 @@
+.text { font-family: var(--font-sans); color: var(--fg); font-size: var(--fs-md); }
+.body {}
+.mono { font-family: var(--font-mono); font-size: var(--fs-sm); }
+.dim { color: var(--fg-dim); font-size: var(--fs-sm); }
+.error { color: var(--accent-red); font-family: var(--font-mono); white-space: pre-wrap; word-break: break-word; }
+.label { font-size: var(--fs-xs); color: var(--fg-dim); }
+.selectable { user-select: text; -webkit-user-select: text; cursor: text; }
