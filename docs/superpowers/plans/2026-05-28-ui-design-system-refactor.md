@@ -902,13 +902,13 @@ LC_ALL=C find src -name "*.ts" -o -name "*.tsx" | xargs sed -i '' \
 
 **Files:** `src/components/features/connections/ConnectionDialog.tsx` (rewrite)
 
-- [ ] **Step 1: Rewrite using primitives** — replace the manual backdrop + form layout with `<Dialog>` + repeated `<FormField>` blocks. All inline `style={{…}}` removed. SSH inputs go in a `<details>` block per the existing UX.
+- [x] **Step 1: Rewrite using primitives** — replace the manual backdrop + form layout with `<Dialog>` + repeated `<FormField>` blocks. All inline `style={{…}}` removed. SSH inputs go in a `<details>` block per the existing UX.
 
-- [ ] **Step 2: Snapshot before/after with the app running** — open the connection dialog, save a connection, edit it. Behavior identical.
+- [x] **Step 2: Snapshot before/after with the app running** — open the connection dialog, save a connection, edit it. Behavior identical.
 
-- [ ] **Step 3: Test** — `src/components/features/connections/__tests__/ConnectionDialog.test.tsx`: renders fields, validation error for empty name, save calls `onSave` with trimmed input.
+- [x] **Step 3: Test** — `src/components/features/connections/__tests__/ConnectionDialog.test.tsx`: renders fields, validation error for empty name, save calls `onSave` with trimmed input.
 
-- [ ] **Step 4:** Commit `refactor(connections): migrate ConnectionDialog to Dialog/FormField`.
+- [x] **Step 4:** Commit `refactor(connections): migrate ConnectionDialog to Dialog/FormField`.
 
 ---
 
