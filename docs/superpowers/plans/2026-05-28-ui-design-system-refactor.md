@@ -269,9 +269,9 @@ export type { ButtonProps, ButtonVariant, ButtonSize } from './Button';
 
 **Files:** `src/components/ui/IconButton/{IconButton.tsx, IconButton.module.css, index.ts, __tests__/IconButton.test.tsx}`
 
-- [ ] **Step 1: Test** — renders icon, click handler fires, `aria-label` required (TypeScript-level).
+- [x] **Step 1: Test** — renders icon, click handler fires, `aria-label` required (TypeScript-level).
 
-- [ ] **Step 2: Implement**
+- [x] **Step 2: Implement**
 
 ```tsx
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
@@ -308,7 +308,7 @@ export function IconButton({ icon, pressed, size = 'md', tooltip, className, ...
 .pressed { background: var(--bg-hover); border-color: var(--border); }
 ```
 
-- [ ] **Step 3:** Commit `feat(ui): add IconButton primitive`.
+- [x] **Step 3:** Commit `feat(ui): add IconButton primitive`.
 
 ---
 

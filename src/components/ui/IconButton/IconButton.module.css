@@ -1,0 +1,10 @@
+.btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent; border: 1px solid transparent;
+  border-radius: var(--radius-sm); cursor: pointer; color: var(--fg);
+}
+.btn:hover:not(:disabled) { background: var(--bg-hover); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.sm { width: 24px; height: 24px; }
+.md { width: 28px; height: 28px; }
+.pressed { background: var(--bg-hover); border-color: var(--border); }
