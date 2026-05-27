@@ -410,9 +410,9 @@ export function Text({
 
 **Files:** `src/components/ui/Panel/{Panel.tsx, Panel.module.css, index.ts, __tests__/Panel.test.tsx}`
 
-- [ ] **Step 1: Test** — renders header title, right slot, body, footer; body is scrollable.
+- [x] **Step 1: Test** — renders header title, right slot, body, footer; body is scrollable.
 
-- [ ] **Step 2: Implement**
+- [x] **Step 2: Implement**
 
 ```tsx
 import type { ReactNode, HTMLAttributes } from 'react';
@@ -456,7 +456,7 @@ export const Panel = Object.assign(PanelRoot, { Header: PanelHeader, Body: Panel
 .footer { padding: var(--space-2) var(--space-3); border-top: 1px solid var(--border); }
 ```
 
-- [ ] **Step 3:** Commit `feat(ui): add Panel compound primitive`.
+- [x] **Step 3:** Commit `feat(ui): add Panel compound primitive`.
 
 ---
 
