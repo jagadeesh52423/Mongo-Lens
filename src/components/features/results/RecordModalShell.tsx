@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactNode } from 'react';
+import styles from './RecordModalShell.module.css';
 
 interface RecordModalShellProps {
   title: string;
@@ -43,11 +44,7 @@ export function RecordModalShell({ title, body, footer, onClose, beforeClose }: 
 
   return (
     <div
-      style={{
-        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        zIndex: 1000,
-      }}
+      className={styles.backdrop}
       onKeyDown={handleBackdropKeyDown}
       onClick={handleBackdropClick}
     >
@@ -57,33 +54,14 @@ export function RecordModalShell({ title, body, footer, onClose, beforeClose }: 
         aria-modal="true"
         aria-label={title}
         tabIndex={-1}
-        style={{
-          background: 'var(--bg-panel)',
-          border: '1px solid var(--border)',
-          borderRadius: 8,
-          width: 600,
-          maxWidth: '90vw',
-          height: '80vh',
-          maxHeight: '80vh',
-          display: 'flex',
-          flexDirection: 'column',
-          padding: 16,
-          gap: 12,
-          outline: 'none',
-        }}
+        className={styles.dialog}
       >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span style={{ fontWeight: 600, color: 'var(--fg)' }}>{title}</span>
+        <div className={styles.header}>
+          <span className={styles.title}>{title}</span>
           <button aria-label="Close" onClick={tryClose}>✕</button>
         </div>
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-          {body}
-        </div>
-        {footer && (
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, alignItems: 'center' }}>
-            {footer}
-          </div>
-        )}
+        <div className={styles.body}>{body}</div>
+        {footer && <div className={styles.footer}>{footer}</div>}
       </div>
     </div>
   );

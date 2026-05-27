@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { TableView, columnsOf } from '../TableView';
 import { KeyboardScopeZone } from '../../../shared/KeyboardScopeZone';
+import styles from './viewMode.module.css';
 import type { ResultViewMode } from './ViewModeRegistry';
 
 /** Table view strategy. Sort state lives here so ResultsPanel stays view-agnostic. */
@@ -41,7 +42,7 @@ function TableViewModeComponent({
   }, [sortedDocs, renderedColumns, onRenderedDocsChange]);
 
   return (
-    <KeyboardScopeZone scope="results-table" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+    <KeyboardScopeZone scope="results-table" className={styles.fillColumn}>
       <TableView
         docs={sortedDocs}
         sortKey={sortKey}

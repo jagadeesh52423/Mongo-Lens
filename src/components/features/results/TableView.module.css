@@ -1,0 +1,34 @@
+.container {
+  overflow: auto;
+  flex: 1;
+  outline: none;
+}
+
+.table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 12px;
+}
+
+.th {
+  border-bottom: 1px solid var(--border);
+  padding: 4px 8px;
+  text-align: left;
+  cursor: pointer;
+  background: var(--bg-panel);
+  position: sticky;
+  top: 0;
+}
+
+.td {
+  border-bottom: 1px solid var(--border);
+  padding: 4px 8px;
+  cursor: pointer;
+  user-select: none;
+  outline-offset: -2px;
+}
+
+.tdSelected {
+  outline: 2px solid var(--accent-blue, #3b82f6);
+  background: var(--bg-selected, rgba(59, 130, 246, 0.08));
+}

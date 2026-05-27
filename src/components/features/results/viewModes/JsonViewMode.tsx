@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { JsonView } from '../JsonView';
+import styles from './viewMode.module.css';
 import { keyboardService } from '../../../../services/KeyboardService';
 import { DEFAULT_SHORTCUTS } from '../../../../shortcuts/defaults';
 import type { ResultViewMode } from './ViewModeRegistry';
@@ -37,7 +38,7 @@ function JsonViewModeComponent({
   }, [group, onRenderedDocsChange]);
 
   return (
-    <div ref={containerRef} style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+    <div ref={containerRef} className={styles.fill}>
       <JsonView docs={group.docs} />
     </div>
   );

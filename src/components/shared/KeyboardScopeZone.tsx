@@ -4,13 +4,20 @@ interface Props {
   scope: string;
   children: ReactNode;
   style?: CSSProperties;
+  className?: string;
   tabIndex?: number;
 }
 
 export const KeyboardScopeZone = forwardRef<HTMLDivElement, Props>(
-  function KeyboardScopeZone({ scope, children, style, tabIndex }, ref) {
+  function KeyboardScopeZone({ scope, children, style, className, tabIndex }, ref) {
     return (
-      <div ref={ref} style={style} data-keyboard-scope={scope} tabIndex={tabIndex}>
+      <div
+        ref={ref}
+        style={style}
+        className={className}
+        data-keyboard-scope={scope}
+        tabIndex={tabIndex}
+      >
         {children}
       </div>
     );

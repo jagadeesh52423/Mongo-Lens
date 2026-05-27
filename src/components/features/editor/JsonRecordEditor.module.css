@@ -1,0 +1,15 @@
+.host {
+  flex: 1;
+  min-height: 200px;
+  border: 1px solid var(--accent-blue, #63b3ed);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.hostReadOnly {
+  border-color: var(--border);
+}
+
+.hostError {
+  border-color: var(--accent-red, #fc8181);
+}

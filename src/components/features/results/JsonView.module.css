@@ -1,0 +1,12 @@
+.container {
+  font-family: var(--font-mono);
+  padding: 10px;
+  overflow: auto;
+}
+
+.doc {
+  margin: 0 0 10px;
+  white-space: pre-wrap;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 8px;
+}

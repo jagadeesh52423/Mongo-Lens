@@ -177,7 +177,7 @@ export function ResultsPanel({
           ref={resultsScopeRef}
           scope="results"
           tabIndex={-1}
-          style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, outline: 'none' }}
+          className={styles.scope}
         >
           <ResultsToolbar
             view={view}

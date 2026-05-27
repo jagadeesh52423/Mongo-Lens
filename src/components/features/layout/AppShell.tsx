@@ -67,7 +67,7 @@ export function AppShell({
           <SettingsView onClose={onCloseSettings} />
         ) : (
           <div className={styles.mainArea}>
-            <PanelGroup direction="horizontal" style={{ flex: 1 }}>
+            <PanelGroup direction="horizontal" className={styles.panelGroup}>
               <Panel
                 ref={sidePanelRef}
                 minSize={10}

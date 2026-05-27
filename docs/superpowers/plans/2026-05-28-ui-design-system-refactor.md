@@ -1106,17 +1106,17 @@ export default function App() {
 
 ### Task 27: Final inline-style sweep
 
-- [ ] **Step 1:** Run
+- [x] **Step 1:** Run
 
 ```bash
 grep -rEn 'style=\{\{' src/components/features/ src/App.tsx
 ```
 
-- [ ] **Step 2:** For each hit, decide:
+- [x] **Step 2:** For each hit, decide:
   - Dynamic pixel from a prop / runtime value (e.g., `style={{ width: size }}`) → **keep**.
   - Static color / spacing / padding / margin → move to `.module.css`.
 
-- [ ] **Step 3:** Verify
+- [x] **Step 3:** Verify
 
 ```bash
 grep -rEn '(color:|background:|padding:|margin:)' src/components/features/ src/App.tsx | grep -v '\.css' | wc -l
@@ -1124,17 +1124,17 @@ grep -rEn '(color:|background:|padding:|margin:)' src/components/features/ src/A
 
 returns 0.
 
-- [ ] **Step 4:** Commit `chore(ui): final inline-style sweep`.
+- [x] **Step 4:** Commit `chore(ui): final inline-style sweep`.
 
 ---
 
 ### Task 28: PR 4 acceptance & overall acceptance
 
-- [ ] No file in `src/components/features/` exceeds 280 lines (`find src/components/features -name "*.tsx" -exec wc -l {} + | sort -rn | head`).
-- [ ] `git grep -nE 'style=\{\{' src/components/features/ src/App.tsx | wc -l` < 20.
-- [ ] `npx vitest run` — all pass.
-- [ ] `npm run -s typecheck` — clean.
-- [ ] `npm run build` — clean.
+- [x] No file in `src/components/features/` exceeds 280 lines (`find src/components/features -name "*.tsx" -exec wc -l {} + | sort -rn | head`).
+- [x] `git grep -nE 'style=\{\{' src/components/features/ src/App.tsx | wc -l` < 20.
+- [x] `npx vitest run` — all pass.
+- [x] `npm run -s typecheck` — clean.
+- [x] `npm run build` — clean.
 - [ ] Manual smoke (full pass): connect (with and without SSH), expand DB/collection tree, open new tab, run query (table + JSON), error state with Cmd+C, full record view F3 and edit F4, paginate, export CSV, export JSON, open AI chat, send AI message, switch tab (AI history isolated), open settings, change theme, open all plugin panels, resize all splits, restart app — sizes persisted.
 
 ---

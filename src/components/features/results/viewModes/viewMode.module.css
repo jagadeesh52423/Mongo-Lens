@@ -1,0 +1,13 @@
+/* Shared flex-fill wrapper used by JsonViewMode and TableViewMode hosts. */
+.fill {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.fillColumn {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}

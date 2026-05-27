@@ -3,6 +3,7 @@ import { renderCell } from './cellRenderers';
 import { useCellSelection } from '../../../contexts/CellSelectionContext';
 import { ContextMenu, type ContextMenuItem } from '../../ui/ContextMenu';
 import { keyboardService, formatKeyCombo } from '../../../services/KeyboardService';
+import styles from './TableView.module.css';
 
 interface Props {
   docs: unknown[];
@@ -78,28 +79,16 @@ export function TableView({ docs, sortKey, sortDir, onToggleSort, groupIndex = 0
     <div
       ref={containerRef}
       tabIndex={0}
-      style={{ overflow: 'auto', flex: 1, outline: 'none' }}
+      className={styles.container}
       onMouseDown={(e) => {
         if (e.target === containerRef.current) clear();
       }}
     >
-      <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 12 }}>
+      <table className={styles.table}>
         <thead>
           <tr>
             {columns.map((c) => (
-              <th
-                key={c}
-                onClick={() => onToggleSort(c)}
-                style={{
-                  borderBottom: '1px solid var(--border)',
-                  padding: '4px 8px',
-                  textAlign: 'left',
-                  cursor: 'pointer',
-                  background: 'var(--bg-panel)',
-                  position: 'sticky',
-                  top: 0,
-                }}
-              >
+              <th key={c} onClick={() => onToggleSort(c)} className={styles.th}>
                 {c} {sortKey === c ? (sortDir === 1 ? '↑' : '↓') : ''}
               </th>
             ))}
@@ -123,15 +112,7 @@ export function TableView({ docs, sortKey, sortDir, onToggleSort, groupIndex = 0
                     aria-selected={isSelected}
                     onClick={() => handleCellClick(i, c, doc)}
                     onContextMenu={(e) => handleCellContextMenu(e, i, c, doc)}
-                    style={{
-                      borderBottom: '1px solid var(--border)',
-                      padding: '4px 8px',
-                      cursor: 'pointer',
-                      userSelect: 'none',
-                      outline: isSelected ? '2px solid var(--accent-blue, #3b82f6)' : 'none',
-                      outlineOffset: '-2px',
-                      background: isSelected ? 'var(--bg-selected, rgba(59,130,246,0.08))' : undefined,
-                    }}
+                    className={`${styles.td} ${isSelected ? styles.tdSelected : ''}`}
                   >
                     {renderCell(raw)}
                   </td>

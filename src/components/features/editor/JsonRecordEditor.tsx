@@ -1,6 +1,7 @@
 import Editor, { OnMount } from '@monaco-editor/react';
 import { forwardRef, useImperativeHandle, useRef } from 'react';
 import { MONACO_THEME_ID } from '../../../themes/applyTheme';
+import styles from './JsonRecordEditor.module.css';
 
 export interface JsonRecordEditorHandle {
   format: () => void;
@@ -29,22 +30,14 @@ export const JsonRecordEditor = forwardRef<JsonRecordEditorHandle, Props>(
       editorRef.current = editor;
     };
 
-    const borderColor = error
-      ? 'var(--accent-red, #fc8181)'
-      : readOnly
-        ? 'var(--border)'
-        : 'var(--accent-blue, #63b3ed)';
+    const hostCls = [
+      styles.host,
+      error && styles.hostError,
+      !error && readOnly && styles.hostReadOnly,
+    ].filter(Boolean).join(' ');
 
     return (
-      <div
-        style={{
-          flex: 1,
-          minHeight: 200,
-          border: `1px solid ${borderColor}`,
-          borderRadius: 4,
-          overflow: 'hidden',
-        }}
-      >
+      <div className={hostCls}>
         <Editor
           height="100%"
           language="json"

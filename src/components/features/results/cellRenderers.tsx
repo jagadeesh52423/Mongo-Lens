@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import styles from './cellRenderers.module.css';
 
 export interface CellRenderer {
   matches(value: unknown): boolean;
@@ -33,13 +34,13 @@ export const undefinedRenderer = makeCellRenderer({
 
 export const nullRenderer = makeCellRenderer({
   matches: (v): v is null => v === null,
-  render: () => <span style={{ color: 'var(--fg-dim)' }}>null</span>,
+  render: () => <span className={styles.dim}>null</span>,
   toEditString: () => 'null',
 });
 
 export const booleanRenderer = makeCellRenderer({
   matches: (v): v is boolean => typeof v === 'boolean',
-  render: (v) => <span style={{ color: 'var(--fg-dim)' }}>{String(v)}</span>,
+  render: (v) => <span className={styles.dim}>{String(v)}</span>,
   toEditString: (v) => String(v),
 });
 

@@ -1,0 +1,55 @@
+.wrapper {
+  margin: 6px 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px;
+  background: var(--bg-hover);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+}
+
+.lang {
+  color: var(--fg-dim);
+  text-transform: lowercase;
+}
+
+.buttonRow {
+  display: flex;
+  gap: 6px;
+}
+
+.button {
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--fg);
+  font-size: 11px;
+  cursor: pointer;
+  opacity: 1;
+}
+
+.button:disabled {
+  color: var(--fg-dim);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.pre {
+  margin: 0;
+  padding: 8px 10px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre;
+  overflow-x: auto;
+  color: var(--fg);
+}

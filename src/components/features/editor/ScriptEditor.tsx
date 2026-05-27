@@ -4,6 +4,9 @@ import type { ExecutionMode } from '../../../execution-modes';
 import type { EditorSelection } from '../../../types';
 import { MONACO_THEME_ID } from '../../../themes/applyTheme';
 import { useEditorBridgeStore, type EditorController } from '../../../store/editorBridge';
+// Side-effect import: registers the :global() rule for the current-statement
+// highlight class name that Monaco's decoration API references by string.
+import './ScriptEditor.module.css';
 
 interface HighlightRange {
   startLine: number;
@@ -23,19 +26,9 @@ interface Props {
 }
 
 const HIGHLIGHT_CLASS = 'current-statement-highlight';
-const HIGHLIGHT_STYLE_ID = 'current-statement-highlight-style';
 
 export function modelPathForTab(tabId: string): string {
   return `inmemory://tab/${encodeURIComponent(tabId)}.js`;
-}
-
-function ensureHighlightStyle() {
-  if (typeof document === 'undefined') return;
-  if (document.getElementById(HIGHLIGHT_STYLE_ID)) return;
-  const style = document.createElement('style');
-  style.id = HIGHLIGHT_STYLE_ID;
-  style.textContent = `.${HIGHLIGHT_CLASS} { background: var(--bg-hover); }`;
-  document.head.appendChild(style);
 }
 
 type EditorInstance = Parameters<OnMount>[0];
@@ -63,7 +56,6 @@ export function ScriptEditor({
   const handleMount: OnMount = (editor, monaco) => {
     monacoRef.current = monaco;
     editorRef.current = editor;
-    ensureHighlightStyle();
 
     modes.forEach((mode) => {
       if (mode.keybind) {

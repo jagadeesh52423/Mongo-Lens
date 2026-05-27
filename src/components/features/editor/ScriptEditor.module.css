@@ -1,0 +1,6 @@
+/* Global rule for Monaco's current-statement decoration. The class name is
+ * referenced by Monaco's decoration API (a string passed at runtime), so it
+ * must escape CSS Modules' local-name scoping via :global(). */
+:global(.current-statement-highlight) {
+  background: var(--bg-hover);
+}
