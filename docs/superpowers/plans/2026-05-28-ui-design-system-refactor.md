@@ -930,7 +930,7 @@ Same recipe as Task 15. Each gets its own commit.
 - Create: `src/components/features/results/viewModes/JsonViewMode.tsx`
 - Create: `src/components/features/results/viewModes/index.ts`
 
-- [ ] **Step 1: Define interface and registry**
+- [x] **Step 1: Define interface and registry**
 
 ```ts
 // ViewModeRegistry.ts
@@ -955,9 +955,9 @@ export const viewModeRegistry = new Registry();
 
 Top-of-file comment: *"To add a new result view (Tree, Chart, …): implement `ResultViewMode`, register on module load in `viewModes/index.ts`."*
 
-- [ ] **Step 2: Adapt existing `TableView` and `JsonView` as `TableViewMode`, `JsonViewMode`**.
+- [x] **Step 2: Adapt existing `TableView` and `JsonView` as `TableViewMode`, `JsonViewMode`**.
 
-- [ ] **Step 3: Self-register in `viewModes/index.ts`**
+- [x] **Step 3: Self-register in `viewModes/index.ts`**
 
 ```ts
 import { viewModeRegistry } from './ViewModeRegistry';
@@ -968,7 +968,7 @@ viewModeRegistry.register(JsonViewMode);
 export * from './ViewModeRegistry';
 ```
 
-- [ ] **Step 4:** Commit `feat(results): introduce ViewModeRegistry`.
+- [x] **Step 4:** Commit `feat(results): introduce ViewModeRegistry`.
 
 ---
 
