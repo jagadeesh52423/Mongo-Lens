@@ -1,3 +1,19 @@
+/**
+ * Headless resize controller backing every `Resizable*` primitive in the
+ * design system. Owns: drag-tracking state, min/max clamping, optional
+ * persistence to `localStorage`.
+ *
+ * Extension contract (Open/Closed): to support a new resize topology, add a
+ * boolean / enum option here and branch on it inside `onPointerMove`. No
+ * call site needs to change — existing options retain their defaults.
+ *
+ * Documented options:
+ *   - `direction`  'horizontal' | 'vertical'  — which axis the pointer drives.
+ *   - `invert`     boolean (default false)    — flip the delta sign for handles
+ *                                                that sit on the leading edge
+ *                                                of the resizable element.
+ *   - `storageKey` string  (optional)         — persist `size` across sessions.
+ */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 
