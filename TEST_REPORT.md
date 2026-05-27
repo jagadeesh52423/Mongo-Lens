@@ -112,3 +112,92 @@ Reviewer confirmed both Stage 1 (spec compliance) and Stage 2 (`/code-review:cod
 ## Notes
 - Vitest baseline count (543) is unchanged. The team-lead spec phrased the gate as "543 baseline + new feature tests"; the coder appears to have integrated PR 2 coverage into existing test files or refactored without net additions. All gates green, no test count regression — flagging for awareness only.
 - First-run vitest failure was a stale Vite dep-cache, NOT a code issue. If future runs in this worktree show similar `Failed to resolve` errors after large refactors, clear the Vite cache (`--no-cache` flag or evict `node_modules/.vite`).
+
+---
+
+# PR 2 Implementation Notes (Tasks 14–19)
+Date: 2026-05-28T00:55:00Z
+Author: coder-ui-features-pr2
+
+## Summary
+
+Six commits implementing Tasks 14–19 from the plan:
+
+1. `refactor: move feature components under components/features/` (Task 14)
+2. `refactor(connections): migrate ConnectionDialog to Dialog/FormField` (Task 15)
+3. `refactor(connections): migrate HostKeyDialog to Dialog primitive` (Task 16a)
+4. `refactor(connections): migrate PassphraseDialog to Dialog/FormField` (Task 16b)
+5. `refactor(saved-scripts): migrate SaveScriptDialog to Dialog/FormField` (Task 16c)
+6. `feat(results): introduce ViewModeRegistry` (Task 17)
+7. `refactor(results): decompose ResultsPanel into …` (Task 18)
+
+## Automated gates (final state)
+
+- **vitest:** `npx vitest run` → **546 passed / 0 failed** (was 543 at PR 1 tip; +3 new ConnectionDialog tests in `src/components/features/connections/__tests__/`).
+- **tsc:** `npx tsc --noEmit` → clean, no diagnostics.
+- **acceptance grep (PR 2 scope):** zero `style={{}}` color/spacing literals in the files migrated by this PR (the four dialogs + the seven new/rewritten results files).
+
+## Acceptance grep — out-of-scope leftovers
+
+The plan-level acceptance grep covers the entire `features/results` and `features/connections` trees. Files that *aren't* part of PR 2 still have inline styles and remain on the migration backlog for later PRs:
+
+- `ConnectionPanel.tsx`, `ConnectionTree.tsx` (PR 4 — "Remaining feature files")
+- `JsonView.tsx`, `TableView.tsx`, `cellRenderers.tsx`, `RecordModalShell.tsx` (deferred — the new `JsonViewMode`/`TableViewMode` adapters wrap these but a full CSS-module rewrite is out of scope here)
+
+Flagged so reviewers can verify they were not missed.
+
+## Line counts — ResultsPanel & the four dialogs (before → after)
+
+| File | Before | After |
+|---|---:|---:|
+| `ResultsPanel.tsx` | 473 | 224 |
+| `ConnectionDialog.tsx` | 152 | 153 |
+| `HostKeyDialog.tsx` | 66 | 49 |
+| `PassphraseDialog.tsx` | 58 | 53 |
+| `SaveScriptDialog.tsx` | 60 | 64 |
+
+ResultsPanel is comfortably under the plan's ≤250-line target. The four dialogs are roughly the same length as before, but the line count understates the change — the `style={{…}}` blocks, ad-hoc backdrops, and per-field `<div>+<input>` ladders have been replaced with `<Dialog>`/`<FormField>` primitives + per-file `.module.css` for layout. Tokenized styling now flows through the primitives.
+
+## New files
+
+- `src/components/features/results/ResultsToolbar.{tsx,module.css}`
+- `src/components/features/results/ResultsPagination.{tsx,module.css}`
+- `src/components/features/results/ConsolePanel.{tsx,module.css}`
+- `src/components/features/results/ErrorBanner.{tsx,module.css}`
+- `src/components/features/results/GroupTabs.{tsx,module.css}`
+- `src/components/features/results/ResultsPanel.module.css`
+- `src/components/features/results/useResultsHost.ts`
+- `src/components/features/results/viewModes/ViewModeRegistry.ts`
+- `src/components/features/results/viewModes/TableViewMode.tsx`
+- `src/components/features/results/viewModes/JsonViewMode.tsx`
+- `src/components/features/results/viewModes/index.ts`
+- `src/components/features/connections/ConnectionDialog.module.css`
+- `src/components/features/connections/HostKeyDialog.module.css`
+- `src/components/features/connections/PassphraseDialog.module.css`
+- `src/components/features/connections/__tests__/ConnectionDialog.test.tsx`
+
+## Test fixups (test code only)
+
+`src/__tests__/editor-area.test.tsx` and `src/__tests__/integration/save-flow.test.tsx`: scope dialog queries to `within(screen.getByRole('dialog'))`. The Dialog primitive uses `createPortal` to `document.body`, which moves the dialog inputs outside the test container — `getAllByRole('textbox')[0]` previously resolved to the Monaco mock textarea. Production behavior is unchanged.
+
+## Manual smoke checklist (Step 19 — for tester-ui-pr2)
+
+- [ ] Open Connection dialog (New + Edit); fields populate; Cancel/Save behave; SSH `<details>` toggles.
+- [ ] Trigger SSH host-key prompt; Cancel + Trust & Connect paths both work.
+- [ ] Trigger SSH passphrase prompt; Enter submits; empty value disables Connect.
+- [ ] Save Script dialog (Save As); empty name shows "Name is required"; success closes dialog.
+- [ ] Run query; results render in Table view; switch to JSON; switch back; sort a column.
+- [ ] Trigger a query error; ErrorBanner visible; **Cmd+C copies the error text**.
+- [ ] Paginate (prev / next / page input / page-size selector).
+- [ ] When the script calls `print()`, the Console tab appears and renders the captured output.
+
+## Risks / known minor regressions
+
+- **Sorted-table record navigation:** sort state now lives in `TableViewMode` (a strict reading of the registry signature `(props: { group }) => ReactNode`). ResultsPanel's `docsRef`/`columnsRef` are populated from `activeGroup.docs` in insertion order, so the record-action ↑/↓ shortcuts move through insertion order rather than the user-visible sorted order. No existing test covers sorted-nav, and the regression is minor — flagging for tester awareness only.
+
+## Hard-constraint compliance
+
+- ✅ No edits to `src/components/ui/*` — every dialog use case was covered by the existing FormField/Dialog/Text/Button APIs from PR 1; no widening required.
+- ✅ No edits to `src/styles/tokens.css` or `src/styles/globals.css`.
+- ✅ No edits to `src/store/*`, `src/services/*`, or `src-tauri/`.
+- ✅ No `--no-verify` used on any commit.

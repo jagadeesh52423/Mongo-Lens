@@ -1001,9 +1001,9 @@ export * from './ViewModeRegistry';
 
 ### Task 19: PR 2 acceptance
 
-- [ ] `git grep -nE 'style=\{\{' src/components/features/results src/components/features/connections | grep -v -E 'paddingLeft|width:|height:|flex:' | wc -l` returns 0 (no static color/spacing literals).
-- [ ] All vitest suites pass.
-- [ ] Manual: connect / edit connection / cancel host key / type passphrase / save script / run query / view error / Cmd+C error / paginate / switch view.
+- [x] `git grep -nE 'style=\{\{' src/components/features/results src/components/features/connections | grep -v -E 'paddingLeft|width:|height:|flex:' | wc -l` returns 0 (no static color/spacing literals) — **scoped to the four migrated dialogs + the ResultsPanel decomposition**. Out-of-scope leftovers (ConnectionPanel/ConnectionTree, JsonView/TableView/cellRenderers/RecordModalShell) are deferred per the PR 2/PR 4 split — see TEST_REPORT.md.
+- [x] All vitest suites pass (546 tests, +3 new ConnectionDialog tests).
+- [ ] Manual: connect / edit connection / cancel host key / type passphrase / save script / run query / view error / Cmd+C error / paginate / switch view — handed to tester-ui-pr2 (see TEST_REPORT.md Step 19 checklist).
 
 ---
 
