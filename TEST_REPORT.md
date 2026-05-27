@@ -290,3 +290,146 @@ PR 3 reshapes the app shell, AI chat panel, and connections panel. The automated
 - ✅ No edits to `src-tauri/` (cargo check confirms no rebuild required).
 - ✅ No `--no-verify` used on any commit.
 - ✅ `--no-cache` used on first vitest run per worktree convention.
+
+---
+
+## PR 4 Test Report — Overall Acceptance
+
+**Branch tip:** 35ce7f1 — 4 new commits since PR 3 (3469368, 66e2843, 9866a73, 35ce7f1).
+**Cycle:** 1 of max 2. **Result:** ALL AUTOMATED GATES PASS.
+
+### PR 4 Gates
+
+#### 1. vitest --no-cache  — PASS
+Command: `npx vitest run --no-cache --reporter=default`
+- **Test Files:** 93 passed (93)
+- **Tests:** 553 passed (553)
+- **Duration:** 10.13s
+- React `act(...)` warnings remain in `src/__tests__/layout.test.tsx > toggles side panel when icon clicked` — pre-existing from PR 3, non-blocking.
+
+#### 2. tsc --noEmit  — PASS
+Command: `npx tsc --noEmit`
+- No output, exit 0. Clean.
+
+#### 3. npm run build  — PASS
+Command: `npm run build` (`tsc && vite build`)
+- `dist/assets/index-BnvpJfUf.js` **667.36 kB (gzip 207.60 kB)**
+- `dist/assets/index-CnnTCDvs.css` **21.39 kB (gzip 4.99 kB)**
+- `dist/assets/io.tauri-DoaR6pDk.js` 1.15 kB (gzip 0.56 kB)
+- `dist/assets/host-BaB2E1zy.js` 2.08 kB (gzip 1.00 kB)
+- `dist/index.html` 3.91 kB (gzip 1.21 kB)
+- 600 modules transformed; built in 1.01s.
+
+**Gzip delta vs PR 3 baseline** (`index-BrdNX5Mh.js` 668.86 kB / gzip 206.86 kB; `index-sHW6-Pzb.css` 12.31 kB / gzip 3.09 kB):
+- **JS:** **−1.50 kB raw / +0.74 kB gzip** (essentially flat; +0.36% gzip).
+- **CSS:** **+9.08 kB raw / +1.90 kB gzip**. Expected from the new co-located `*.module.css` files for the EditorArea / EditorTabBar / ContextBar / IconRail / SidePanel / StatusBar / SavedScriptsPanel decomposition in PR 4.
+
+**Cumulative delta PR 4 vs initial baseline** (`index-CD4ouDeH.js` 664.98 kB / gzip 203.79 kB; `index-DwfhLJgN.css` 1.48 kB after PR 1 tokens extraction):
+- JS: **+2.38 kB raw / +3.81 kB gzip** (≈ +1.9% gzip) across 4 PRs / 36 commits.
+- CSS: **+19.91 kB raw / +3.51 kB gzip** — design-system primitives + per-feature `*.module.css` replacing inline styles. Bundle now legibly factored instead of monolithic.
+
+Pre-existing warnings (unchanged): static + dynamic import notice for `src/ipc.ts` and `src/plugins/sandbox/moduleLoader.ts`; chunk-size > 500 kB notice. No new warnings introduced.
+
+#### 4. Dev smoke  — PASS
+- `npm run dev` background, sleep 8, `curl :1420` → **HTTP 200**, then killed. No startup errors in `/tmp/dev.log`.
+
+#### 5. cargo check  — PASS
+- `(cd src-tauri && cargo check)` → `Finished dev profile [unoptimized + debuginfo] target(s) in 58.35s`. No errors.
+- No edits to `src-tauri/` in PR 4 (or anywhere in the refactor).
+
+### Overall Spec Acceptance (§Acceptance from `docs/superpowers/specs/2026-05-27-ui-design-system-refactor-design.md`)
+
+#### A1. Inline `style={{ }}` count — PASS (2 < 20)
+Command: `git grep -nE 'style=\{\{' src/components/features/ src/App.tsx | wc -l` → **2**
+The 2 remaining occurrences are exactly the spec-allowed dynamic-pixel exception:
+```
+src/components/features/ai/AIChatPanel.tsx:103:    <div className={styles.container} style={{ width: width }}>
+src/components/features/layout/SidePanel.tsx:69:        style={{ display: item && !error ? 'block' : 'none' }}
+```
+Both depend on runtime state (resizable width, conditional visibility) and cannot be expressed as a static class.
+
+#### A2. Static CSS literals in JSX — PASS (0)
+Command: `git grep -nE '(color:|background:|padding:|margin:)' src/components/features/ src/App.tsx | grep -v '\.css' | wc -l` → **0**
+Zero offending lines. All static color / background / padding / margin literals have been moved to CSS modules or design tokens.
+
+#### A3. No feature file exceeds 280 lines — PASS (top = 236 < 280)
+Command: `find src/components/features -name "*.tsx" -exec wc -l {} + | sort -rn | head -15`
+```
+3262 total
+ 236 src/components/features/results/ResultsPanel.tsx
+ 201 src/components/features/editor/ScriptEditor.tsx
+ 172 src/components/features/connections/ConnectionDialog.tsx
+ 165 src/components/features/editor/ContextBar.tsx
+ 162 src/components/features/connections/ConnectionPanel.tsx
+ 158 src/components/features/connections/ConnectionTree.tsx
+ 143 src/components/features/editor/EditorArea.tsx
+ 135 src/components/features/results/TableView.tsx
+ 132 src/components/features/ai/AIChatPanel.tsx
+ 127 src/components/features/saved-scripts/SavedScriptsPanel.tsx
+ 110 src/components/features/layout/AppShell.tsx
+ 102 src/components/features/ai/AIChatInput.tsx
+  91 src/components/features/results/cellRenderers.tsx
+  90 src/components/features/ai/CodeBlock.tsx
+```
+
+LOC reduction (top 5 vs `main`):
+| File | main | PR 4 | Δ |
+|---|---|---|---|
+| `App.tsx` | 490 | 44 | **−446 (−91%)** |
+| `ResultsPanel.tsx` | 473 | 236 | **−237 (−50%)** |
+| `AIChatPanel.tsx` | 422 | 132 | **−290 (−69%)** |
+| `ConnectionPanel.tsx` | 334 | 162 | **−172 (−51%)** |
+| `EditorArea.tsx` | 312 | 143 | **−169 (−54%)** |
+
+#### A4. Existing vitest suites still pass — PASS
+Covered by gate 1. 553/553 across 93 files. No suites disabled, removed, or marked `.skip` in any of the 4 PRs.
+
+#### A5. Manual smoke — CHECKLIST for user (CANNOT verify in CLI)
+Full §Acceptance bullet 5 + reviewer's particular spots. Please walk through the running app and tick each:
+
+- [ ] **Connect** to a Mongo instance — both **with and without SSH** (host-key prompt + passphrase prompt should still fire correctly on SSH connections).
+- [ ] **Expand connection tree** — databases load, collections load on expand.
+- [ ] **New tab** (`+ New` in EditorTabBar), **close tab** (✕), **Cancel** while a script is running.
+- [ ] **Run a query** — table view renders; **JSON view** toggle works; **paginate** prev/next; **sort** a column.
+- [ ] **Error path** — trigger a query error and confirm the red banner appears and **Cmd+C copies the error text** (A6).
+- [ ] **Record modal** — **F3 view**, **F4 edit** both open; arrow-key nav across sorted order works after Table↔JSON↔Table round-trip.
+- [ ] **Export** results to CSV and JSON.
+- [ ] **All 4 dialogs**: ConnectionDialog (Add/Edit Connection), HostKeyDialog (first SSH connect), PassphraseDialog (encrypted key), SaveScriptDialog (Save As).
+- [ ] **AI chat panel** — open via icon; send a message; **clear context**; open AI settings; verify **per-tab history isolation** (switch tab → previous chat doesn't bleed).
+- [ ] **Resize** every split:
+  - Primary 3-column split (connections | editor | results — or the actual layout in this build).
+  - **AI panel edge drag** (right edge — uses the new invert option in useResizable).
+  - Side panel.
+- [ ] **Restart the app** — all panel sizes persist.
+- [ ] **Switch theme** (Settings → Theme) — light/dark/custom all apply correctly across the new design-system primitives.
+- [ ] **Plugin panels** — open a plugin activity from the IconRail; SidePanel title appears; empty state shows when no activity selected.
+- [ ] **Visual parity** — overall output matches pre-refactor screenshots (no layout regressions, no font shift, no spacing drift).
+
+Reviewer's particular spotlight items (from PR 4 approval message):
+- [ ] **EditorTabBar** — tab click / close / `+ New` / Cancel-while-running.
+- [ ] **SavedScriptsPanel** — search filter, click-to-open, Duplicate icon, Delete icon → confirm strip → Cancel/Delete.
+- [ ] **ContextBar** — connection picker, database picker (loading + error states), Save/Save As, mode buttons (filled vs outlined).
+- [ ] **IconRail** — pressed/active state with accent stripe on the left edge as you click between activities.
+- [ ] **SidePanel** — title shows for each activity (testid `side-panel-title`); empty state when no activity.
+- [ ] **StatusBar** — connection dot green when connected / dim when not; node status on the right.
+- [ ] **ScriptEditor** — current-statement highlight (background of active statement line). Styling moved from runtime DOM `<style>` injection to a CSS-Modules `:global(...)` rule — visual output should be unchanged; 1-second sanity check.
+
+#### A6. Cmd+C on error text and table cells — DOCUMENTED, requires manual smoke
+The Tauri menu fix from Phase 1 (pre-refactor) preserves the system copy command path. No code in any of the 4 PRs touched `src-tauri/` menu wiring (confirmed by zero src-tauri diff in `git log main..HEAD --stat -- src-tauri/`). Manual smoke A5 above verifies behavior at runtime.
+
+### Cumulative project tally (main → 35ce7f1)
+
+- **Commits:** 36 across 4 PRs.
+- **Vitest:** 553/553 (93 files); started at ~480 on main, +73 new tests added over the refactor.
+- **LOC top-5 reduction:** −1,314 lines combined across the 5 largest feature files (App.tsx, ResultsPanel, AIChatPanel, ConnectionPanel, EditorArea).
+- **§Acceptance counts:** A1=2 (<20), A2=0, A3 top=236 (<280) — all green.
+- **Build size cumulative:** JS +3.81 kB gzip / CSS +3.51 kB gzip across 4 PRs. Bundle now cleanly modularized into design-system primitives + feature folders.
+
+### Cycles used
+**1 of 2.** All automated gates green on first run — no fixes required, no second cycle needed.
+
+### Hard-constraint compliance
+- ✅ No edits to `src-tauri/` across any of the 4 PRs (cargo check confirms).
+- ✅ No `--no-verify` used on any commit.
+- ✅ `--no-cache` used on first vitest run per worktree convention.
+- ✅ All 4 PRs branched off the previous PR tip; this PR branched off PR 3 tip `7201ae1`.
