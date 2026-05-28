@@ -570,8 +570,10 @@ mod tests {
         assert_eq!(second.migrated, 1);
 
         // Exactly one v2 row regardless of how many sweeps happened.
+        // (Post-PR-5 the v2 table is named `connections`; this test was
+        // written against the dual-table phase's `connections_v2`.)
         let count: i64 = sqlite
-            .query_row("SELECT COUNT(*) FROM connections_v2", [], |row| row.get(0))
+            .query_row("SELECT COUNT(*) FROM connections", [], |row| row.get(0))
             .unwrap();
         assert_eq!(count, 1);
     }
@@ -643,10 +645,15 @@ mod legacy_db {
         })
     }
 
+    // All reads target `connections_v1_backup` — the post-rename home of
+    // the pre-PR-5 legacy table. `db::migrate.rs` always ensures the
+    // backup table exists (creating it empty on fresh installs), so this
+    // module never has to guard against a missing table.
+
     pub fn list(conn: &Connection) -> rusqlite::Result<Vec<ConnectionRecord>> {
         let mut stmt = conn.prepare(
             "SELECT id,name,host,port,auth_db,username,conn_string,ssh_host,ssh_port,ssh_user,ssh_key_path,created_at
-             FROM connections ORDER BY name",
+             FROM connections_v1_backup ORDER BY name",
         )?;
         let rows = stmt.query_map([], map_row)?;
         rows.collect()
@@ -656,7 +663,7 @@ mod legacy_db {
     pub fn get(conn: &Connection, id: &str) -> rusqlite::Result<Option<ConnectionRecord>> {
         let mut stmt = conn.prepare(
             "SELECT id,name,host,port,auth_db,username,conn_string,ssh_host,ssh_port,ssh_user,ssh_key_path,created_at
-             FROM connections WHERE id = ?1",
+             FROM connections_v1_backup WHERE id = ?1",
         )?;
         let mut rows = stmt.query_map(params![id], map_row)?;
         match rows.next() {
@@ -668,7 +675,7 @@ mod legacy_db {
     #[cfg(test)]
     pub fn insert(conn: &Connection, rec: &ConnectionRecord) -> rusqlite::Result<()> {
         conn.execute(
-            "INSERT INTO connections (id,name,host,port,auth_db,username,conn_string,ssh_host,ssh_port,ssh_user,ssh_key_path,created_at)
+            "INSERT INTO connections_v1_backup (id,name,host,port,auth_db,username,conn_string,ssh_host,ssh_port,ssh_user,ssh_key_path,created_at)
              VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
             params![
                 rec.id, rec.name, rec.host, rec.port, rec.auth_db, rec.username,

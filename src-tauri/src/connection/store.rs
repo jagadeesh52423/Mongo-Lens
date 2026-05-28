@@ -1,11 +1,13 @@
 //! SQLite-backed payload-JSON store for the v2 connection model.
 //!
-//! One table (`connections_v2`, see [`SCHEMA_SQL`]); one row per
+//! One table (`connections`, see [`SCHEMA_SQL`]); one row per
 //! `Connection`. The full tagged-union JSON lives in the `payload`
 //! column; `id` and `name` are projected so list/sort stays cheap.
 //!
-//! The old flat `connections` table is left alone and continues to be
-//! served by `crate::db::connections` until the Phase 2 cutover.
+//! Pre-PR-5 the table was named `connections_v2` and coexisted with a
+//! legacy flat-column `connections` table. PR 5's `db::migrate.rs` ran a
+//! one-shot rename so the v2 schema is now the canonical `connections`;
+//! the legacy archive lives at `connections_v1_backup`.
 //!
 //! Errors funnel through [`StoreError`], which wraps the two real
 //! failure modes — SQLite I/O and JSON encode/decode — so callers can
@@ -49,7 +51,7 @@ fn map_row(row: &Row) -> Result<Connection> {
 pub fn list(conn: &SqliteConnection) -> Result<Vec<Connection>> {
     let mut stmt = conn.prepare(
         "SELECT id, name, payload, created_at, updated_at \
-         FROM connections_v2 \
+         FROM connections \
          ORDER BY name COLLATE NOCASE ASC, id ASC",
     )?;
     let mut rows = stmt.query([])?;
@@ -64,7 +66,7 @@ pub fn list(conn: &SqliteConnection) -> Result<Vec<Connection>> {
 pub fn get(conn: &SqliteConnection, id: &str) -> Result<Option<Connection>> {
     let mut stmt = conn.prepare(
         "SELECT id, name, payload, created_at, updated_at \
-         FROM connections_v2 WHERE id = ?1",
+         FROM connections WHERE id = ?1",
     )?;
     let mut rows = stmt.query(params![id])?;
     match rows.next()? {
@@ -83,7 +85,7 @@ pub fn upsert(conn: &SqliteConnection, connection: &Connection) -> Result<()> {
     let payload = serde_json::to_string(connection)?;
     let now = now_utc();
     conn.execute(
-        "INSERT INTO connections_v2 (id, name, payload, created_at, updated_at) \
+        "INSERT INTO connections (id, name, payload, created_at, updated_at) \
          VALUES (?1, ?2, ?3, ?4, ?5) \
          ON CONFLICT(id) DO UPDATE SET \
              name       = excluded.name, \
@@ -103,7 +105,7 @@ pub fn upsert(conn: &SqliteConnection, connection: &Connection) -> Result<()> {
 /// Delete a connection by id. Succeeds (no-op) if the id is unknown — the
 /// caller can `get` first if they need to distinguish.
 pub fn delete(conn: &SqliteConnection, id: &str) -> Result<()> {
-    conn.execute("DELETE FROM connections_v2 WHERE id = ?1", params![id])?;
+    conn.execute("DELETE FROM connections WHERE id = ?1", params![id])?;
     Ok(())
 }
 
@@ -184,7 +186,7 @@ mod tests {
         apply_schema(&conn).unwrap();
         let count: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='connections_v2'",
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='connections'",
                 [],
                 |row| row.get(0),
             )
@@ -195,6 +197,10 @@ mod tests {
     #[test]
     fn schema_creates_supporting_indexes() {
         let conn = fresh_db();
+        // Index names retain the `_v2` suffix from before PR 5's table
+        // rename — they're cosmetic identifiers, and renaming them
+        // unnecessarily would invalidate existing users' indexes on
+        // first boot after upgrade.
         let count: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM sqlite_master \
@@ -248,7 +254,7 @@ mod tests {
         // Read the DB-side created_at so we can verify it's preserved.
         let initial_created_at: String = conn
             .query_row(
-                "SELECT created_at FROM connections_v2 WHERE id='c1'",
+                "SELECT created_at FROM connections WHERE id='c1'",
                 [],
                 |row| row.get(0),
             )
@@ -261,13 +267,13 @@ mod tests {
         upsert(&conn, &edited).unwrap();
 
         let row_count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM connections_v2", [], |row| row.get(0))
+            .query_row("SELECT COUNT(*) FROM connections", [], |row| row.get(0))
             .unwrap();
         assert_eq!(row_count, 1, "upsert must not create a duplicate row");
 
         let (name, db_created_at): (String, String) = conn
             .query_row(
-                "SELECT name, created_at FROM connections_v2 WHERE id='c1'",
+                "SELECT name, created_at FROM connections WHERE id='c1'",
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
@@ -285,7 +291,7 @@ mod tests {
         upsert(&conn, &sample_direct("c1", "orig")).unwrap();
         let first: String = conn
             .query_row(
-                "SELECT updated_at FROM connections_v2 WHERE id='c1'",
+                "SELECT updated_at FROM connections WHERE id='c1'",
                 [],
                 |row| row.get(0),
             )
@@ -298,7 +304,7 @@ mod tests {
         upsert(&conn, &sample_direct("c1", "edited")).unwrap();
         let second: String = conn
             .query_row(
-                "SELECT updated_at FROM connections_v2 WHERE id='c1'",
+                "SELECT updated_at FROM connections WHERE id='c1'",
                 [],
                 |row| row.get(0),
             )
