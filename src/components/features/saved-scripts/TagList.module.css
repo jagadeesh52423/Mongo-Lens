@@ -12,7 +12,7 @@
   font-size: var(--fs-xs);
   padding: 1px 6px;
   border-radius: 999px;
-  background: var(--bg-2);
+  background: var(--bg-hover);
   color: var(--fg-dim);
   border: 1px solid var(--border);
   line-height: 1.4;
@@ -23,15 +23,15 @@
 }
 
 .interactive:hover {
-  background: var(--accent-blue-dim);
-  color: var(--accent-blue);
-  border-color: var(--accent-blue-dim);
+  background: var(--accent);
+  color: var(--bg);
+  border-color: var(--accent);
 }
 
 .selected {
-  background: var(--accent-blue-dim);
-  color: var(--accent-blue);
-  border-color: var(--accent-blue);
+  background: var(--accent);
+  color: var(--bg);
+  border-color: var(--accent);
 }
 
 .remove {

@@ -43,7 +43,7 @@ export function EditTagsPopover({ initial, allTags, onSave, onCancel }: Props) {
       setTags(tags.slice(0, -1));
     } else if (e.key === 'Escape') {
       e.preventDefault();
-      onCancel();
+      void save();
     }
   }
 
@@ -63,6 +63,9 @@ export function EditTagsPopover({ initial, allTags, onSave, onCancel }: Props) {
     }
   }
 
+  const hasKnownTags = allTags.length > 0;
+  const allKnownAlreadyAdded = hasKnownTags && suggestions.length === 0 && !input.trim();
+
   return (
     <div className={styles.popover} role="dialog" aria-label="Edit tags">
       <TagList tags={tags} onRemove={remove} />
@@ -72,18 +75,29 @@ export function EditTagsPopover({ initial, allTags, onSave, onCancel }: Props) {
         value={input}
         onChange={(e) => setInput(e.target.value)}
         onKeyDown={onKey}
-        placeholder="Add tag…"
+        placeholder="Add tag — Enter to add, Esc to save"
       />
-      {suggestions.length > 0 && (
-        <ul className={styles.suggest}>
-          {suggestions.map((s) => (
-            <li key={s}>
-              <button type="button" onClick={() => add(s)}>
-                {s}
-              </button>
-            </li>
-          ))}
-        </ul>
+      {hasKnownTags && (
+        <div className={styles.suggestWrap}>
+          <div className={styles.suggestLabel}>Suggestions</div>
+          {suggestions.length > 0 ? (
+            <ul className={styles.suggest}>
+              {suggestions.map((s) => (
+                <li key={s}>
+                  <button type="button" className={styles.suggestBtn} onClick={() => add(s)}>
+                    {s}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className={styles.suggestEmpty}>
+              {allKnownAlreadyAdded
+                ? 'All known tags are already on this script.'
+                : 'No matches.'}
+            </div>
+          )}
+        </div>
       )}
       <div className={styles.actions}>
         <button type="button" onClick={onCancel} disabled={busy}>
