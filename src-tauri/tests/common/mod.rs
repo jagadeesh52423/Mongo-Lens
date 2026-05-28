@@ -523,6 +523,118 @@ pub fn add_socks5(conn: &mut Connection, host: &str, port: u16) {
     });
 }
 
+/// Same as [`add_ssh_key`] but marks the key as passphrase-protected and
+/// uses the supplied host-key policy. Built for the new Task 17 connect_v2
+/// integration tests (passphrase + host-key strict).
+pub fn add_ssh_key_with_passphrase(
+    conn: &mut Connection,
+    host: &str,
+    port: u16,
+    user: &str,
+    key_path: &Path,
+    policy: KnownHostsPolicy,
+) {
+    conn.ssh = Some(SshTunnel {
+        host: host.into(),
+        port,
+        user: user.into(),
+        auth: SshAuth::Key {
+            key_path: key_path.to_string_lossy().into_owned(),
+            has_passphrase: true,
+        },
+        known_hosts_policy: policy,
+    });
+}
+
+/// Override the `known_hosts_policy` on a Connection that already has an
+/// SSH config. Panics if there's no SSH config — caller's bug.
+pub fn set_ssh_policy(conn: &mut Connection, policy: KnownHostsPolicy) {
+    match conn.ssh.as_mut() {
+        Some(s) => s.known_hosts_policy = policy,
+        None => panic!("set_ssh_policy called on connection without ssh config"),
+    }
+}
+
+/// Generate a passphrase-protected ed25519 keypair using ssh-keygen.
+/// Returns the private-key path (encrypted), the public key, and the
+/// passphrase string. Tempdir is held alive by the returned struct.
+pub fn generate_ssh_keypair_with_passphrase(
+    passphrase: &str,
+) -> Result<(SshKeypair, String), String> {
+    let tempdir = tempfile::Builder::new()
+        .prefix("conn-v2-ssh-key-pp-")
+        .tempdir()
+        .map_err(|e| e.to_string())?;
+    let priv_path = tempdir.path().join("id_ed25519");
+    let pub_path = tempdir.path().join("id_ed25519.pub");
+
+    run_with_timeout(
+        "ssh-keygen",
+        &[
+            "-t", "ed25519",
+            "-N", passphrase,
+            "-C", "conn-v2-test-pp",
+            "-f", priv_path.to_str().unwrap(),
+        ],
+        Duration::from_secs(15),
+    )?;
+
+    let public_str = std::fs::read_to_string(&pub_path)
+        .map_err(|e| format!("read pub key: {e}"))?
+        .trim()
+        .to_string();
+
+    Ok((
+        SshKeypair {
+            private_path: priv_path,
+            public_str,
+            _tempdir: tempdir,
+        },
+        passphrase.to_string(),
+    ))
+}
+
+/// RAII handle that swaps `HOME` to a fresh tempdir for the duration of
+/// the test, then restores the original on drop. Used by the host-key
+/// integration test so the app's `~/.mongomacapp/known_hosts` starts
+/// empty and the trust state added during the test doesn't leak into
+/// the dev box's real known_hosts file.
+///
+/// NOT safe under parallel test execution — the suite already runs with
+/// `--test-threads=1`, which matches what the existing integration tests
+/// assume.
+pub struct HomeGuard {
+    _dir: tempfile::TempDir,
+    original: Option<String>,
+}
+
+impl HomeGuard {
+    pub fn fresh() -> Result<Self, String> {
+        let dir = tempfile::Builder::new()
+            .prefix("conn-v2-home-")
+            .tempdir()
+            .map_err(|e| e.to_string())?;
+        // Pre-create ~/.mongomacapp so known_hosts ensure-file writes work.
+        std::fs::create_dir_all(dir.path().join(".mongomacapp"))
+            .map_err(|e| format!("mkdir mongomacapp: {e}"))?;
+        let original = std::env::var("HOME").ok();
+        std::env::set_var("HOME", dir.path());
+        Ok(HomeGuard {
+            _dir: dir,
+            original,
+        })
+    }
+}
+
+impl Drop for HomeGuard {
+    fn drop(&mut self) {
+        match self.original.take() {
+            Some(v) => std::env::set_var("HOME", v),
+            None => std::env::remove_var("HOME"),
+        }
+    }
+}
+
 // ──────────────────────────────────────────────────────────────────────────
 // Mongo health probe via the driver — the actual end-to-end assertion
 // ──────────────────────────────────────────────────────────────────────────
@@ -574,4 +686,70 @@ pub async fn ping_via_builder(
 
     ping_result.map_err(|e| format!("ping: {e}"))?;
     Ok(elapsed)
+}
+
+/// Raw discriminant of a `BuildOutcome`, with host-key fields surfaced for
+/// assertion. `Ready` and `PassphraseRequired` carry no extra structured
+/// info the tests need (Ready's tunnel handle is closed inline).
+pub enum OutcomeKind {
+    Ready,
+    PassphraseRequired,
+    HostKeyUnknown {
+        host: String,
+        port: u16,
+        algorithm: String,
+        fingerprint: String,
+    },
+}
+
+/// Call `build_client_options` and reduce the live outcome to a
+/// kind-discriminant. On `Ready`, performs the same hello round-trip
+/// `ping_via_builder` does so the test signals "really did connect", then
+/// tears down the tunnel before returning. Used by the Task 17 connect_v2
+/// integration tests where the test needs to assert variant identity
+/// (not just success/failure).
+pub async fn connect_outcome(
+    resolved: &mongo_lens::connection::builder::ResolvedConnection<'_>,
+    accept_host_key: bool,
+) -> Result<OutcomeKind, String> {
+    use mongo_lens::connection::builder::{build_client_options, BuildOutcome};
+    use mongodb::bson::doc;
+    use mongodb::Client;
+
+    let log = null_log();
+    let outcome = build_client_options(resolved, &fast_prefs(), accept_host_key, log)
+        .await
+        .map_err(|e| format!("build_client_options stage={:?}: {}", e.stage, e.error))?;
+
+    match outcome {
+        BuildOutcome::PassphraseRequired => Ok(OutcomeKind::PassphraseRequired),
+        BuildOutcome::HostKeyUnknown {
+            host,
+            port,
+            algorithm,
+            fingerprint,
+        } => Ok(OutcomeKind::HostKeyUnknown {
+            host,
+            port,
+            algorithm,
+            fingerprint,
+        }),
+        BuildOutcome::Ready { options, tunnel } => {
+            // Same hello-round-trip the legacy helper does, so a Ready
+            // outcome means "tunnel up + mongo reachable" — not just
+            // "ClientOptions parsed".
+            let client = Client::with_options(options)
+                .map_err(|e| format!("Client::with_options: {e}"))?;
+            let ping = client
+                .database("admin")
+                .run_command(doc! { "ping": 1 })
+                .await;
+            if let Some(t) = tunnel {
+                t.close().await;
+            }
+            drop(client);
+            ping.map_err(|e| format!("ping: {e}"))?;
+            Ok(OutcomeKind::Ready)
+        }
+    }
 }

@@ -423,8 +423,14 @@ async fn open_ssh_if_configured(
 }
 
 /// Translate the resolved-secrets bag into a `ResolvedSshSecrets` for the
-/// bridge. Returns a clear error if the bag is missing what the chosen
-/// SSH auth variant needs.
+/// bridge.
+///
+/// Password auth is pre-validated here (no password resolved is a hard
+/// `BuildError::ssh` — the dialog should have caught it at save). Encrypted
+/// key auth with a missing passphrase, however, is *not* pre-rejected: it
+/// flows through to the bridge so the typed `SshError::PassphraseRequired`
+/// signal survives intact, and `open_ssh_if_configured` can fold it into
+/// `SshStepOutcome::PassphraseRequired` for the dialog's prompt flow.
 fn build_ssh_secrets(
     ssh: &SshTunnel,
     resolved: &ResolvedConnection<'_>,
@@ -436,11 +442,12 @@ fn build_ssh_secrets(
             })?),
             key_passphrase: None,
         },
+        // Pass through whatever's resolved (including None) — the bridge's
+        // resolve_auth emits PassphraseRequired when has_passphrase=true
+        // but key_passphrase=None, which we want to surface as a prompt.
         SshAuth::Key { has_passphrase: true, .. } => ResolvedSshSecrets {
             password: None,
-            key_passphrase: Some(resolved.ssh_key_passphrase.clone().ok_or_else(|| {
-                BuildError::ssh("SSH key passphrase missing for encrypted key")
-            })?),
+            key_passphrase: resolved.ssh_key_passphrase.clone(),
         },
         SshAuth::Key { has_passphrase: false, .. } => ResolvedSshSecrets::default(),
         SshAuth::Agent => ResolvedSshSecrets::default(),
