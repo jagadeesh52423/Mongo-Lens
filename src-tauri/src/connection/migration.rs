@@ -23,7 +23,7 @@
 //! entry remain untouched so the old dialog keeps working unchanged.
 //! The v2 store gets a fresh `upsert` and, if a legacy password is
 //! available, the password is *also* written to
-//! [`SecretSlot::MongoPassword`] for the same connection id. Old and new
+//! [`SecretSlot::AuthPassword`] for the same connection id. Old and new
 //! coexist until Phase 2 cuts over.
 //!
 //! Sync failures **do not surface to the user**: the caller (create or
@@ -159,7 +159,7 @@ fn to_u16_or(value: Option<i64>, default: u16) -> u16 {
 
 /// Migrate one legacy row into v2: upsert the payload row in
 /// `connections_v2`, and (if a legacy password is supplied and non-empty)
-/// write it to `SecretSlot::MongoPassword` for the same connection id.
+/// write it to `SecretSlot::AuthPassword` for the same connection id.
 /// **The legacy keychain entry is intentionally left in place** — the
 /// old dialog still reads from it.
 ///
@@ -174,7 +174,7 @@ pub fn sync_row_to_v2<S: SecretStore + ?Sized>(
     store::upsert(sqlite, &connection)?;
     if let Some(password) = legacy_password {
         if !password.is_empty() {
-            secrets.set(&connection.id, SecretSlot::MongoPassword, password)?;
+            secrets.set(&connection.id, SecretSlot::AuthPassword, password)?;
         }
     }
     Ok(connection)
@@ -418,7 +418,7 @@ mod tests {
         assert_eq!(from_store, connection);
 
         let pw = secrets
-            .get("c1", SecretSlot::MongoPassword)
+            .get("c1", SecretSlot::AuthPassword)
             .unwrap()
             .expect("secret missing");
         assert_eq!(pw, "hunter2");
@@ -435,7 +435,7 @@ mod tests {
 
         assert!(store::get(&sqlite, "c1").unwrap().is_some());
         assert!(secrets
-            .get("c1", SecretSlot::MongoPassword)
+            .get("c1", SecretSlot::AuthPassword)
             .unwrap()
             .is_none());
     }
@@ -451,7 +451,7 @@ mod tests {
 
         assert!(store::get(&sqlite, "c1").unwrap().is_some());
         assert!(secrets
-            .get("c1", SecretSlot::MongoPassword)
+            .get("c1", SecretSlot::AuthPassword)
             .unwrap()
             .is_none());
     }
@@ -512,13 +512,13 @@ mod tests {
         // Only c1 has a password.
         assert_eq!(
             secrets
-                .get("c1", SecretSlot::MongoPassword)
+                .get("c1", SecretSlot::AuthPassword)
                 .unwrap()
                 .as_deref(),
             Some("pw1")
         );
         assert!(secrets
-            .get("c2", SecretSlot::MongoPassword)
+            .get("c2", SecretSlot::AuthPassword)
             .unwrap()
             .is_none());
     }
@@ -544,7 +544,7 @@ mod tests {
         assert_eq!(summary.failed, 0);
         assert!(store::get(&sqlite, "c1").unwrap().is_some());
         assert!(secrets
-            .get("c1", SecretSlot::MongoPassword)
+            .get("c1", SecretSlot::AuthPassword)
             .unwrap()
             .is_none());
     }

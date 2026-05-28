@@ -34,6 +34,19 @@
 //!   modifying). [`open_default_keychain_store`] wires the prod path:
 //!   master key from the macOS Keychain, blobs at
 //!   `~/.mongomacapp/secrets/`.
+//!
+//! ## Phase 2 hardening (tracked, non-blocking for Phase 1)
+//!
+//! 1. `FileEncryptedStore::delete_all_for` matches `conn-{id}-…\.bin` by
+//!    prefix only. Connection ids are UUIDs in practice, so a prefix
+//!    collision is statistically impossible today. After matching,
+//!    verify the trailing component (before `.bin`) is a known
+//!    `SecretSlot::ALL.as_wire()` value to close the door if id
+//!    semantics ever change.
+//! 2. `fetch_or_create_master_key` silently overwrites a Keychain
+//!    entry of the wrong length. Add a `log::warn!` (or thread a
+//!    `&dyn Logger` through) so a recurring "key wrong size,
+//!    regenerated" pattern is debuggable rather than invisible.
 
 use std::collections::HashMap;
 use std::fs;
@@ -60,19 +73,30 @@ use thiserror::Error;
 
 /// Per-connection secret kinds. Each variant maps to exactly one stored
 /// value for a given connection id.
+///
+/// Wire names are the canonical contract — Phase 1 plan §Migration
+/// references them by string ("auth-password" in particular). Renaming a
+/// variant is a free Rust-side refactor; renaming its `as_wire` output is
+/// a breaking change that orphans every secret already on disk.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum SecretSlot {
-    /// Password for SCRAM / LDAP / legacy CR auth modes.
-    MongoPassword,
+    /// Password for any plaintext-credential MongoDB auth mode
+    /// (SCRAM / LDAP / legacy CR). Plan §Migration writes the legacy
+    /// keychain password to this slot on dual-table sync.
+    AuthPassword,
     /// Password for SSH tunnel password auth (`SshAuth::Password`).
     SshPassword,
     /// Passphrase protecting an SSH private key (`SshAuth::Key { has_passphrase: true }`).
     SshKeyPassphrase,
     /// Password for an authenticating proxy (`Proxy { auth: Some(_) }`).
     ProxyPassword,
-    /// AWS session token (`AuthMode::AwsIam { session_token }`) — sensitive
-    /// because it's a short-lived credential, stored encrypted at rest.
-    AwsSessionToken,
+    /// AWS IAM secret access key (long-lived credential paired with
+    /// `AuthMode::AwsIam { access_key_id }`). The `sessionToken` field on
+    /// `AuthMode::AwsIam` is a short-lived STS-derived value and is
+    /// carried as a plaintext model field, not stored here — if a future
+    /// flow needs to cache it across launches, add a new `AwsSessionToken`
+    /// slot rather than overloading this one.
+    AwsSecretKey,
     /// OIDC refresh token cached after first device-code flow.
     OidcRefreshToken,
 }
@@ -81,11 +105,11 @@ impl SecretSlot {
     /// Every variant, in declaration order. Used for housekeeping
     /// (e.g. `delete_all_for` mock implementations that iterate slots).
     pub const ALL: &'static [SecretSlot] = &[
-        SecretSlot::MongoPassword,
+        SecretSlot::AuthPassword,
         SecretSlot::SshPassword,
         SecretSlot::SshKeyPassphrase,
         SecretSlot::ProxyPassword,
-        SecretSlot::AwsSessionToken,
+        SecretSlot::AwsSecretKey,
         SecretSlot::OidcRefreshToken,
     ];
 
@@ -94,11 +118,11 @@ impl SecretSlot {
     /// is not.
     pub fn as_wire(self) -> &'static str {
         match self {
-            SecretSlot::MongoPassword => "mongo-password",
+            SecretSlot::AuthPassword => "auth-password",
             SecretSlot::SshPassword => "ssh-password",
             SecretSlot::SshKeyPassphrase => "ssh-key-passphrase",
             SecretSlot::ProxyPassword => "proxy-password",
-            SecretSlot::AwsSessionToken => "aws-session-token",
+            SecretSlot::AwsSecretKey => "aws-secret-key",
             SecretSlot::OidcRefreshToken => "oidc-refresh-token",
         }
     }
@@ -557,12 +581,12 @@ mod tests {
     // ── Trait conformance suite — runs against every backend ──────────────
 
     fn round_trip_suite<S: SecretStore>(store: &S) {
-        store.set("c1", SecretSlot::MongoPassword, "hunter2").unwrap();
+        store.set("c1", SecretSlot::AuthPassword, "hunter2").unwrap();
         store.set("c1", SecretSlot::SshPassword, "shh").unwrap();
-        store.set("c2", SecretSlot::MongoPassword, "other").unwrap();
+        store.set("c2", SecretSlot::AuthPassword, "other").unwrap();
 
         assert_eq!(
-            store.get("c1", SecretSlot::MongoPassword).unwrap().as_deref(),
+            store.get("c1", SecretSlot::AuthPassword).unwrap().as_deref(),
             Some("hunter2")
         );
         assert_eq!(
@@ -570,7 +594,7 @@ mod tests {
             Some("shh")
         );
         assert_eq!(
-            store.get("c2", SecretSlot::MongoPassword).unwrap().as_deref(),
+            store.get("c2", SecretSlot::AuthPassword).unwrap().as_deref(),
             Some("other")
         );
         assert!(store
@@ -578,31 +602,31 @@ mod tests {
             .unwrap()
             .is_none());
         assert!(store
-            .get("missing", SecretSlot::MongoPassword)
+            .get("missing", SecretSlot::AuthPassword)
             .unwrap()
             .is_none());
     }
 
     fn isolation_suite<S: SecretStore>(store: &S) {
-        store.set("c1", SecretSlot::MongoPassword, "v1").unwrap();
-        store.set("c2", SecretSlot::MongoPassword, "v2").unwrap();
+        store.set("c1", SecretSlot::AuthPassword, "v1").unwrap();
+        store.set("c2", SecretSlot::AuthPassword, "v2").unwrap();
         store
-            .set("c1-prefix-collider", SecretSlot::MongoPassword, "v3")
+            .set("c1-prefix-collider", SecretSlot::AuthPassword, "v3")
             .unwrap();
 
         // delete one slot for c1 — c2 and c1-prefix-collider untouched.
-        store.delete("c1", SecretSlot::MongoPassword).unwrap();
+        store.delete("c1", SecretSlot::AuthPassword).unwrap();
         assert!(store
-            .get("c1", SecretSlot::MongoPassword)
+            .get("c1", SecretSlot::AuthPassword)
             .unwrap()
             .is_none());
         assert_eq!(
-            store.get("c2", SecretSlot::MongoPassword).unwrap().as_deref(),
+            store.get("c2", SecretSlot::AuthPassword).unwrap().as_deref(),
             Some("v2")
         );
         assert_eq!(
             store
-                .get("c1-prefix-collider", SecretSlot::MongoPassword)
+                .get("c1-prefix-collider", SecretSlot::AuthPassword)
                 .unwrap()
                 .as_deref(),
             Some("v3"),
@@ -611,10 +635,10 @@ mod tests {
     }
 
     fn delete_all_for_suite<S: SecretStore>(store: &S) {
-        store.set("c1", SecretSlot::MongoPassword, "a").unwrap();
+        store.set("c1", SecretSlot::AuthPassword, "a").unwrap();
         store.set("c1", SecretSlot::SshPassword, "b").unwrap();
         store.set("c1", SecretSlot::ProxyPassword, "c").unwrap();
-        store.set("c2", SecretSlot::MongoPassword, "z").unwrap();
+        store.set("c2", SecretSlot::AuthPassword, "z").unwrap();
 
         let removed = store.delete_all_for("c1").unwrap();
         assert_eq!(removed, 3, "delete_all_for must remove every c1 slot");
@@ -627,7 +651,7 @@ mod tests {
             );
         }
         assert_eq!(
-            store.get("c2", SecretSlot::MongoPassword).unwrap().as_deref(),
+            store.get("c2", SecretSlot::AuthPassword).unwrap().as_deref(),
             Some("z"),
             "delete_all_for must not touch other connections"
         );
@@ -635,15 +659,15 @@ mod tests {
 
     fn no_op_deletes_suite<S: SecretStore>(store: &S) {
         // delete on empty + delete_all_for on empty: both succeed, return 0.
-        store.delete("nope", SecretSlot::MongoPassword).unwrap();
+        store.delete("nope", SecretSlot::AuthPassword).unwrap();
         assert_eq!(store.delete_all_for("nope").unwrap(), 0);
     }
 
     fn set_overwrites_suite<S: SecretStore>(store: &S) {
-        store.set("c1", SecretSlot::MongoPassword, "first").unwrap();
-        store.set("c1", SecretSlot::MongoPassword, "second").unwrap();
+        store.set("c1", SecretSlot::AuthPassword, "first").unwrap();
+        store.set("c1", SecretSlot::AuthPassword, "second").unwrap();
         assert_eq!(
-            store.get("c1", SecretSlot::MongoPassword).unwrap().as_deref(),
+            store.get("c1", SecretSlot::AuthPassword).unwrap().as_deref(),
             Some("second")
         );
     }
@@ -748,9 +772,9 @@ mod tests {
     fn file_blob_is_actually_encrypted() {
         let (store, _tmp) = file_store_in_tempdir();
         store
-            .set("c1", SecretSlot::MongoPassword, "plaintext-secret")
+            .set("c1", SecretSlot::AuthPassword, "plaintext-secret")
             .unwrap();
-        let path = store.path_for("c1", SecretSlot::MongoPassword).unwrap();
+        let path = store.path_for("c1", SecretSlot::AuthPassword).unwrap();
         let bytes = fs::read(&path).unwrap();
         assert!(bytes.len() >= NONCE_SIZE + TAG_SIZE);
         // Sanity: the plaintext must not appear verbatim in the blob.
@@ -764,15 +788,15 @@ mod tests {
     #[test]
     fn file_open_detects_tampering() {
         let (store, _tmp) = file_store_in_tempdir();
-        store.set("c1", SecretSlot::MongoPassword, "secret").unwrap();
-        let path = store.path_for("c1", SecretSlot::MongoPassword).unwrap();
+        store.set("c1", SecretSlot::AuthPassword, "secret").unwrap();
+        let path = store.path_for("c1", SecretSlot::AuthPassword).unwrap();
         let mut bytes = fs::read(&path).unwrap();
         // Flip a bit in the ciphertext region (skip the 12-byte nonce).
         let idx = NONCE_SIZE + 1;
         bytes[idx] ^= 0xFF;
         fs::write(&path, &bytes).unwrap();
 
-        let err = store.get("c1", SecretSlot::MongoPassword).unwrap_err();
+        let err = store.get("c1", SecretSlot::AuthPassword).unwrap_err();
         match err {
             SecretError::Crypto(_) => {}
             other => panic!("expected Crypto error on tamper, got {other:?}"),
@@ -782,10 +806,10 @@ mod tests {
     #[test]
     fn file_open_rejects_truncated_blob() {
         let (store, _tmp) = file_store_in_tempdir();
-        store.set("c1", SecretSlot::MongoPassword, "secret").unwrap();
-        let path = store.path_for("c1", SecretSlot::MongoPassword).unwrap();
+        store.set("c1", SecretSlot::AuthPassword, "secret").unwrap();
+        let path = store.path_for("c1", SecretSlot::AuthPassword).unwrap();
         fs::write(&path, b"too-short").unwrap();
-        let err = store.get("c1", SecretSlot::MongoPassword).unwrap_err();
+        let err = store.get("c1", SecretSlot::AuthPassword).unwrap_err();
         match err {
             SecretError::Crypto(_) => {}
             other => panic!("expected Crypto error on truncated blob, got {other:?}"),
@@ -795,7 +819,7 @@ mod tests {
     #[test]
     fn file_delete_all_for_ignores_unrelated_files() {
         let (store, _tmp) = file_store_in_tempdir();
-        store.set("c1", SecretSlot::MongoPassword, "a").unwrap();
+        store.set("c1", SecretSlot::AuthPassword, "a").unwrap();
         // Drop an unrelated file in the dir; it must survive delete_all_for.
         let unrelated = store.base_dir.join("not-a-secret.txt");
         fs::write(&unrelated, b"hello").unwrap();
@@ -813,7 +837,7 @@ mod tests {
         let (store, _tmp) = file_store_in_tempdir();
         for bad in ["", ".hidden", "../escape", "with/slash", "with:colon"] {
             let err = store
-                .set(bad, SecretSlot::MongoPassword, "x")
+                .set(bad, SecretSlot::AuthPassword, "x")
                 .unwrap_err();
             match err {
                 SecretError::InvalidId(_) => {}
