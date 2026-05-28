@@ -23,6 +23,13 @@ const SSH_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const CHANNEL_OPEN_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// A live SSH tunnel handle. Drop this (or call `close()`) to shut the tunnel down.
+///
+/// `Debug` is derived (rather than hand-written) so callers downstream
+/// of `build_client_options` — which now returns `(ClientOptions,
+/// Option<TunnelHandle>)` — can use `.unwrap_err()` / `assert!` machinery
+/// that needs `T: Debug` on the Ok side. The internal channel/task
+/// fields are themselves `Debug`, so this is mechanical.
+#[derive(Debug)]
 pub struct TunnelHandle {
     /// The local address the MongoDB driver should connect to.
     pub local_addr: SocketAddr,

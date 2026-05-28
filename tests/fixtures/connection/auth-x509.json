@@ -1,0 +1,7 @@
+{
+  "id": "fx-auth-x509",
+  "name": "Fixture: x509 auth",
+  "target": { "kind": "direct", "host": "secure.example", "port": 27017 },
+  "auth": { "kind": "x509", "certFile": "/etc/ssl/client.pem", "certKeyFile": "/etc/ssl/client.key" },
+  "createdAt": "2026-05-28T00:00:00Z"
+}

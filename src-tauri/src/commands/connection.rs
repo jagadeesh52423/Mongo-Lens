@@ -1,3 +1,4 @@
+use crate::connection::migration;
 use crate::db::{self, connections::ConnectionRecord};
 use crate::keychain;
 use crate::logctx;
@@ -169,12 +170,41 @@ pub fn create_connection(
         log.error("insert failed", logctx! { "connId" => id.clone(), "err" => e.to_string() });
         e.to_string()
     })?;
-    if let Some(pw) = input.password {
+    if let Some(ref pw) = input.password {
         if !pw.is_empty() {
-            keychain::set_password(&id, &pw, log.as_ref())?;
+            keychain::set_password(&id, pw, log.as_ref())?;
         }
     }
+    // CONN_V2 dual-table sync: keep connections_v2 + slotted secrets in step
+    // with the legacy save. Failures are logged and swallowed — the legacy
+    // path is already persisted, the v2 path is opportunistic.
+    sync_v2_after_save(&state, &conn, &rec, input.password.as_deref(), log.as_ref());
     Ok(rec)
+}
+
+/// Best-effort dual-table sync: if the v2 secret store is installed (i.e.
+/// the app was launched with `CONN_V2` set), upsert the migrated payload
+/// row in `connections_v2` and re-key the legacy password into
+/// `SecretSlot::AuthPassword`. Any failure is logged at warn level and
+/// returned as unit — the user-visible save has already succeeded and
+/// the legacy path is unaffected.
+fn sync_v2_after_save(
+    state: &State<'_, AppState>,
+    sqlite: &rusqlite::Connection,
+    rec: &ConnectionRecord,
+    password: Option<&str>,
+    log: &dyn Logger,
+) {
+    let store = match state.connection_secrets() {
+        Some(s) => s,
+        None => return, // CONN_V2 disabled; nothing to do
+    };
+    if let Err(err) = migration::sync_row_to_v2(sqlite, &*store, rec, password) {
+        log.warn(
+            "v2 sync failed (legacy save succeeded)",
+            logctx! { "connId" => rec.id.clone(), "err" => err.to_string() },
+        );
+    }
 }
 
 #[tauri::command]
@@ -219,13 +249,14 @@ pub fn update_connection(
         log.error("update failed", logctx! { "err" => e.to_string() });
         e.to_string()
     })?;
-    if let Some(pw) = input.password {
+    if let Some(ref pw) = input.password {
         if pw.is_empty() {
             keychain::delete_password(&id, log.as_ref())?;
         } else {
-            keychain::set_password(&id, &pw, log.as_ref())?;
+            keychain::set_password(&id, pw, log.as_ref())?;
         }
     }
+    sync_v2_after_save(&state, &conn, &rec, input.password.as_deref(), log.as_ref());
     Ok(rec)
 }
 

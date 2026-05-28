@@ -1,5 +1,7 @@
 pub mod auth;
+pub mod auth_agent;
 pub mod auth_key;
+pub mod auth_password;
 pub mod config;
 pub mod errors;
 pub mod host_key;

@@ -1,0 +1,7 @@
+{
+  "id": "lc-host-no-auth",
+  "name": "Legacy: host, no auth",
+  "host": "db.example",
+  "port": 27017,
+  "createdAt": "2026-05-02T00:00:00Z"
+}

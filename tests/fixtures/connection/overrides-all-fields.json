@@ -1,0 +1,37 @@
+{
+  "id": "fx-overrides-all-fields",
+  "name": "Fixture: every overrides field populated",
+  "color": "#ff7a00",
+  "target": { "kind": "direct", "host": "all.example", "port": 27017 },
+  "auth": { "kind": "scram", "username": "judy", "authDb": "admin", "mechanism": "SCRAM-SHA-256" },
+  "tls": {
+    "enabled": true,
+    "allowInvalidCerts": true,
+    "allowInvalidHostnames": true,
+    "caFile": "/etc/ssl/ca.pem",
+    "clientCertFile": "/etc/ssl/client.pem"
+  },
+  "overrides": {
+    "intelliShell": {
+      "commandTimeoutMs": 30000,
+      "autoCompleteEnabled": true,
+      "printLimit": 200
+    },
+    "tools": {
+      "mongodumpPath": "/usr/local/bin/mongodump",
+      "mongorestorePath": "/usr/local/bin/mongorestore",
+      "mongoexportPath": "/usr/local/bin/mongoexport",
+      "mongoimportPath": "/usr/local/bin/mongoimport"
+    },
+    "advanced": {
+      "appName": "mongo-lens",
+      "retryWrites": true,
+      "retryReads": false,
+      "compressors": ["snappy", "zlib", "zstd"],
+      "serverSelectionTimeoutMs": 15000,
+      "connectTimeoutMs": 10000,
+      "socketTimeoutMs": 60000
+    }
+  },
+  "createdAt": "2026-05-28T00:00:00Z"
+}

@@ -1,0 +1,14 @@
+{
+  "id": "fx-ssh-agent",
+  "name": "Fixture: SSH agent",
+  "target": { "kind": "direct", "host": "127.0.0.1", "port": 27017 },
+  "auth": { "kind": "none" },
+  "ssh": {
+    "host": "bastion.example",
+    "port": 22,
+    "user": "heidi",
+    "auth": { "kind": "agent" },
+    "knownHostsPolicy": "accept-any"
+  },
+  "createdAt": "2026-05-28T00:00:00Z"
+}

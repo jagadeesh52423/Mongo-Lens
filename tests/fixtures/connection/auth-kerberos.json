@@ -1,0 +1,12 @@
+{
+  "id": "fx-auth-kerberos",
+  "name": "Fixture: Kerberos auth",
+  "target": { "kind": "direct", "host": "kdc.example", "port": 27017 },
+  "auth": {
+    "kind": "kerberos",
+    "principal": "dave@EXAMPLE.COM",
+    "serviceName": "mongodb",
+    "canonicalizeHostName": true
+  },
+  "createdAt": "2026-05-28T00:00:00Z"
+}

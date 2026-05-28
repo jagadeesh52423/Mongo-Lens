@@ -1,0 +1,9 @@
+{
+  "id": "lc-host-scram",
+  "name": "Legacy: host + SCRAM",
+  "host": "db.example",
+  "port": 27017,
+  "username": "alice",
+  "authDb": "myapp",
+  "createdAt": "2026-05-03T00:00:00Z"
+}

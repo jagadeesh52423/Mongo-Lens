@@ -1,0 +1,7 @@
+{
+  "id": "fx-auth-legacy-cr",
+  "name": "Fixture: legacy CR auth",
+  "target": { "kind": "direct", "host": "legacy.example", "port": 27017 },
+  "auth": { "kind": "legacy-cr", "username": "bob", "authDb": "admin" },
+  "createdAt": "2026-05-28T00:00:00Z"
+}

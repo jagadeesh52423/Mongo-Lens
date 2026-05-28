@@ -1,0 +1,7 @@
+{
+  "id": "fx-auth-none",
+  "name": "Fixture: no auth",
+  "target": { "kind": "direct", "host": "localhost", "port": 27017 },
+  "auth": { "kind": "none" },
+  "createdAt": "2026-05-28T00:00:00Z"
+}
