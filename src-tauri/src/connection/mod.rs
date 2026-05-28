@@ -17,5 +17,11 @@ pub mod model;
 #[allow(dead_code)]
 pub mod store;
 
+// Slotted secret storage (KeychainStore + MemStore). Consumed by Task 7
+// (SSH auth flows) and the builder/migration in Tasks 10-11; allow
+// dead_code until those land.
+#[allow(dead_code)]
+pub mod secrets;
+
 #[cfg(test)]
 mod model_contract_tests;
