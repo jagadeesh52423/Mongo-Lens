@@ -30,6 +30,9 @@ export type SecretSlotName =
   | 'aws-secret-key'
   | 'oidc-refresh-token';
 
+/// Alias for ergonomic imports in dialog code.
+export type SecretSlot = SecretSlotName;
+
 export interface SecretInput {
   slot: SecretSlotName;
   value: string;
