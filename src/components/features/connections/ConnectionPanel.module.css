@@ -19,11 +19,6 @@
   border-left: 3px solid transparent;
 }
 
-/* Env color stripe — driven inline via style={{ borderLeftColor }} */
-.rowWithStripe {
-  /* placeholder; actual color set inline from connection.color */
-}
-
 .statusDot {
   color: var(--fg-dim);
 }

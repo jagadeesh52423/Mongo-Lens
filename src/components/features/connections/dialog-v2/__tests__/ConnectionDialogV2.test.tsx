@@ -37,6 +37,6 @@ describe('ConnectionDialogV2', () => {
     const blank: Connection = { ...sample, target: { kind: 'direct', host: '', port: 27017 } };
     render(<ConnectionDialogV2 initial={blank} globals={DEFAULT_GLOBAL_PREFS} onSave={vi.fn()} onCancel={vi.fn()} />);
     expect(screen.getByRole('button', { name: /save/i })).toBeDisabled();
-    expect(screen.getByText(/issues/i)).toBeInTheDocument();
+    expect(screen.getByText(/issue/i)).toBeInTheDocument();
   });
 });

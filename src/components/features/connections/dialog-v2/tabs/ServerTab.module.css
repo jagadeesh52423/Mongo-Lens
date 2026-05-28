@@ -1,0 +1,10 @@
+.radioGroup {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.fieldRow {
+  display: flex;
+  gap: 12px;
+}

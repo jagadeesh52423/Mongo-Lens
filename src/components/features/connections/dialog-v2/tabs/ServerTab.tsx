@@ -1,6 +1,7 @@
 import type { TabFormProps } from './types';
 import type { ConnectionTarget } from '../../../../../connection/model';
 import { FormField } from '../../../../ui/FormField';
+import styles from './ServerTab.module.css';
 
 export function ServerTab({ value, onChange }: TabFormProps) {
   const target = value.target;
@@ -27,7 +28,7 @@ export function ServerTab({ value, onChange }: TabFormProps) {
 
   return (
     <div>
-      <div role="radiogroup" aria-label="Target type" style={{ display: 'flex', gap: 16, marginBottom: 12 }}>
+      <div role="radiogroup" aria-label="Target type" className={styles.radioGroup}>
         <label>
           <input type="radio" name="target-kind" checked={target.kind === 'direct'} onChange={() => switchKind('direct')} />
           Direct
@@ -39,7 +40,7 @@ export function ServerTab({ value, onChange }: TabFormProps) {
       </div>
 
       {target.kind === 'direct' && (
-        <div style={{ display: 'flex', gap: 12 }}>
+        <div className={styles.fieldRow}>
           <FormField>
             <FormField.Label htmlFor="srv-host">Host</FormField.Label>
             <FormField.Input

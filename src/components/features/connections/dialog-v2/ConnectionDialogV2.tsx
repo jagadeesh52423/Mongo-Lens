@@ -94,7 +94,11 @@ export function ConnectionDialogV2({ initial, globals, onSave, onCancel }: Props
 
       <div className={styles.footer}>
         <div className={styles.issues}>
-          {issues.length > 0 && <span>⚠ {issues.length} issues across tabs</span>}
+          {issues.length > 0 && (
+            <span>
+              ⚠ {issues.length === 1 ? '1 issue' : `${issues.length} issues`} across tabs
+            </span>
+          )}
         </div>
         <div className={styles.actions}>
           <Button onClick={onCancel}>Cancel</Button>
