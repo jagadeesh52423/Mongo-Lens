@@ -533,14 +533,29 @@ pub fn add_socks5(conn: &mut Connection, host: &str, port: u16) {
 pub async fn ping_via_builder(
     resolved: &mongo_lens::connection::builder::ResolvedConnection<'_>,
 ) -> Result<Duration, String> {
-    use mongo_lens::connection::builder::build_client_options;
+    use mongo_lens::connection::builder::{build_client_options, BuildOutcome};
     use mongodb::bson::doc;
     use mongodb::Client;
 
     let log = null_log();
-    let (opts, tunnel) = build_client_options(resolved, &fast_prefs(), log)
+    // Integration tests don't exercise the interactive prompt flow — any
+    // PassphraseRequired / HostKeyUnknown outcome is a bug in the test
+    // setup, so panic with a clear message rather than dropping the
+    // outcome silently.
+    let (opts, tunnel) = match build_client_options(resolved, &fast_prefs(), false, log)
         .await
-        .map_err(|e| format!("build_client_options stage={:?}: {}", e.stage, e.error))?;
+        .map_err(|e| format!("build_client_options stage={:?}: {}", e.stage, e.error))?
+    {
+        BuildOutcome::Ready { options, tunnel } => (options, tunnel),
+        BuildOutcome::PassphraseRequired => {
+            return Err("unexpected BuildOutcome::PassphraseRequired in integration test".into());
+        }
+        BuildOutcome::HostKeyUnknown { fingerprint, .. } => {
+            return Err(format!(
+                "unexpected BuildOutcome::HostKeyUnknown in integration test (fp: {fingerprint})"
+            ));
+        }
+    };
 
     let client = Client::with_options(opts).map_err(|e| format!("Client::with_options: {e}"))?;
     let started = Instant::now();

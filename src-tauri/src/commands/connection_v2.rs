@@ -24,7 +24,7 @@
 // variant there and no callers update.
 
 use crate::connection::builder::{
-    build_client_options, BuildError, BuildStage, ResolvedConnection,
+    build_client_options, BuildError, BuildOutcome, BuildStage, ResolvedConnection,
 };
 use crate::connection::model::Connection;
 use crate::connection::secrets::{SecretSlot, SecretStore};
@@ -308,20 +308,56 @@ pub async fn connections_v2_test(
     // 2. Project the flat secret list onto the typed `ResolvedConnection`.
     let resolved = build_resolved(&input.connection, &input.secrets);
 
-    // 3. Build ClientOptions + tunnel handle. Builder errors map straight
-    //    onto Fail. If the builder failed mid-way through SSH the handle
-    //    is dropped by the builder before returning Err — nothing to
-    //    close here.
-    let (opts, tunnel) = match build_client_options(&resolved, &effective, log.clone()).await {
-        Ok(pair) => pair,
-        Err(BuildError { stage, error }) => {
-            log.info(
-                "connections_v2_test: build failed",
-                logctx! { "stage" => format!("{stage:?}"), "err" => error.clone() },
-            );
-            return Ok(TestResultV2::failure(stage, error));
-        }
-    };
+    // 3. Build ClientOptions + tunnel handle. Three success-shaped outcomes:
+    //    Ready (proceed), PassphraseRequired (no retry loop here — fold
+    //    into Fail), HostKeyUnknown (likewise). Genuine BuildError maps
+    //    straight to Fail.
+    //
+    //    Test command is one-shot, not the interactive connect flow, so a
+    //    user-input prompt can't be answered. We surface both as SSH-stage
+    //    failures with a hint. accept_host_key is hard-coded false because
+    //    test doesn't have a retry round-trip — if the dialog wants live
+    //    confirmation, that's the connect flow's job.
+    let (opts, tunnel) =
+        match build_client_options(&resolved, &effective, false, log.clone()).await {
+            Ok(BuildOutcome::Ready { options, tunnel }) => (options, tunnel),
+            Ok(BuildOutcome::PassphraseRequired) => {
+                log.info(
+                    "connections_v2_test: passphrase required",
+                    logctx! { "connId" => input.connection.id.clone() },
+                );
+                return Ok(TestResultV2::failure(
+                    BuildStage::Ssh,
+                    "SSH key is encrypted — provide the passphrase and retry.",
+                ));
+            }
+            Ok(BuildOutcome::HostKeyUnknown {
+                host,
+                port,
+                algorithm,
+                fingerprint,
+            }) => {
+                log.info(
+                    "connections_v2_test: host key unknown",
+                    logctx! { "host" => host.clone(), "alg" => algorithm.clone() },
+                );
+                return Ok(TestResultV2::failure(
+                    BuildStage::Ssh,
+                    format!(
+                        "SSH host key for {host}:{port} is not in any known_hosts store \
+                         ({algorithm} fingerprint: {fingerprint}). Connect from the \
+                         dialog and confirm the fingerprint to add it."
+                    ),
+                ));
+            }
+            Err(BuildError { stage, error }) => {
+                log.info(
+                    "connections_v2_test: build failed",
+                    logctx! { "stage" => format!("{stage:?}"), "err" => error.clone() },
+                );
+                return Ok(TestResultV2::failure(stage, error));
+            }
+        };
 
     // 4. Construct the client. ClientOptions::parse already validated the
     //    URI; the only failure mode here is the driver rejecting our
