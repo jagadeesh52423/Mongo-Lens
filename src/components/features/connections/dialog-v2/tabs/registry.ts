@@ -1,5 +1,6 @@
 import { ServerTab } from './ServerTab';
-import { validateTarget } from '../../../../../connection/validation';
+import { AuthTab } from './AuthTab';
+import { validateTarget, validateAuth } from '../../../../../connection/validation';
 import type { TabSpec } from './types';
 
 /**
@@ -15,5 +16,12 @@ export const TABS: TabSpec[] = [
     group: 'transport',
     Form: ServerTab,
     validate: (c) => validateTarget(c.target),
+  },
+  {
+    id: 'auth',
+    label: 'Auth',
+    group: 'transport',
+    Form: AuthTab,
+    validate: (c) => validateAuth(c.auth),
   },
 ];
