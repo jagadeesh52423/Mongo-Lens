@@ -6,6 +6,27 @@ import styles from './ConnectionTree.module.css';
 
 const TYPE_TO_SEARCH_RESET_MS = 600;
 
+function DbIcon() {
+  return (
+    <svg
+      width="11"
+      height="11"
+      viewBox="0 0 12 12"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <ellipse cx="6" cy="2.5" rx="4" ry="1.3" />
+      <path d="M2 2.5v7c0 .72 1.79 1.3 4 1.3s4-.58 4-1.3v-7" />
+      <path d="M2 5.2c0 .72 1.79 1.3 4 1.3s4-.58 4-1.3" />
+      <path d="M2 7.7c0 .72 1.79 1.3 4 1.3s4-.58 4-1.3" />
+    </svg>
+  );
+}
+
 interface Props {
   connectionId: string;
   onOpenCollection: (database: string, collection: string) => void;
@@ -124,32 +145,37 @@ export function ConnectionTree({ connectionId, onOpenCollection }: Props) {
             >
               {db}
             </ListRow>
-            {expanded[db] && cols && cols.map((c) => {
-              const isSelected = selected?.db === db && selected?.col === c.name;
-              return (
-                <div
-                  key={c.name}
-                  ref={(el) => {
-                    rowRefs.current.set(`${db}::${c.name}`, el);
-                  }}
-                >
-                  <ListRow
-                    indent={1}
-                    selected={isSelected}
-                    className={isSelected ? 'list-row-focused' : undefined}
-                    onClick={() => {
-                      setActiveDb(db);
-                      setSelected({ db, col: c.name });
-                      bufferRef.current = '';
-                      wrapperRef.current?.focus();
-                    }}
-                    onDoubleClick={() => onOpenCollection(db, c.name)}
-                  >
-                    {c.name}
-                  </ListRow>
-                </div>
-              );
-            })}
+            {expanded[db] && cols && (
+              <div className={styles.children}>
+                {cols.map((c) => {
+                  const isSelected = selected?.db === db && selected?.col === c.name;
+                  return (
+                    <div
+                      key={c.name}
+                      ref={(el) => {
+                        rowRefs.current.set(`${db}::${c.name}`, el);
+                      }}
+                    >
+                      <ListRow
+                        icon={<span className={styles.colIcon}><DbIcon /></span>}
+                        indent={2}
+                        selected={isSelected}
+                        className={isSelected ? 'list-row-focused' : undefined}
+                        onClick={() => {
+                          setActiveDb(db);
+                          setSelected({ db, col: c.name });
+                          bufferRef.current = '';
+                          wrapperRef.current?.focus();
+                        }}
+                        onDoubleClick={() => onOpenCollection(db, c.name)}
+                      >
+                        {c.name}
+                      </ListRow>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         );
       })}

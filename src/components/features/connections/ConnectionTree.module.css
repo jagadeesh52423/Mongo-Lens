@@ -20,6 +20,31 @@
   color: var(--fg-dim);
 }
 
+.colIcon {
+  display: inline-flex;
+  align-items: center;
+  width: 14px;
+  color: var(--accent-green);
+  opacity: 0.85;
+}
+
+/* Tree guide line: thin vertical rule under each expanded database,
+   anchored to the centre of the parent caret column. */
+.children {
+  position: relative;
+}
+
+.children::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--space-2) + 7px);
+  width: 1px;
+  background: var(--border);
+  pointer-events: none;
+}
+
 /* Stronger highlight when the tree wrapper is keyboard-focused so the
    selected collection is clearly distinguishable from a mouse hover. */
 .wrap:focus :global(.list-row-focused) {
