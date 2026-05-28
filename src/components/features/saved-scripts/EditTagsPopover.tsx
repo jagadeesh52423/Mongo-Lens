@@ -48,9 +48,16 @@ export function EditTagsPopover({ initial, allTags, onSave, onCancel }: Props) {
   }
 
   async function save() {
+    // Flush any in-progress text in the input so users who click Save without
+    // first pressing Enter don't silently lose their typed tag.
+    const pending = input.trim();
+    const final =
+      pending && !tags.some((t) => t.toLowerCase() === pending.toLowerCase())
+        ? [...tags, pending]
+        : tags;
     setBusy(true);
     try {
-      await onSave(tags);
+      await onSave(final);
     } finally {
       setBusy(false);
     }

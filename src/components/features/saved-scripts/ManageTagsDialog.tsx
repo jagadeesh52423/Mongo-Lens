@@ -41,6 +41,7 @@ export function ManageTagsDialog({ scripts, onClose, onMutated }: Props) {
       setEditing(null);
       return;
     }
+    setErr(null);
     try {
       await renameTag(old, next);
       setEditing(null);
@@ -51,6 +52,7 @@ export function ManageTagsDialog({ scripts, onClose, onMutated }: Props) {
   }
 
   async function commitDelete(tag: string) {
+    setErr(null);
     try {
       await deleteTag(tag);
       setConfirmingDelete(null);

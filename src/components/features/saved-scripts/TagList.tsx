@@ -1,4 +1,4 @@
-import { MouseEvent } from 'react';
+import { KeyboardEvent, MouseEvent } from 'react';
 import styles from './TagList.module.css';
 
 interface Props {
@@ -27,6 +27,19 @@ export function TagList({ tags, onClick, onRemove, selectedTag }: Props) {
                 ? (e: MouseEvent) => {
                     e.stopPropagation();
                     onClick!(tag);
+                  }
+                : undefined
+            }
+            onKeyDown={
+              interactive
+                ? (e: KeyboardEvent) => {
+                    // Enter and Space activate the chip, matching native
+                    // button semantics for elements with role="button".
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      onClick!(tag);
+                    }
                   }
                 : undefined
             }

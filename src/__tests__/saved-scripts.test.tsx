@@ -197,4 +197,35 @@ describe('SavedScriptsPanel', () => {
       expect(updateCall![1].tags).toEqual(['prod', 'newtag']);
     });
   });
+
+  it('Edit-tags popover flushes pending input on Save without requiring Enter', async () => {
+    invokeMock.mockResolvedValueOnce([
+      { id: '1', name: 'rowA', content: 'db.x.find({})', tags: ['prod'], createdAt: 't' },
+    ]);
+    // updateScript call
+    invokeMock.mockResolvedValueOnce({
+      id: '1', name: 'rowA', content: 'db.x.find({})', tags: ['prod', 'pending'], createdAt: 't',
+    });
+    // reload after save
+    invokeMock.mockResolvedValueOnce([
+      { id: '1', name: 'rowA', content: 'db.x.find({})', tags: ['prod', 'pending'], createdAt: 't' },
+    ]);
+    const user = userEvent.setup();
+    render(<SavedScriptsPanel />);
+    await waitFor(() => expect(screen.getByText('rowA')).toBeInTheDocument());
+
+    await user.click(screen.getByLabelText('Edit tags for rowA'));
+    const popover = await screen.findByRole('dialog', { name: /Edit tags/i });
+    const input = popover.querySelector('input') as HTMLInputElement;
+
+    // Type a tag but do NOT press Enter — go straight to Save.
+    await user.type(input, 'pending');
+    await user.click(screen.getByRole('button', { name: /^Save$/i }));
+
+    await waitFor(() => {
+      const updateCall = invokeMock.mock.calls.find((c) => c[0] === 'update_script');
+      expect(updateCall).toBeTruthy();
+      expect(updateCall![1].tags).toEqual(['prod', 'pending']);
+    });
+  });
 });
