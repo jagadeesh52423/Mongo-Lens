@@ -112,6 +112,38 @@ pub fn delete_script(state: State<'_, AppState>, id: String) -> Result<(), Strin
 }
 
 #[tauri::command]
+pub fn rename_tag(
+    state: State<'_, AppState>,
+    old: String,
+    new: String,
+) -> Result<usize, String> {
+    let log = state.logger.child(logctx! { "logger" => "commands.saved_script" });
+    log.info("rename_tag", logctx! { "old" => old.clone(), "new" => new.clone() });
+    let conn = state.open_db().map_err(|e| {
+        log.error("open_db failed", logctx! { "err" => e.to_string() });
+        e.to_string()
+    })?;
+    db::scripts::rename_tag_everywhere(&conn, &old, &new).map_err(|e| {
+        log.error("rename_tag failed", logctx! { "err" => e.to_string() });
+        e.to_string()
+    })
+}
+
+#[tauri::command]
+pub fn delete_tag(state: State<'_, AppState>, tag: String) -> Result<usize, String> {
+    let log = state.logger.child(logctx! { "logger" => "commands.saved_script" });
+    log.info("delete_tag", logctx! { "tag" => tag.clone() });
+    let conn = state.open_db().map_err(|e| {
+        log.error("open_db failed", logctx! { "err" => e.to_string() });
+        e.to_string()
+    })?;
+    db::scripts::delete_tag_everywhere(&conn, &tag).map_err(|e| {
+        log.error("delete_tag failed", logctx! { "err" => e.to_string() });
+        e.to_string()
+    })
+}
+
+#[tauri::command]
 pub fn touch_script(state: State<'_, AppState>, id: String) -> Result<(), String> {
     let log = state.logger.child(logctx! {
         "logger" => "commands.saved_script",
