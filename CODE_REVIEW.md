@@ -978,3 +978,301 @@ One subtle cosmetic change: `input.password` is now bound by reference (`if let 
 **Stage 1: PASS · Stage 2: PASS · 0 blocking · 4 minor findings.**
 
 The wire-name fix (5994f34) closes the cross-task coordination concern raised in Task 6. The Phase-2 hardening items now live as tracked docstrings in `secrets.rs`. Task 11 wires the legacy→v2 sync end-to-end without touching a single legacy code path. Task 12 (IPC + frontend bindings) is the next unlock; Task 13 is manual QA.
+
+---
+
+## Task 10 Review (commit 740e10c)
+
+**Files added/modified:** `src-tauri/src/connection/builder.rs` (new, 1468 lines), `src-tauri/src/connection/mod.rs` (+`pub mod builder;`)
+**Plan ref:** §Task 10
+**Commit chain context:** 7bcb8e4 → 5994f34 → 72687fe → **740e10c** (verified parent pointers; 740e10c is the latest, Task 11's commits land before).
+
+> **Build verification (isolated):** `git worktree add /tmp/task10-review 740e10c` → `cargo test --bin mongo-lens connection::builder` → **25/25 PASS**. `cargo build` clean (no warnings). At this commit, Cargo.toml still has `mongodb = "3"` with no features list (the `socks5-proxy` enablement is in coder-rust-net's working tree, will land with Task 12).
+
+### Stage 1 — Spec compliance: **PASS**
+
+#### All 8 AuthMode variants wired to mongodb v3 Credential + AuthMechanism
+
+| AuthMode variant     | AuthMechanism      | source DB     | notes                                                          |
+|----------------------|--------------------|---------------|----------------------------------------------------------------|
+| `None`               | (no credential)    | —             | ✓                                                              |
+| `Scram { Auto }`     | `None` (negotiate) | `auth_db`     | ✓ driver picks SHA-256→SHA-1 fallback                          |
+| `Scram { SHA-1 }`    | `ScramSha1`        | `auth_db`     | ✓                                                              |
+| `Scram { SHA-256 }`  | `ScramSha256`      | `auth_db`     | ✓                                                              |
+| `LegacyCr`           | `MongoDbCr`        | `auth_db`     | ✓ documented to surface as "mechanism not supported" at Ping   |
+| `X509`               | `MongoDbX509`      | `$external`   | ✓ username intentionally `None` (driver lifts subject DN)      |
+| `Ldap`               | `Plain`            | `$external`   | ✓                                                              |
+| `Kerberos`           | `Gssapi`           | `$external`   | ✓ mechanism_properties = SERVICE_NAME, CANONICALIZE_HOST_NAME  |
+| `AwsIam`             | `MongoDbAws`       | `$external`   | ✓ mechanism_properties.AWS_SESSION_TOKEN when present          |
+| `Oidc`               | `MongoDbOidc`      | `$external`   | ✓ mechanism_properties.ENVIRONMENT = provider_name             |
+
+**Source-DB defaults exactly per plan**: `$external` for X509/LDAP/Kerberos/AwsIam/OIDC (5 modes); user-supplied `auth_db` for SCRAM/LegacyCr (2 modes); none for AuthMode::None.
+
+#### Kerberos + AWS IAM "not compiled in" errors
+
+Both produce explicit `BuildStage::Auth` errors with a rebuild hint when their `mongodb` features are off:
+
+```rust
+// Kerberos, line ~582-589
+#[cfg(not(feature = "gssapi-auth"))]
+{ let _ = (principal, service_name, canonicalize_host_name);
+  Err(BuildError::auth(
+      "Kerberos (GSSAPI) authentication is not compiled into this build. \
+       Rebuild the app with `mongodb` crate feature `gssapi-auth` enabled.")) }
+
+// AWS IAM, line ~630-637  — same shape
+```
+
+No silent skip. Tests `kerberos_without_feature_returns_auth_stage_error` and `aws_iam_without_feature_returns_auth_stage_error` confirm at unit-test level (both run in the current build since the features are off).
+
+#### `BuildStage` enum + `ResolvedConnection` secret discipline
+
+- `BuildStage { Ssh, Tls, Auth, Ping }` with `#[serde(rename_all = "lowercase")]`. Wire format `"ssh"|"tls"|"auth"|"ping"`. Doc comment makes the Ping/IPC-layer-only contract explicit. ✓
+- `BuildError { stage: BuildStage, error: String }` with `#[derive(Serialize)]`. Flat string rationale documented inline.
+- **`ResolvedConnection<'a>` verified to have NO derives** — direct source read at line 134, zero `#[derive(...)]` above the struct. The doc comment explicitly states: "Intentionally not `Debug`, not `Serialize`, not `Clone` — secrets must not leak via logs, IPC traces, or accidental cloning into long-lived state." Cannot accidentally pretty-print, marshal, or duplicate a credential bag.
+
+#### 25 unit tests pass without connecting
+
+Verified `cargo test --bin mongo-lens connection::builder` → **25/25 PASS** at 740e10c. Test breakdown:
+- URI synthesis (3): bare / replica_set / read_pref+direct
+- URI passthrough (1)
+- SCRAM (2): explicit mechanism + Auto-negotiate
+- LDAP / X.509 / OIDC / None / LegacyCr (5)
+- Feature-gated auth (2): Kerberos-without-feature + AWS-without-feature both unit-tested
+- TLS (3): disabled, options propagate, allow_invalid_hostnames-feature-gated
+- Advanced prefs propagate (1) — uses real overrides resolver from Task 9
+- Compressors skipped-when-feature-off (1)
+- Proxy (4): HTTP-reject, SOCKS4-reject, SOCKS5-without-feature, SOCKS5-with-feature (cfg-gated)
+- SSH (2): handshake failure → SSH stage, missing-password-secret → SSH stage
+- Serde guards (2): `BuildError` lowercase stage, `BuildStage::Ping` lowercase
+
+The Kerberos-with-feature, AWS-with-feature, and SOCKS5-with-feature variants are `cfg(feature=…)`-gated; they don't run at this Cargo.toml's feature set. **28 test functions exist in source; 25 compile/run in this build configuration.**
+
+No scope creep — only `builder.rs` + one line in `mod.rs`. No IPC wiring, no AppState changes, no Cargo.toml feature flips (team-lead-mandated scope discipline).
+
+### Stage 2 — Code quality: **PASS (with team-lead-flagged caveats acknowledged)**
+
+I judge each of the team-lead's five caveats:
+
+#### 1. **PHASE-1 LEAK** — `std::mem::forget(handle)` at line 273
+
+**Verdict: acceptable for Phase 1 dark mode; MUST be fixed in Task 12.**
+
+The leak is intentional and documented in two places: at the leak site itself (line 269-273: "PHASE-1 LEAK: keep the handle alive for the lifetime of the returned ClientOptions by forgetting it here. The follow-up (Task 12) will hand the handle to the caller alongside the options so it can be dropped when the client shuts down.") AND in the `build_client_options` doc comment (line 186-189: "**In the current version of this builder, opening the SSH tunnel here is therefore opportunistic — the tunnel is leaked at the end of the function.**").
+
+The leak occurs because the plan-mandated signature returns `ClientOptions` alone — no room for a handle without changing the public API. Phase 1 is dark, so the only consumer is internal test commands; users aren't exposed.
+
+**Hard requirement for Task 12 review** (will track in that review when it lands): Task 12 must either
+- (a) hand the `TunnelHandle` back alongside the options (e.g., return `(ClientOptions, Option<TunnelHandle>)`); or
+- (b) open the SSH tunnel in the IPC layer and pass only the bound `SocketAddr` to the builder, removing the leak path entirely.
+
+Either way, the `std::mem::forget` line MUST be gone after Task 12.
+
+#### 2. **`socks5-proxy` Cargo feature still not enabled** at 740e10c
+
+**Verdict: confirmed; consistent with the Task 8 finding and the team-lead's plan to bundle the feature flip with Task 12.**
+
+At this commit, valid SOCKS5 connections fall through to line 829-836:
+```rust
+#[cfg(not(feature = "socks5-proxy"))]
+{ ... return Err(BuildError::tls(
+    "SOCKS5 proxy is not compiled into this build. \
+     Rebuild the app with `mongodb` crate feature `socks5-proxy` enabled.")); }
+```
+Test `socks5_without_feature_returns_tls_stage_error` covers this path. Coder kept scope tight to builder.rs + mod.rs as instructed. Good discipline.
+
+#### 3. **Proxy errors → `BuildStage::Tls`** (no Proxy stage in the 4-enum)
+
+**Verdict: defensible. Document accepted.**
+
+The line at 807-810 says it best: "// validate_for_driver already produces a user-facing message; map any failure to BuildStage::Tls (transport-layer setup)." The UI's TLS tab is also where the proxy form section lives, so error routing lands the user in the right place. Module-doc table (line 32-37) makes the mapping explicit for future maintainers.
+
+#### 4. **Compressors degrade silently with warning logs**
+
+**Verdict: defensible asymmetry. Documented.**
+
+Module doc at line 39-42 lays out the rationale: "never skip a configured feature silently — except for compressors, where the cost of failing the whole connection because a perf hint isn't available outweighs the benefit." Each unsupported codec gets one `log.warn` call per codec via `map_compressors`. The non-feature path (lines 779-795) still iterates the requested codecs to emit warnings before returning an empty `Vec<()>` stub.
+
+#### 5. **`#![allow(unexpected_cfgs)]`** at top of builder.rs
+
+**Verdict: acceptable for Phase 1. Phase 2 should redeclare features in Cargo.toml.**
+
+Lines 1-7 document the lint suppression's rationale. The attribute is **module-scoped** (`#![...]` inside the file), not crate-level — scope is minimal. The cleaner Phase 2 approach is to add a `[features]` table to `src-tauri/Cargo.toml` that re-exports the gated mongodb features:
+
+```toml
+[features]
+socks5-proxy = ["mongodb/socks5-proxy"]
+gssapi-auth  = ["mongodb/gssapi-auth"]
+aws-auth     = ["mongodb/aws-auth"]
+zstd-compression   = ["mongodb/zstd-compression"]
+zlib-compression   = ["mongodb/zlib-compression"]
+snappy-compression = ["mongodb/snappy-compression"]
+openssl-tls  = ["mongodb/openssl-tls"]
+```
+
+With those declared, `cfg(feature = "…")` checks in builder.rs become first-class workspace features and the lint-allow can be removed.
+
+#### Additional finding (not in team-lead's caveat list)
+
+**Stale slot reference in `aws_iam_credential` error message** (line ~615-618):
+
+```rust
+let secret = secret_key.ok_or_else(|| {
+    BuildError::auth(
+        "AWS IAM auth: secret access key is required when useEnvCreds=false \
+         (keychain slot AwsSessionToken / via ResolvedConnection.aws_secret_key)",
+    )
+})?;
+```
+
+The slot name `AwsSessionToken` is the OLD name from before commit 5994f34 (which renamed it to `AwsSecretKey`). Functionally harmless — the field `resolved.aws_secret_key` itself is correct, so the credential resolves properly — but the error message is misleading because no such slot exists anymore. **Same class of stale reference that commit 72687fe cleaned up for `MongoPassword → AuthPassword`.** Suggested fix: tiny doc-only commit changing the error string to `"(keychain slot AwsSecretKey / via ResolvedConnection.aws_secret_key)"`.
+
+#### Other quality observations (positive)
+
+- **Excellent module documentation** — full feature-gating table, extension contract, BuildStage usage notes, asymmetry rationale for compressors. Reads as a how-to-extend guide.
+- **`EXTENSION POINT` comment** at line 465 marks the auth-dispatch match for future variants.
+- **Defensive anchors** — `_doc_import_anchor()` and `_server_address_anchor()` keep imports live when both feature gates are off. Hacky but principled; documented inline.
+- **`build_ssh_secrets`** correctly bridges resolved secrets → `ResolvedSshSecrets` with the same secret-missing error vocabulary as `connection::tunnel::resolve_auth`. Consistent UX.
+- **URI rewrite via `ssh::uri::rewrite_uri`** — reuses the legacy module's single source of truth for SRV/multi-seed rejection. No duplicated parsing logic.
+
+### Result
+
+**Stage 1: PASS — every team-lead-specified check verified.**
+**Stage 2: PASS — all 5 flagged caveats correctly characterized; 1 additional stale-reference finding.**
+
+**0 blocking issues for Task 10 in isolation.**
+
+**Hard requirements for Task 12 review:**
+1. **PHASE-1 LEAK must be removed.** `std::mem::forget` either disappears (handle moves out via signature change or moved to IPC ownership) or the function refactors to never open the tunnel itself.
+2. **`socks5-proxy` Cargo feature enabled** in Cargo.toml (matches Task 8 finding).
+3. Stale `AwsSessionToken` reference in builder.rs:617 should be tidied up alongside Task 12's bigger touchup — costs nothing.
+
+**Phase 2 hardening (non-blocking):** declare the gated mongodb features as workspace features in `src-tauri/Cargo.toml` so `#![allow(unexpected_cfgs)]` can come off.
+
+---
+
+## Task 12 Review (commits bc2ff80 + e1ac370 + 8baf4cd)
+
+**Files:**
+- bc2ff80: `src-tauri/src/commands/connection_v2.rs` (new, 562 lines), `src-tauri/src/commands/prefs.rs` (new, 97 lines), `src-tauri/src/commands/mod.rs` (+module registrations), `src-tauri/src/main.rs` (CONN_V2 gating + handler-list split), `src/connection/ipc.ts` (new, 82 lines), `src/connection/__tests__/ipc.test.ts` (new, 144 lines)
+- e1ac370: `src-tauri/Cargo.toml` (`mongodb = "3"` → `{ version = "3", features = ["socks5-proxy"] }`), `src-tauri/Cargo.lock`
+- 8baf4cd: `src-tauri/src/connection/builder.rs` (removes `std::mem::forget`, returns `(ClientOptions, Option<TunnelHandle>)`), `src-tauri/src/commands/connection_v2.rs` (owns + closes the tunnel on every exit path), `src-tauri/src/connection/mod.rs` (7 module-level `#[allow(dead_code)]` swept), `src-tauri/src/connection/proxy.rs`, `src-tauri/src/connection/secrets.rs`, `src-tauri/src/ssh/tunnel.rs` (TunnelHandle derives Debug + per-item allow rationale)
+
+**Plan ref:** §Task 12 + cross-task hard requirements from Task 10 review.
+
+> **Build verification (isolated):** `git worktree add /tmp/task12-review 8baf4cd`. `cargo test --bin mongo-lens connection::` → **92/92 PASS**; `commands::connection_v2` → **8/8 PASS**; `commands::` (all) → **12/12 PASS**; `prefs::` → **14/14 PASS**. `cargo build` → **0 warnings**. Full suite: 215 passed, 8 failing (pre-existing keychain mutex-poison, unrelated to this work). Live worktree: `npx vitest run src/connection/__tests__/ipc.test.ts` → **9/9 PASS**.
+
+### Hard requirements from Task 10 review — ALL MET
+
+#### 1. ✅ `std::mem::forget` removed (PHASE-1 LEAK fix)
+
+- `build_client_options` signature now returns `Result<(ClientOptions, Option<TunnelHandle>), BuildError>`. `open_ssh_if_configured` returns the live `TunnelHandle` (callers derive `.local_addr` themselves). The `std::mem::forget` line is gone.
+- `connections_v2_test` takes ownership of the returned tunnel and runs the tear-down sequence — **`client.shutdown().await` THEN `tunnel.close().await`** — on every exit path:
+  - Success (hello returned `Ok`): tear-down then `Ok(TestResultV2::success)`.
+  - Hello failure: tear-down then `Ok(TestResultV2::failure(Ping, …))`.
+  - Client init failure (`Client::with_options`): close tunnel inline before returning `Ok(TestResultV2::failure(Tls, …))`.
+- Order matches `main.rs::on-window-close`: pool first so no in-flight queries hit a dead tunnel. Documented inline.
+- 14 builder test sites updated to `let (opts, _tunnel) = build_client_options(...)`. `TunnelHandle` now derives `Debug` to keep `Result::unwrap_err()` compilable.
+
+#### 2. ✅ `mongodb` `socks5-proxy` feature enabled in Cargo.toml
+
+```toml
+-mongodb = "3"
++mongodb = { version = "3", features = ["socks5-proxy"] }
+```
+
+`Cargo.lock` updated. e1ac370 is a 2-line build commit — minimal blast radius.
+
+#### 3. ✅ Stale `AwsSessionToken` doc-string fixed
+
+Verified at builder.rs:605: now reads `"(keychain slot AwsSecretKey / via ResolvedConnection.aws_secret_key)"` (was `AwsSessionToken`). Matches the slot renamed in 5994f34.
+
+### Stage 1 — Spec compliance: **PASS**
+
+#### IPC surface shape
+
+| Command                       | Wire shape                                         | Notes                                                |
+|-------------------------------|----------------------------------------------------|------------------------------------------------------|
+| `connections_v2_list`         | `() → Vec<Connection>`                             | Reads `connections_v2`, sorted by name              |
+| `connections_v2_save`         | `(input: SaveInput) → Connection`                  | Rejects unknown slot strings up-front (see below)   |
+| `connections_v2_delete`       | `(id: String) → ()`                                | store::delete + best-effort secrets.delete_all_for  |
+| `connections_v2_test`         | `(input: SaveInput) → TestResultV2`                | Tunnel-owning, hello round-trip                     |
+| `prefs_get`                   | `() → GlobalPrefs`                                 | Returns Default on first run                        |
+| `prefs_set`                   | `(prefs: GlobalPrefs) → ()`                        | Sync flush via `store.save()?`                       |
+| `prefs_resolve_effective`     | `(connectionId: String) → EffectivePrefs`          | Errors on unknown id (not silent)                   |
+
+All wire keys camelCase via `#[serde(rename_all = "camelCase")]` on `SecretInput` and `SaveInput`. The TS `ipc.ts` types mirror exactly.
+
+#### CONN_V2 gating
+
+Verified in `main.rs`:
+- `let conn_v2_enabled = std::env::var("CONN_V2").is_ok();` resolved **once** at boot, then used by both the `setup()` hook (`bootstrap_conn_v2` call) and the `invoke_handler` branch — they cannot disagree mid-process.
+- `tauri::generate_handler!` is a compile-time macro, so coder uses two pre-built handler lists at runtime — the v1 list is registered unconditionally, the v1+v2+prefs list when CONN_V2 is set. The v1 portion of both lists is byte-identical (visual confirmation of both branches in the diff).
+- **Old dialog remains fully functional regardless of CONN_V2** — v1 commands (`commands::connection::*`, `commands::collection::*`, etc.) appear in both branches.
+
+#### `TestResultV2` wire format
+
+```rust
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub enum TestResultV2 {
+    Ok(TestResultOk),
+    Fail(TestResultFail),
+}
+```
+
+with both variants carrying an explicit `ok: bool` field. Serializes as `{"ok": true, "serverInfo": …}` / `{"ok": false, "stage": "ssh|tls|auth|ping", "error": …}` — exactly the TS discriminated union shape (`{ ok: true; serverInfo: unknown } | { ok: false; stage: BuildStage; error: string }`).
+
+**Deviation from plan: AGREE WITH CODER, plan was wrong.** If the coder had used `#[serde(tag = "ok", rename_all = ...)]` per the plan's literal snippet, serde would have emitted `ok` as a **string discriminator** (`"true"` / `"false"`), incompatible with the TS `ok: true | false` boolean literal type. The untagged-enum-with-explicit-bool approach is the only way to produce a JSON boolean. Tests `test_result_ok_serializes_with_boolean_ok_and_server_info` and `test_result_fail_serializes_with_boolean_ok_and_lowercase_stage` explicitly assert `value["ok"] == Value::Bool(true|false)` — anchored against future drift.
+
+#### Slot-string policy asymmetry
+
+- `connections_v2_save` (line 198-206): rejects unknown slot strings up-front with `"unknown secret slot: {slot}"`. Rationale: silently dropping a secret on save would surprise the user later when the connection fails to authenticate.
+- `connections_v2_test` (build_resolved, line 151-156): silently ignores unknown slot strings. Rationale: a typo in one slot shouldn't block validating the rest of the form.
+
+Defensible asymmetry; both call sites have explicit inline comments explaining the choice. **AGREE.**
+
+#### `prefs_resolve_effective` unknown-id behaviour
+
+Line 84-91: `conn_store::get(&db, &connectionId)?.ok_or_else(|| format!("connection not found: {connectionId}"))`. The frontend uses this lookup to populate per-connection UI; a silently-empty response would mask a stale connection id. **AGREE — correct UX.**
+
+#### `#[allow(dead_code)]` sweep
+
+7 module-level allows removed from `connection/mod.rs`:
+- `pub mod model;`, `pub mod store;`, `pub mod secrets;`, `pub mod tunnel;`, `pub mod proxy;`, `pub mod migration;`, `pub mod builder;`
+- All 7 modules now have at least one IPC consumer wired through, so the warning would be a false positive.
+
+Targeted per-item allows applied with rationale comments on the genuinely dead-in-bin items:
+- `MemStore` — test mock (still useful as a public type for downstream tests)
+- `wire_key` — only used by `MemStore` + tests (trait extension point)
+- `TAG_SIZE`, `aead_open` — read path not yet exercised by Phase 1 IPC (only `aead_seal` is called via `set`)
+- `SecretStore::{get,delete}` — trait extension points for non-FileEncryptedStore backends
+- `ResolvedProxy` — carrier shape used by builder internally; not yet a public API
+
+Surgical, well-justified. No blanket suppressions.
+
+### Stage 2 — Code quality: **PASS**
+
+- **Tunnel teardown sequence** is documented at line 356-359 of `connection_v2.rs`: "Tear-down runs on every exit path: shut down the MongoDB client, then close the tunnel (in that order — pool first so no in-flight queries hit a dead tunnel, matching the on-window-close policy in `main.rs`)." Disciplined.
+- **`build_resolved`** dispatches each `SecretSlot` variant to its `ResolvedConnection` field via explicit match arms (line 142-148). `OidcRefreshToken` is explicitly dropped with a comment — the builder doesn't need it; storing it is enough.
+- **`save_input_deserializes_camel_case_secrets` test** is the wire-format contract for the entire IPC surface. Tests both the connection payload AND the flat secrets list shape in one JSON literal.
+- **TS `ipc.ts` types** mirror the Rust shape exactly: `SecretSlotName` lists all 6 slot wire-names; `TestResult` is a discriminated union on `ok`. `prefsSet`'s argument shape `{ prefs }` matches Rust's `prefs: GlobalPrefs` parameter name (Tauri auto-camelCases parameter names from `prefs` to wire-key `prefs`).
+- **`#[allow(non_snake_case)] connectionId: String`** on `prefs_resolve_effective` is the right way to match Tauri's preservation of JSON parameter casing across the boundary.
+- **`prefs_get` and `prefs_set`** delegate straight to the well-tested `prefs::load|save`; no logic added at the IPC layer.
+- **`Client::shutdown().await` then `tunnel.close().await`** — drains the connection pool before closing the underlying socket. Correct order.
+
+### Minor findings (non-blocking)
+
+1. **`connections_v2_save` partial-failure semantics**: if the user sends 3 secrets and write #2 fails, the v2 row + secret #1 stay. The comment at line 220-221 calls this out — "user can retry the save without losing the row" — and since both `upsert` and `set` are idempotent, retry is safe. No rollback layer needed for Phase 1; worth tracking as a Phase 2 hardening item if multi-slot atomicity is ever required (e.g., for SSH key + passphrase pairs that should travel together).
+2. **`connections_v2_delete` race with concurrent `save`**: between `store::delete(id)` and `secrets.delete_all_for(id)`, a concurrent save could re-insert the row. In a single-user desktop app this is not realistic, but the doc comment could note the assumption.
+3. **`prefs_resolve_effective` opens a fresh DB handle** via `state.open_db()` — same pattern as the other commands. No regression; just an observation that AppState doesn't expose a shared connection.
+4. **`AppHandle` parameter on `prefs_resolve_effective`** is used only for the `prefs::load` call; the DB handle comes from `state`. Slightly redundant threading but correct.
+5. **TS `SecretSlotName` is hand-mirrored** from Rust `SecretSlot::as_wire`. A future 7th slot would silently drift. A short comment ("if this list changes, update `SecretSlot::as_wire` in secrets.rs") would help; or post-Phase-1 auto-generate from a single source.
+
+### Result
+
+**Stage 1: PASS · Stage 2: PASS · 0 blocking · 5 minor.**
+
+**All three Task-10 hard requirements are addressed.** TestResultV2 deviation from the literal plan snippet is correct (plan would have emitted string `ok`, not boolean) — I agree with the coder's choice. The dead-code-allow sweep is precise and well-justified. CONN_V2 gating via dual handler lists is the only safe approach given the compile-time macro.
+
+Phase 1 backend is complete and dark-shipped behind `CONN_V2`. Task 13 (manual QA) is the only remaining item; the IPC surface is now ready for Phase 2 UI work.
