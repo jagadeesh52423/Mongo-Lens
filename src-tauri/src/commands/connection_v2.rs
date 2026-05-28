@@ -320,9 +320,11 @@ pub async fn connections_v2_test(
     //    failures with a hint. accept_host_key is hard-coded false because
     //    test doesn't have a retry round-trip — if the dialog wants live
     //    confirmation, that's the connect flow's job.
+    // `uri` is unused by the test path — we never write to mongo_uris
+    // here (test is one-shot, never registers a live client).
     let (opts, tunnel) =
         match build_client_options(&resolved, &effective, false, log.clone()).await {
-            Ok(BuildOutcome::Ready { options, tunnel }) => (options, tunnel),
+            Ok(BuildOutcome::Ready { options, tunnel, uri: _ }) => (options, tunnel),
             Ok(BuildOutcome::PassphraseRequired) => {
                 log.info(
                     "connections_v2_test: passphrase required",
@@ -680,9 +682,9 @@ pub async fn connections_v2_connect(
     // 4. Build ClientOptions. Three success-shaped outcomes plus
     //    BuildError. PassphraseRequired / HostKeyUnknown short-circuit
     //    back to the frontend retry loop.
-    let (opts, tunnel) =
+    let (opts, tunnel, resolved_uri) =
         match build_client_options(&resolved, &effective, accept_flag, log_arc.clone()).await {
-            Ok(BuildOutcome::Ready { options, tunnel }) => (options, tunnel),
+            Ok(BuildOutcome::Ready { options, tunnel, uri }) => (options, tunnel, uri),
             Ok(BuildOutcome::PassphraseRequired) => {
                 log.info("connections_v2_connect: passphrase required", logctx! {});
                 return Ok(ConnectResultV2::PassphraseRequired {
@@ -764,15 +766,17 @@ pub async fn connections_v2_connect(
     }
 
     state.mongo_clients.lock().unwrap().insert(id.clone(), client);
-    // mongo_uris is keyed by id for legacy callers; we don't have a
-    // pre-rewrite URI handy here (the builder consumed it). Stash a
-    // sentinel so list/connect/disconnect parity holds — the legacy
-    // pre-rewrite value is only used for diagnostics anyway.
+    // mongo_uris stores the *real* MongoDB URI the builder used (post-SSH
+    // rewrite where applicable). Downstream consumers — `mongo::active_uri`
+    // and via that the Node script runner — re-use this string to launch
+    // a Node-side connection without re-deriving from scratch (which would
+    // re-run SDAM and possibly hit the same fallback that the Rust builder
+    // already worked around).
     state
         .mongo_uris
         .lock()
         .unwrap()
-        .insert(id.clone(), format!("conn-v2://{id}"));
+        .insert(id.clone(), resolved_uri);
 
     if let Some(t) = tunnel {
         // Spawn the session-loss monitor BEFORE inserting the handle

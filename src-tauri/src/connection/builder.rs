@@ -146,9 +146,20 @@ impl BuildError {
 pub enum BuildOutcome {
     /// `ClientOptions` assembled; tunnel (if any) is live and the caller
     /// owns the [`TunnelHandle`].
+    ///
+    /// `uri` is the post-rewrite MongoDB URI that was fed to
+    /// `ClientOptions::parse`. For URI targets this is `target.uri`
+    /// (possibly with the host:port swapped for the tunnel's local
+    /// address); for Direct targets it's a synthesized
+    /// `mongodb://host:port/?...`. Callers like the Node runner (via
+    /// `mongo_uris` → `mongo::active_uri`) re-use this string instead of
+    /// re-deriving from the raw connection record, so any fallback
+    /// query params or SSH rewrites that made the Rust connect succeed
+    /// apply identically to downstream consumers.
     Ready {
         options: ClientOptions,
         tunnel: Option<TunnelHandle>,
+        uri: String,
     },
     /// SSH key file is encrypted. Caller should prompt the user, persist
     /// the answer, and call [`build_client_options`] again with the secret
@@ -330,6 +341,7 @@ pub async fn build_client_options(
     Ok(BuildOutcome::Ready {
         options: opts,
         tunnel,
+        uri,
     })
 }
 
@@ -1033,7 +1045,10 @@ mod tests {
             .await
             .expect("build_client_options should succeed")
         {
-            BuildOutcome::Ready { options, tunnel } => (options, tunnel),
+            // The `uri` field is verified by integration tests (it's the
+            // string fed to ClientOptions::parse); unit tests here check
+            // assembled-options fields, so we drop it.
+            BuildOutcome::Ready { options, tunnel, uri: _ } => (options, tunnel),
             other => panic!("expected BuildOutcome::Ready, got {}", other.kind()),
         }
     }

@@ -658,7 +658,9 @@ pub async fn ping_via_builder(
         .await
         .map_err(|e| format!("build_client_options stage={:?}: {}", e.stage, e.error))?
     {
-        BuildOutcome::Ready { options, tunnel } => (options, tunnel),
+        // ping_via_builder doesn't need the URI — assertion is on the
+        // ping latency itself, which comes from the Client built from opts.
+        BuildOutcome::Ready { options, tunnel, uri: _ } => (options, tunnel),
         BuildOutcome::PassphraseRequired => {
             return Err("unexpected BuildOutcome::PassphraseRequired in integration test".into());
         }
@@ -734,7 +736,7 @@ pub async fn connect_outcome(
             algorithm,
             fingerprint,
         }),
-        BuildOutcome::Ready { options, tunnel } => {
+        BuildOutcome::Ready { options, tunnel, uri: _ } => {
             // Same hello-round-trip the legacy helper does, so a Ready
             // outcome means "tunnel up + mongo reachable" — not just
             // "ClientOptions parsed".
