@@ -602,7 +602,7 @@ fn aws_iam_credential(
             let secret = secret_key.ok_or_else(|| {
                 BuildError::auth(
                     "AWS IAM auth: secret access key is required when useEnvCreds=false \
-                     (keychain slot AwsSessionToken / via ResolvedConnection.aws_secret_key)",
+                     (keychain slot AwsSecretKey / via ResolvedConnection.aws_secret_key)",
                 )
             })?;
             c.username = Some(key_id.to_string());
