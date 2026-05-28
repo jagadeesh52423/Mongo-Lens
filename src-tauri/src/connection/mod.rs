@@ -28,5 +28,10 @@ pub mod secrets;
 #[allow(dead_code)]
 pub mod tunnel;
 
+// SOCKS5 proxy validation (HTTP/SOCKS4 deferred). Consumed by the builder
+// (Task 10); allow(dead_code) until that lands.
+#[allow(dead_code)]
+pub mod proxy;
+
 #[cfg(test)]
 mod model_contract_tests;
