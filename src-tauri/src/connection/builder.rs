@@ -66,7 +66,7 @@ use crate::connection::tunnel::{open as open_tunnel_bridge, ResolvedSshSecrets};
 use crate::logctx;
 use crate::logger::Logger;
 use crate::prefs::model::EffectivePrefs;
-use crate::ssh::{TunnelHandle, TunnelStartResult};
+use crate::ssh::{SshError, TunnelHandle, TunnelStartResult};
 
 // ──────────────────────────────────────────────────────────────────────────
 // Public types
@@ -123,6 +123,90 @@ impl BuildError {
     }
 }
 
+/// Outcome of [`build_client_options`].
+///
+/// SSH challenge-response signals (passphrase prompt, unknown host key) are
+/// not errors — they're successful Ssh-stage results that need user input
+/// before the connect can proceed. The IPC layer translates these into the
+/// matching `ConnectResultV2` variants so the dialog can route to the
+/// passphrase / host-key prompts.
+///
+/// `BuildError` is reserved for genuine failures (network unreachable, bad
+/// TLS, missing required secret, etc.) — anything the user can't fix by
+/// answering a prompt.
+///
+/// `HostKeyUnknown` carries enough structured info (algorithm + fingerprint
+/// + host:port) for the dialog to render the confirmation card without
+/// re-parsing strings.
+///
+/// Intentionally not `Debug` / `Serialize` / `Clone` — the variant carries a
+/// live `TunnelHandle` whose drop policy is "caller closes". Tests assert
+/// the variant kind via pattern-matching (see `BuildOutcomeKind` below)
+/// rather than `assert_eq!`.
+pub enum BuildOutcome {
+    /// `ClientOptions` assembled; tunnel (if any) is live and the caller
+    /// owns the [`TunnelHandle`].
+    ///
+    /// `uri` is the post-rewrite MongoDB URI that was fed to
+    /// `ClientOptions::parse`. For URI targets this is `target.uri`
+    /// (possibly with the host:port swapped for the tunnel's local
+    /// address); for Direct targets it's a synthesized
+    /// `mongodb://host:port/?...`. Callers like the Node runner (via
+    /// `mongo_uris` → `mongo::active_uri`) re-use this string instead of
+    /// re-deriving from the raw connection record, so any fallback
+    /// query params or SSH rewrites that made the Rust connect succeed
+    /// apply identically to downstream consumers.
+    Ready {
+        options: ClientOptions,
+        tunnel: Option<TunnelHandle>,
+        uri: String,
+    },
+    /// SSH key file is encrypted. Caller should prompt the user, persist
+    /// the answer, and call [`build_client_options`] again with the secret
+    /// store populated (or the `ssh_key_passphrase` slot set on the
+    /// `ResolvedConnection`).
+    PassphraseRequired,
+    /// SSH host key was not in any known_hosts store. Caller should show
+    /// the fingerprint, get user confirmation, and retry with
+    /// `accept_host_key = true`.
+    HostKeyUnknown {
+        host: String,
+        port: u16,
+        algorithm: String,
+        fingerprint: String,
+    },
+}
+
+impl BuildOutcome {
+    /// Convenience for tests: discriminant without inspecting the live
+    /// `TunnelHandle`. Not used by production code.
+    #[cfg(test)]
+    fn kind(&self) -> &'static str {
+        match self {
+            BuildOutcome::Ready { .. } => "ready",
+            BuildOutcome::PassphraseRequired => "passphraseRequired",
+            BuildOutcome::HostKeyUnknown { .. } => "hostKeyUnknown",
+        }
+    }
+}
+
+/// Intermediate result of [`open_ssh_if_configured`]. Folded into the public
+/// [`BuildOutcome`] by [`build_client_options`].
+enum SshStepOutcome {
+    /// Either there is no SSH config, or the tunnel opened cleanly. The
+    /// optional handle is `None` only when no SSH config was present.
+    Open(Option<TunnelHandle>),
+    /// SSH key is encrypted; need passphrase to retry.
+    PassphraseRequired,
+    /// Unknown host key; user must confirm and retry with `accept_host_key`.
+    HostKeyUnknown {
+        host: String,
+        port: u16,
+        algorithm: String,
+        fingerprint: String,
+    },
+}
+
 /// A `Connection` paired with secrets the caller already resolved from the
 /// keychain.
 ///
@@ -169,6 +253,9 @@ impl<'a> ResolvedConnection<'a> {
 ///
 /// Steps (each fails fast with the corresponding [`BuildStage`]):
 ///   1. SSH tunnel (if configured) → local listener bound on 127.0.0.1.
+///      May short-circuit to [`BuildOutcome::PassphraseRequired`] or
+///      [`BuildOutcome::HostKeyUnknown`] — both are *successful* SSH-stage
+///      outcomes that need user input, not errors.
 ///   2. Construct base URI from `conn.target`; rewrite host:port to the
 ///      tunnel address if a tunnel was opened.
 ///   3. Parse URI into `ClientOptions`.
@@ -178,21 +265,50 @@ impl<'a> ResolvedConnection<'a> {
 ///      *_timeout_ms).
 ///   7. Validate + apply proxy (SOCKS5 only).
 ///
-/// Returns `(ClientOptions, Option<TunnelHandle>)`. The caller OWNS the
-/// returned tunnel handle and is responsible for closing it when the
-/// resulting `Client` shuts down (drop alone is not enough — call
-/// [`TunnelHandle::close`] for a clean teardown). When the connection
-/// has no SSH config the second element is `None`.
+/// `accept_host_key`: pass `true` after the user accepted the fingerprint
+/// in the UI on a prior call. The verifier will persist the key on success
+/// (per the connection's `known_hosts_policy`). On the first call this
+/// must be `false`.
+///
+/// Returns a [`BuildOutcome`] — `Ready { options, tunnel }` on success.
+/// The caller OWNS the returned `TunnelHandle` and is responsible for
+/// closing it when the resulting `Client` shuts down (drop alone is not
+/// enough — call [`TunnelHandle::close`] for a clean teardown). When the
+/// connection has no SSH config `tunnel` is `None`.
 pub async fn build_client_options(
     resolved: &ResolvedConnection<'_>,
     effective: &EffectivePrefs,
+    accept_host_key: bool,
     log: Arc<dyn Logger>,
-) -> Result<(ClientOptions, Option<TunnelHandle>), BuildError> {
+) -> Result<BuildOutcome, BuildError> {
     let conn = resolved.conn;
 
     // ── Step 1: SSH tunnel ────────────────────────────────────────────
-    let tunnel = open_ssh_if_configured(conn.ssh.as_ref(), resolved, &conn.target, log.clone())
-        .await?;
+    let tunnel = match open_ssh_if_configured(
+        conn.ssh.as_ref(),
+        resolved,
+        &conn.target,
+        accept_host_key,
+        log.clone(),
+    )
+    .await?
+    {
+        SshStepOutcome::Open(tunnel) => tunnel,
+        SshStepOutcome::PassphraseRequired => return Ok(BuildOutcome::PassphraseRequired),
+        SshStepOutcome::HostKeyUnknown {
+            host,
+            port,
+            algorithm,
+            fingerprint,
+        } => {
+            return Ok(BuildOutcome::HostKeyUnknown {
+                host,
+                port,
+                algorithm,
+                fingerprint,
+            });
+        }
+    };
     let tunnel_local = tunnel.as_ref().map(|t| t.local_addr);
 
     // ── Step 2: Base URI (+ rewrite if tunnel established) ────────────
@@ -222,25 +338,46 @@ pub async fn build_client_options(
     // Direct target shape, applied during URI synthesis (step 2). For URI
     // targets they ride in the connection string itself.
 
-    Ok((opts, tunnel))
+    Ok(BuildOutcome::Ready {
+        options: opts,
+        tunnel,
+        uri,
+    })
 }
 
 // ──────────────────────────────────────────────────────────────────────────
 // Step 1: SSH
 // ──────────────────────────────────────────────────────────────────────────
 
-/// Open the SSH tunnel if the connection has one. Returns the live
-/// [`TunnelHandle`] (whose `.local_addr` the URI is rewritten against in
-/// the caller). Ownership transfers to the caller — `build_client_options`
-/// hands it back in the returned tuple so the IPC layer can `.close()` it
-/// on disconnect / test teardown / drop. No leaks.
+/// Open the SSH tunnel if the connection has one.
+///
+/// Three success-shaped outcomes (none are `BuildError`):
+///   * [`SshStepOutcome::Open`] — tunnel open (or no SSH configured).
+///   * [`SshStepOutcome::PassphraseRequired`] — encrypted key, prompt user.
+///   * [`SshStepOutcome::HostKeyUnknown`] — confirm fingerprint, then retry
+///     with `accept_host_key = true`.
+///
+/// Genuine failures (network unreachable, auth rejected, host-key
+/// *changed*) come back as `Err(BuildError { stage: Ssh, .. })`.
+///
+/// `accept_host_key`: when `true`, the host-key verifier will persist a
+/// previously-unknown key on success (TOFU). When `false`, an unknown key
+/// returns `HostKeyUnknown` instead of trusting blindly.
+///
+/// Ownership: the live `TunnelHandle` in `Open(Some(handle))` is
+/// transferred to the caller — `build_client_options` hands it back in
+/// `BuildOutcome::Ready` so the IPC layer can `.close()` it on disconnect /
+/// test teardown / drop. No leaks.
 async fn open_ssh_if_configured(
     ssh: Option<&SshTunnel>,
     resolved: &ResolvedConnection<'_>,
     target: &ConnectionTarget,
+    accept_host_key: bool,
     log: Arc<dyn Logger>,
-) -> Result<Option<TunnelHandle>, BuildError> {
-    let Some(ssh) = ssh else { return Ok(None) };
+) -> Result<SshStepOutcome, BuildError> {
+    let Some(ssh) = ssh else {
+        return Ok(SshStepOutcome::Open(None));
+    };
 
     let secrets = build_ssh_secrets(ssh, resolved)?;
     let (target_host, target_port) = target_host_port_for_ssh(target)?;
@@ -252,22 +389,43 @@ async fn open_ssh_if_configured(
             "sshPort" => ssh.port,
             "target"  => format!("{target_host}:{target_port}"),
             "policy"  => format!("{:?}", ssh.known_hosts_policy),
+            "acceptHostKey" => accept_host_key,
         },
     );
 
-    let result = open_tunnel_bridge(ssh, secrets, &target_host, target_port, false, log.clone())
-        .await
-        .map_err(|e| BuildError::ssh(e.to_string()))?;
+    let result =
+        match open_tunnel_bridge(ssh, secrets, &target_host, target_port, accept_host_key, log)
+            .await
+        {
+            Ok(r) => r,
+            // PassphraseRequired / PassphraseIncorrect are user-prompt
+            // outcomes, not errors. The dialog will collect the
+            // passphrase, persist it via the secret store, and retry.
+            // Both map to the same outcome — the dialog doesn't currently
+            // distinguish "first time" from "wrong on retry" (TODO: thread
+            // the distinction through if UX research wants it later).
+            Err(SshError::PassphraseRequired) | Err(SshError::PassphraseIncorrect) => {
+                return Ok(SshStepOutcome::PassphraseRequired);
+            }
+            Err(e) => return Err(BuildError::ssh(e.to_string())),
+        };
 
     match result {
-        TunnelStartResult::Ready(handle) => Ok(Some(handle)),
-        TunnelStartResult::HostKeyUnknown { host, fingerprint, .. } => {
-            Err(BuildError::ssh(format!(
-                "Host key for {host} is not in any known_hosts store. \
-                 Fingerprint: {fingerprint}. Use the SSH dialog flow to confirm and retry."
-            )))
-        }
+        TunnelStartResult::Ready(handle) => Ok(SshStepOutcome::Open(Some(handle))),
+        TunnelStartResult::HostKeyUnknown {
+            host,
+            port,
+            algorithm,
+            fingerprint,
+        } => Ok(SshStepOutcome::HostKeyUnknown {
+            host,
+            port,
+            algorithm,
+            fingerprint,
+        }),
         TunnelStartResult::HostKeyChanged { host, stored_source } => {
+            // Host key *changed* is a hard failure (possible MITM) — never
+            // surface as a confirmation prompt.
             Err(BuildError::ssh(format!(
                 "Host key for {host} does not match the entry in {stored_source}. \
                  Connection refused to protect against possible MITM attack."
@@ -277,8 +435,14 @@ async fn open_ssh_if_configured(
 }
 
 /// Translate the resolved-secrets bag into a `ResolvedSshSecrets` for the
-/// bridge. Returns a clear error if the bag is missing what the chosen
-/// SSH auth variant needs.
+/// bridge.
+///
+/// Password auth is pre-validated here (no password resolved is a hard
+/// `BuildError::ssh` — the dialog should have caught it at save). Encrypted
+/// key auth with a missing passphrase, however, is *not* pre-rejected: it
+/// flows through to the bridge so the typed `SshError::PassphraseRequired`
+/// signal survives intact, and `open_ssh_if_configured` can fold it into
+/// `SshStepOutcome::PassphraseRequired` for the dialog's prompt flow.
 fn build_ssh_secrets(
     ssh: &SshTunnel,
     resolved: &ResolvedConnection<'_>,
@@ -290,11 +454,12 @@ fn build_ssh_secrets(
             })?),
             key_passphrase: None,
         },
+        // Pass through whatever's resolved (including None) — the bridge's
+        // resolve_auth emits PassphraseRequired when has_passphrase=true
+        // but key_passphrase=None, which we want to surface as a prompt.
         SshAuth::Key { has_passphrase: true, .. } => ResolvedSshSecrets {
             password: None,
-            key_passphrase: Some(resolved.ssh_key_passphrase.clone().ok_or_else(|| {
-                BuildError::ssh("SSH key passphrase missing for encrypted key")
-            })?),
+            key_passphrase: resolved.ssh_key_passphrase.clone(),
         },
         SshAuth::Key { has_passphrase: false, .. } => ResolvedSshSecrets::default(),
         SshAuth::Agent => ResolvedSshSecrets::default(),
@@ -866,6 +1031,40 @@ mod tests {
         MemoryLogger::new("builder-test")
     }
 
+    /// Test helper: call `build_client_options` with `accept_host_key=false`
+    /// and assert the result is `BuildOutcome::Ready`. Panics with a clear
+    /// message on `PassphraseRequired` / `HostKeyUnknown` (those code
+    /// paths are exercised by integration tests, not unit tests). Returns
+    /// `(ClientOptions, Option<TunnelHandle>)` so existing test bodies stay
+    /// readable.
+    async fn build_ok(
+        resolved: &ResolvedConnection<'_>,
+        effective: &EffectivePrefs,
+    ) -> (ClientOptions, Option<TunnelHandle>) {
+        match build_client_options(resolved, effective, false, null_log())
+            .await
+            .expect("build_client_options should succeed")
+        {
+            // The `uri` field is verified by integration tests (it's the
+            // string fed to ClientOptions::parse); unit tests here check
+            // assembled-options fields, so we drop it.
+            BuildOutcome::Ready { options, tunnel, uri: _ } => (options, tunnel),
+            other => panic!("expected BuildOutcome::Ready, got {}", other.kind()),
+        }
+    }
+
+    /// Test helper: call `build_client_options` and assert it returns the
+    /// `BuildError` variant (genuine failure). Panics on `Ok`.
+    async fn build_err(
+        resolved: &ResolvedConnection<'_>,
+        effective: &EffectivePrefs,
+    ) -> BuildError {
+        match build_client_options(resolved, effective, false, null_log()).await {
+            Err(e) => e,
+            Ok(other) => panic!("expected BuildError, got {}", other.kind()),
+        }
+    }
+
     fn base_conn(target: ConnectionTarget, auth: AuthMode) -> Connection {
         Connection {
             id: "c1".into(),
@@ -933,9 +1132,7 @@ mod tests {
             AuthMode::None,
         );
         let resolved = ResolvedConnection::bare(&conn);
-        let (opts, _tunnel) = build_client_options(&resolved, &effective_defaults(), null_log())
-            .await
-            .expect("build_client_options");
+        let (opts, _tunnel) = build_ok(&resolved, &effective_defaults()).await;
         // appName from EffectivePrefs wins over whatever the URI carried —
         // step 6 runs after parse and overwrites the field.
         assert_eq!(opts.app_name.as_deref(), Some("mongo-lens"));
@@ -957,9 +1154,7 @@ mod tests {
         let mut resolved = ResolvedConnection::bare(&conn);
         resolved.auth_password = Some("pw".into());
 
-        let (opts, _tunnel) = build_client_options(&resolved, &effective_defaults(), null_log())
-            .await
-            .unwrap();
+        let (opts, _tunnel) = build_ok(&resolved, &effective_defaults()).await;
         let cred = opts.credential.expect("credential");
         assert_eq!(cred.username.as_deref(), Some("alice"));
         assert_eq!(cred.source.as_deref(), Some("admin"));
@@ -978,9 +1173,7 @@ mod tests {
             },
         );
         let resolved = ResolvedConnection::bare(&conn);
-        let (opts, _tunnel) = build_client_options(&resolved, &effective_defaults(), null_log())
-            .await
-            .unwrap();
+        let (opts, _tunnel) = build_ok(&resolved, &effective_defaults()).await;
         assert!(opts.credential.unwrap().mechanism.is_none());
     }
 
@@ -994,9 +1187,7 @@ mod tests {
         );
         let mut resolved = ResolvedConnection::bare(&conn);
         resolved.auth_password = Some("pw".into());
-        let (opts, _tunnel) = build_client_options(&resolved, &effective_defaults(), null_log())
-            .await
-            .unwrap();
+        let (opts, _tunnel) = build_ok(&resolved, &effective_defaults()).await;
         let cred = opts.credential.unwrap();
         assert_eq!(cred.username.as_deref(), Some("ldap-user"));
         assert!(matches!(cred.mechanism, Some(AuthMechanism::Plain)));
@@ -1013,9 +1204,7 @@ mod tests {
             },
         );
         let resolved = ResolvedConnection::bare(&conn);
-        let (opts, _tunnel) = build_client_options(&resolved, &effective_defaults(), null_log())
-            .await
-            .unwrap();
+        let (opts, _tunnel) = build_ok(&resolved, &effective_defaults()).await;
         let cred = opts.credential.unwrap();
         assert!(cred.username.is_none(), "x509 lifts DN from cert");
         assert_eq!(cred.source.as_deref(), Some("$external"));
@@ -1032,9 +1221,7 @@ mod tests {
             },
         );
         let resolved = ResolvedConnection::bare(&conn);
-        let (opts, _tunnel) = build_client_options(&resolved, &effective_defaults(), null_log())
-            .await
-            .unwrap();
+        let (opts, _tunnel) = build_ok(&resolved, &effective_defaults()).await;
         let cred = opts.credential.unwrap();
         assert!(matches!(cred.mechanism, Some(AuthMechanism::MongoDbOidc)));
         assert_eq!(cred.username.as_deref(), Some("user@example.com"));
@@ -1046,9 +1233,7 @@ mod tests {
     async fn none_auth_mode_produces_no_credential() {
         let conn = base_conn(direct_target(), AuthMode::None);
         let resolved = ResolvedConnection::bare(&conn);
-        let (opts, _tunnel) = build_client_options(&resolved, &effective_defaults(), null_log())
-            .await
-            .unwrap();
+        let (opts, _tunnel) = build_ok(&resolved, &effective_defaults()).await;
         assert!(opts.credential.is_none());
     }
 
@@ -1063,9 +1248,7 @@ mod tests {
         );
         let mut resolved = ResolvedConnection::bare(&conn);
         resolved.auth_password = Some("pw".into());
-        let (opts, _tunnel) = build_client_options(&resolved, &effective_defaults(), null_log())
-            .await
-            .unwrap();
+        let (opts, _tunnel) = build_ok(&resolved, &effective_defaults()).await;
         assert!(matches!(
             opts.credential.unwrap().mechanism,
             Some(AuthMechanism::MongoDbCr)
@@ -1088,9 +1271,7 @@ mod tests {
             },
         );
         let resolved = ResolvedConnection::bare(&conn);
-        let (opts, _tunnel) = build_client_options(&resolved, &effective_defaults(), null_log())
-            .await
-            .unwrap();
+        let (opts, _tunnel) = build_ok(&resolved, &effective_defaults()).await;
         let cred = opts.credential.unwrap();
         assert!(matches!(cred.mechanism, Some(AuthMechanism::Gssapi)));
         assert_eq!(cred.username.as_deref(), Some("alice@EXAMPLE.COM"));
@@ -1111,9 +1292,7 @@ mod tests {
             },
         );
         let resolved = ResolvedConnection::bare(&conn);
-        let err = build_client_options(&resolved, &effective_defaults(), null_log())
-            .await
-            .unwrap_err();
+        let err = build_err(&resolved, &effective_defaults()).await;
         assert_eq!(err.stage, BuildStage::Auth);
         assert!(err.error.contains("gssapi-auth"), "msg: {}", err.error);
     }
@@ -1131,9 +1310,7 @@ mod tests {
         );
         let mut resolved = ResolvedConnection::bare(&conn);
         resolved.aws_secret_key = Some("SECRET".into());
-        let (opts, _tunnel) = build_client_options(&resolved, &effective_defaults(), null_log())
-            .await
-            .unwrap();
+        let (opts, _tunnel) = build_ok(&resolved, &effective_defaults()).await;
         let cred = opts.credential.unwrap();
         assert!(matches!(cred.mechanism, Some(AuthMechanism::MongoDbAws)));
         assert_eq!(cred.username.as_deref(), Some("AKIA..."));
@@ -1154,9 +1331,7 @@ mod tests {
             },
         );
         let resolved = ResolvedConnection::bare(&conn);
-        let err = build_client_options(&resolved, &effective_defaults(), null_log())
-            .await
-            .unwrap_err();
+        let err = build_err(&resolved, &effective_defaults()).await;
         assert_eq!(err.stage, BuildStage::Auth);
         assert!(err.error.contains("aws-auth"), "msg: {}", err.error);
     }
@@ -1174,9 +1349,7 @@ mod tests {
             client_cert_file: None,
         });
         let resolved = ResolvedConnection::bare(&conn);
-        let (opts, _tunnel) = build_client_options(&resolved, &effective_defaults(), null_log())
-            .await
-            .unwrap();
+        let (opts, _tunnel) = build_ok(&resolved, &effective_defaults()).await;
         assert!(matches!(opts.tls, Some(Tls::Disabled)));
     }
 
@@ -1191,9 +1364,7 @@ mod tests {
             client_cert_file: Some("/etc/ssl/client.pem".into()),
         });
         let resolved = ResolvedConnection::bare(&conn);
-        let (opts, _tunnel) = build_client_options(&resolved, &effective_defaults(), null_log())
-            .await
-            .unwrap();
+        let (opts, _tunnel) = build_ok(&resolved, &effective_defaults()).await;
         match opts.tls {
             Some(Tls::Enabled(tls_opts)) => {
                 assert_eq!(tls_opts.allow_invalid_certificates, Some(true));
@@ -1222,9 +1393,7 @@ mod tests {
             client_cert_file: None,
         });
         let resolved = ResolvedConnection::bare(&conn);
-        let err = build_client_options(&resolved, &effective_defaults(), null_log())
-            .await
-            .unwrap_err();
+        let err = build_err(&resolved, &effective_defaults()).await;
         assert_eq!(err.stage, BuildStage::Tls);
         assert!(err.error.contains("openssl-tls"), "msg: {}", err.error);
     }
@@ -1255,9 +1424,7 @@ mod tests {
         };
         let effective = crate::prefs::resolve_effective(&global, Some(&overrides));
 
-        let (opts, _tunnel) = build_client_options(&resolved, &effective, null_log())
-            .await
-            .unwrap();
+        let (opts, _tunnel) = build_ok(&resolved, &effective).await;
         assert_eq!(opts.app_name.as_deref(), Some("custom-app"));
         assert_eq!(opts.retry_writes, Some(false));
         assert_eq!(opts.retry_reads, Some(false));
@@ -1299,9 +1466,7 @@ mod tests {
             }),
         };
         let effective = crate::prefs::resolve_effective(&global, Some(&overrides));
-        let (opts, _tunnel) = build_client_options(&resolved, &effective, null_log())
-            .await
-            .unwrap();
+        let (opts, _tunnel) = build_ok(&resolved, &effective).await;
         // The `compressors` field on ClientOptions itself is feature-gated.
         // When all three codec features are off, the field doesn't exist —
         // hitting that path means the builder simply didn't touch it. When
@@ -1322,9 +1487,7 @@ mod tests {
             auth: None,
         });
         let resolved = ResolvedConnection::bare(&conn);
-        let err = build_client_options(&resolved, &effective_defaults(), null_log())
-            .await
-            .unwrap_err();
+        let err = build_err(&resolved, &effective_defaults()).await;
         assert_eq!(err.stage, BuildStage::Tls);
         assert!(err.error.contains("HTTP proxy"), "msg: {}", err.error);
     }
@@ -1339,9 +1502,7 @@ mod tests {
             auth: None,
         });
         let resolved = ResolvedConnection::bare(&conn);
-        let err = build_client_options(&resolved, &effective_defaults(), null_log())
-            .await
-            .unwrap_err();
+        let err = build_err(&resolved, &effective_defaults()).await;
         assert_eq!(err.stage, BuildStage::Tls);
         assert!(err.error.contains("SOCKS4"), "msg: {}", err.error);
     }
@@ -1357,9 +1518,7 @@ mod tests {
             auth: None,
         });
         let resolved = ResolvedConnection::bare(&conn);
-        let err = build_client_options(&resolved, &effective_defaults(), null_log())
-            .await
-            .unwrap_err();
+        let err = build_err(&resolved, &effective_defaults()).await;
         assert_eq!(err.stage, BuildStage::Tls);
         assert!(err.error.contains("socks5-proxy"), "msg: {}", err.error);
     }
@@ -1378,9 +1537,7 @@ mod tests {
         });
         let mut resolved = ResolvedConnection::bare(&conn);
         resolved.proxy_password = Some("proxy-pw".into());
-        let (opts, _tunnel) = build_client_options(&resolved, &effective_defaults(), null_log())
-            .await
-            .unwrap();
+        let (opts, _tunnel) = build_ok(&resolved, &effective_defaults()).await;
         let sp = opts.socks5_proxy.expect("socks5_proxy");
         assert_eq!(sp.host, "proxy.example.com");
         assert_eq!(sp.port, Some(1080));
@@ -1406,9 +1563,7 @@ mod tests {
             known_hosts_policy: KnownHostsPolicy::AcceptAny,
         });
         let resolved = ResolvedConnection::bare(&conn);
-        let err = build_client_options(&resolved, &effective_defaults(), null_log())
-            .await
-            .unwrap_err();
+        let err = build_err(&resolved, &effective_defaults()).await;
         assert_eq!(err.stage, BuildStage::Ssh);
     }
 
@@ -1424,9 +1579,7 @@ mod tests {
         });
         // resolved.ssh_password intentionally None.
         let resolved = ResolvedConnection::bare(&conn);
-        let err = build_client_options(&resolved, &effective_defaults(), null_log())
-            .await
-            .unwrap_err();
+        let err = build_err(&resolved, &effective_defaults()).await;
         assert_eq!(err.stage, BuildStage::Ssh);
         assert!(err.error.contains("SSH password"), "msg: {}", err.error);
     }

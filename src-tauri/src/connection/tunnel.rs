@@ -36,18 +36,25 @@ pub struct ResolvedSshSecrets {
 
 /// Dispatch `SshAuth` → `Box<dyn AuthMethod>`.
 ///
-/// Returns an error string (not `SshError`) because missing-secret is a
-/// caller programming error, not a transport failure — the caller resolves
-/// secrets *before* invoking the bridge.
+/// Returns typed [`SshError`] so two paths can be distinguished:
+///   * `SshError::PassphraseRequired` — known-encrypted key, no passphrase
+///     resolved. The IPC layer translates this to a passphrase prompt
+///     (see `builder::open_ssh_if_configured` → `BuildOutcome::PassphraseRequired`).
+///   * `SshError::AuthFailed(...)` — caller programming error (e.g. the
+///     model says password auth but no password was resolved).
+///
+/// The previous shape returned a `String` for every missing-secret case,
+/// which collapsed both into the same opaque "auth failed" surface and
+/// hid the user-prompt opportunity from the v2 dialog flow.
 fn resolve_auth(
     auth: &SshAuth,
     secrets: ResolvedSshSecrets,
-) -> Result<Box<dyn AuthMethod>, String> {
+) -> Result<Box<dyn AuthMethod>, SshError> {
     match auth {
         SshAuth::Password => {
-            let password = secrets
-                .password
-                .ok_or_else(|| "SSH password missing for password auth".to_string())?;
+            let password = secrets.password.ok_or_else(|| {
+                SshError::AuthFailed("SSH password missing for password auth".into())
+            })?;
             Ok(Box::new(PasswordAuth::new(password)))
         }
         SshAuth::Key {
@@ -55,9 +62,14 @@ fn resolve_auth(
             has_passphrase,
         } => {
             let passphrase = if *has_passphrase {
-                Some(secrets.key_passphrase.ok_or_else(|| {
-                    "SSH key passphrase missing for encrypted key".to_string()
-                })?)
+                Some(
+                    secrets
+                        .key_passphrase
+                        // No passphrase resolved but the model knows the
+                        // key is encrypted — that's exactly the prompt
+                        // signal, not a hard failure.
+                        .ok_or(SshError::PassphraseRequired)?,
+                )
             } else {
                 None
             };
@@ -98,7 +110,9 @@ pub async fn open(
     caller_confirmed: bool,
     log: Arc<dyn Logger>,
 ) -> Result<TunnelStartResult, SshError> {
-    let auth = resolve_auth(&tunnel.auth, secrets).map_err(SshError::AuthFailed)?;
+    // resolve_auth already returns a typed SshError — propagate as-is so
+    // PassphraseRequired survives intact (see resolve_auth's contract).
+    let auth = resolve_auth(&tunnel.auth, secrets)?;
 
     let cfg = SshConfig {
         ssh_host: tunnel.host.clone(),
@@ -143,10 +157,19 @@ mod tests {
     }
 
     #[test]
-    fn resolve_auth_password_missing_secret_errors() {
-        let result = resolve_auth(&SshAuth::Password, ResolvedSshSecrets::default());
-        assert!(result.is_err());
-        assert!(result.err().unwrap().contains("password missing"));
+    fn resolve_auth_password_missing_secret_errors_as_auth_failed() {
+        // Missing SSH password for password auth is a caller programming
+        // error (the dialog should have rejected save), so AuthFailed is
+        // the right shape — distinct from PassphraseRequired which is a
+        // user-prompt outcome.
+        // `Box<dyn AuthMethod>` is not `Debug`, so we can't use `{:?}` on
+        // the `Ok` branch — match on Err first, otherwise the test fails
+        // with an explicit message.
+        match resolve_auth(&SshAuth::Password, ResolvedSshSecrets::default()) {
+            Err(SshError::AuthFailed(msg)) => assert!(msg.contains("password missing"), "msg: {msg}"),
+            Err(other) => panic!("expected AuthFailed, got {other:?}"),
+            Ok(_) => panic!("expected Err(AuthFailed), got Ok(<auth>)"),
+        }
     }
 
     #[test]
@@ -179,16 +202,22 @@ mod tests {
     }
 
     #[test]
-    fn resolve_auth_key_missing_passphrase_errors_when_encrypted() {
-        let result = resolve_auth(
+    fn resolve_auth_key_missing_passphrase_emits_passphrase_required() {
+        // Model says has_passphrase=true but the caller didn't resolve
+        // one — this is the prompt signal, not a hard failure. The
+        // builder's SSH step folds it into BuildOutcome::PassphraseRequired
+        // and the IPC layer maps that to ConnectResultV2::PassphraseRequired.
+        match resolve_auth(
             &SshAuth::Key {
                 key_path: "/tmp/id_ed25519".into(),
                 has_passphrase: true,
             },
             ResolvedSshSecrets::default(),
-        );
-        assert!(result.is_err());
-        assert!(result.err().unwrap().contains("passphrase missing"));
+        ) {
+            Err(SshError::PassphraseRequired) => {} // expected
+            Err(other) => panic!("expected PassphraseRequired, got {other:?}"),
+            Ok(_) => panic!("expected Err(PassphraseRequired), got Ok(<auth>)"),
+        }
     }
 
     #[test]

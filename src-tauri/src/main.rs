@@ -25,11 +25,6 @@ fn main() {
 }
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
-    // CONN_V2 toggles registration of the new tagged-union IPC commands.
-    // Resolved once here so setup() and the invoke_handler branch agree
-    // on the same value for the lifetime of the process.
-    let conn_v2_enabled = std::env::var("CONN_V2").is_ok();
-
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -70,14 +65,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 tracing_logger.clone(),
             ));
 
-            // CONN_V2: opt-in dual-table mode. When the env var is set,
-            // install the v2 secret store on AppState and run a one-shot
-            // migrate_all over the legacy `connections` table so the v2
-            // table starts in sync. Failures here log a warning and
-            // continue — the legacy path is unaffected.
-            if conn_v2_enabled {
-                bootstrap_conn_v2(app, &db_path, tracing_logger.as_ref());
-            }
+            // V2 is the canonical surface now. Install the v2 secret
+            // store on AppState and run a one-shot migrate_all over the
+            // legacy table so any pre-PR-5 user's rows make it into v2.
+            // Failures log a warning and continue — fresh installs have
+            // nothing to migrate, and an empty sweep is a no-op.
+            bootstrap_conn_v2(app, &db_path, tracing_logger.as_ref());
 
             // Retention sweep: once at boot, then every 24h.
             let sweep_dir = logs_dir.clone();
@@ -93,85 +86,43 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             Ok(())
         });
 
-    // Existing v1 handlers stay registered unconditionally so the old
-    // dialog keeps working. The v2 surface (connection_v2_* + prefs_*)
-    // is appended only when CONN_V2 is enabled — generate_handler! is a
-    // compile-time macro, so we pick one of two pre-built handler lists
-    // at runtime here rather than mutating a single list.
-    let builder = if conn_v2_enabled {
-        builder.invoke_handler(tauri::generate_handler![
-            commands::connection::list_connections,
-            commands::connection::create_connection,
-            commands::connection::update_connection,
-            commands::connection::delete_connection,
-            commands::connection::test_connection,
-            commands::connection::connect_connection,
-            commands::connection::disconnect_connection,
-            commands::collection::list_databases,
-            commands::collection::list_collections,
-            commands::collection::list_indexes,
-            commands::collection::browse_collection,
-            commands::document::update_document,
-            commands::document::delete_document,
-            commands::script::run_script,
-            commands::script::cancel_script,
-            commands::saved_script::list_scripts,
-            commands::saved_script::create_script,
-            commands::saved_script::update_script,
-            commands::saved_script::delete_script,
-            commands::saved_script::touch_script,
-            commands::logging::log_write,
-            runner::executor::check_node_runner,
-            runner::executor::install_node_runner,
-            commands::ai::set_ai_token,
-            commands::ai::get_ai_token,
-            commands::ai::delete_ai_token,
-            commands::plugin_secrets::set_plugin_secret,
-            commands::plugin_secrets::get_plugin_secret,
-            commands::plugin_secrets::delete_plugin_secret,
-            // CONN_V2 gated surface — see commands/connection_v2.rs and
-            // commands/prefs.rs.
-            commands::connection_v2::connections_v2_list,
-            commands::connection_v2::connections_v2_save,
-            commands::connection_v2::connections_v2_delete,
-            commands::connection_v2::connections_v2_test,
-            commands::prefs::prefs_get,
-            commands::prefs::prefs_set,
-            commands::prefs::prefs_resolve_effective,
-        ])
-    } else {
-        builder.invoke_handler(tauri::generate_handler![
-            commands::connection::list_connections,
-            commands::connection::create_connection,
-            commands::connection::update_connection,
-            commands::connection::delete_connection,
-            commands::connection::test_connection,
-            commands::connection::connect_connection,
-            commands::connection::disconnect_connection,
-            commands::collection::list_databases,
-            commands::collection::list_collections,
-            commands::collection::list_indexes,
-            commands::collection::browse_collection,
-            commands::document::update_document,
-            commands::document::delete_document,
-            commands::script::run_script,
-            commands::script::cancel_script,
-            commands::saved_script::list_scripts,
-            commands::saved_script::create_script,
-            commands::saved_script::update_script,
-            commands::saved_script::delete_script,
-            commands::saved_script::touch_script,
-            commands::logging::log_write,
-            runner::executor::check_node_runner,
-            runner::executor::install_node_runner,
-            commands::ai::set_ai_token,
-            commands::ai::get_ai_token,
-            commands::ai::delete_ai_token,
-            commands::plugin_secrets::set_plugin_secret,
-            commands::plugin_secrets::get_plugin_secret,
-            commands::plugin_secrets::delete_plugin_secret,
-        ])
-    };
+    // Single canonical handler list. The legacy connection_* commands
+    // were deleted in PR 5; the v2 connections_v2_* surface is the only
+    // path now (Task 20 will rename it back to `connections` once the
+    // table rename lands).
+    let builder = builder.invoke_handler(tauri::generate_handler![
+        commands::connection_v2::connections_v2_list,
+        commands::connection_v2::connections_v2_save,
+        commands::connection_v2::connections_v2_delete,
+        commands::connection_v2::connections_v2_test,
+        commands::connection_v2::connections_v2_connect,
+        commands::connection_v2::connections_v2_disconnect,
+        commands::prefs::prefs_get,
+        commands::prefs::prefs_set,
+        commands::prefs::prefs_resolve_effective,
+        commands::collection::list_databases,
+        commands::collection::list_collections,
+        commands::collection::list_indexes,
+        commands::collection::browse_collection,
+        commands::document::update_document,
+        commands::document::delete_document,
+        commands::script::run_script,
+        commands::script::cancel_script,
+        commands::saved_script::list_scripts,
+        commands::saved_script::create_script,
+        commands::saved_script::update_script,
+        commands::saved_script::delete_script,
+        commands::saved_script::touch_script,
+        commands::logging::log_write,
+        runner::executor::check_node_runner,
+        runner::executor::install_node_runner,
+        commands::ai::set_ai_token,
+        commands::ai::get_ai_token,
+        commands::ai::delete_ai_token,
+        commands::plugin_secrets::set_plugin_secret,
+        commands::plugin_secrets::get_plugin_secret,
+        commands::plugin_secrets::delete_plugin_secret,
+    ]);
 
     builder
         .on_window_event(|window, event| {
@@ -213,7 +164,8 @@ fn dirs_dir() -> Result<PathBuf, String> {
 /// `migrate_all` over the legacy `connections` table. Every step logs
 /// independently and is independently recoverable: a Keychain failure
 /// does not block migrate_all, and a per-row sync failure does not block
-/// the next row.
+/// the next row. Always called now that v2 is the canonical surface
+/// (the prior `CONN_V2` env gate was removed in PR 5).
 fn bootstrap_conn_v2(
     app: &tauri::App,
     db_path: &std::path::Path,
@@ -226,7 +178,7 @@ fn bootstrap_conn_v2(
         Ok(s) => Arc::new(s) as Arc<dyn connection::secrets::SecretStore>,
         Err(e) => {
             log.warn(
-                "CONN_V2 secret store init failed; skipping bootstrap",
+                "v2 secret store init failed; skipping bootstrap",
                 logctx! { "phase" => "conn_v2_bootstrap", "err" => e.to_string() },
             );
             return;
@@ -242,7 +194,7 @@ fn bootstrap_conn_v2(
         Ok(c) => c,
         Err(e) => {
             log.warn(
-                "CONN_V2 db open failed; migrate_all skipped",
+                "v2 db open failed; migrate_all skipped",
                 logctx! { "phase" => "conn_v2_bootstrap", "err" => e.to_string() },
             );
             return;
@@ -257,7 +209,7 @@ fn bootstrap_conn_v2(
 
     match connection::migration::migrate_all(&conn, &*store, &fetch_legacy_pw, log) {
         Ok(summary) => log.info(
-            "CONN_V2 bootstrap migrate_all complete",
+            "v2 bootstrap migrate_all complete",
             logctx! {
                 "total" => summary.total,
                 "migrated" => summary.migrated,
@@ -266,7 +218,7 @@ fn bootstrap_conn_v2(
             },
         ),
         Err(e) => log.warn(
-            "CONN_V2 bootstrap migrate_all failed",
+            "v2 bootstrap migrate_all failed",
             logctx! { "phase" => "conn_v2_bootstrap", "err" => e.to_string() },
         ),
     }

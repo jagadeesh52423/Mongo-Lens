@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { ContextBar } from '../components/features/editor/ContextBar';
-import { useConnectionsStore } from '../store/connections';
+import { useConnectionsV2 } from '../components/features/connections/useConnectionsV2';
+import type { Connection } from '../connection/model';
 
 vi.mock('../ipc', () => ({
   listDatabases: vi.fn().mockResolvedValue(['testdb']),
@@ -22,8 +23,14 @@ describe('ContextBar Save/Save As buttons', () => {
   };
 
   beforeEach(() => {
-    useConnectionsStore.setState({
-      connections: [{ id: 'conn-1', name: 'Test', createdAt: '2026-01-01' }],
+    const conn: Connection = {
+      id: 'conn-1', name: 'Test',
+      target: { kind: 'direct', host: 'localhost', port: 27017 },
+      auth: { kind: 'none' },
+      createdAt: '2026-01-01',
+    };
+    useConnectionsV2.setState({
+      connections: [conn],
       connectedIds: new Set(['conn-1']),
     });
   });

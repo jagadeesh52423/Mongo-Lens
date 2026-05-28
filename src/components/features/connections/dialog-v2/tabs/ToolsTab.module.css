@@ -1,0 +1,15 @@
+.row {
+  display: flex;
+  align-items: end;
+  gap: 6px;
+}
+
+.picker {
+  flex: 1;
+}
+
+.hint {
+  color: var(--fg-dim);
+  font-size: var(--fs-sm);
+  margin: 2px 0 6px;
+}

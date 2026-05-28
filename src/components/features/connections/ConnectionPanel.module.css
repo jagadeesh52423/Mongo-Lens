@@ -16,6 +16,7 @@
   align-items: center;
   gap: 6px;
   padding: 6px var(--space-3);
+  border-left: 3px solid transparent;
 }
 
 .statusDot {

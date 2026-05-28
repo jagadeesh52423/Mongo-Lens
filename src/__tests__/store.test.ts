@@ -1,30 +1,31 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { useConnectionsStore } from '../store/connections';
+import { useConnectionsV2 } from '../components/features/connections/useConnectionsV2';
 import { useEditorStore } from '../store/editor';
 import { useResultsStore } from '../store/results';
 
 beforeEach(() => {
-  useConnectionsStore.setState({
-    connections: [], activeConnectionId: null, activeDatabase: null, connectedIds: new Set(),
+  useConnectionsV2.setState({
+    connections: [], activeConnectionId: null, activeDatabase: null, connectedIds: new Set(), loading: false,
   });
   useEditorStore.setState({ tabs: [], activeTabId: null });
   useResultsStore.setState({ byTab: {} });
 });
 
-describe('connections store', () => {
-  it('adds and removes connections', () => {
-    const s = useConnectionsStore.getState();
-    s.addConnection({ id: '1', name: 'a', createdAt: 't' });
-    expect(useConnectionsStore.getState().connections).toHaveLength(1);
-    useConnectionsStore.getState().removeConnection('1');
-    expect(useConnectionsStore.getState().connections).toHaveLength(0);
+describe('connections store (v2)', () => {
+  it('tracks active selection', () => {
+    useConnectionsV2.getState().setActive('a', 'admin');
+    expect(useConnectionsV2.getState().activeConnectionId).toBe('a');
+    expect(useConnectionsV2.getState().activeDatabase).toBe('admin');
+    useConnectionsV2.getState().setActive(null);
+    expect(useConnectionsV2.getState().activeConnectionId).toBeNull();
+    expect(useConnectionsV2.getState().activeDatabase).toBeNull();
   });
 
   it('tracks connected ids', () => {
-    useConnectionsStore.getState().markConnected('x');
-    expect(useConnectionsStore.getState().connectedIds.has('x')).toBe(true);
-    useConnectionsStore.getState().markDisconnected('x');
-    expect(useConnectionsStore.getState().connectedIds.has('x')).toBe(false);
+    useConnectionsV2.getState().markConnected('x');
+    expect(useConnectionsV2.getState().connectedIds.has('x')).toBe(true);
+    useConnectionsV2.getState().markDisconnected('x');
+    expect(useConnectionsV2.getState().connectedIds.has('x')).toBe(false);
   });
 });
 

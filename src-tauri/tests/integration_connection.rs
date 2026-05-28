@@ -534,6 +534,281 @@ async fn test_08_socks5_proxy_ping() {
     println!("test_08_socks5_proxy_ping: ping ok in {latency:?}");
 }
 
+// ══════════════════════════════════════════════════════════════════════════
+// Task 17 — connections_v2_connect outcome tests
+//
+// These exercise the *outcome* surface of `build_client_options` —
+// `BuildOutcome::Ready` vs `PassphraseRequired` vs `HostKeyUnknown` —
+// which is the contract `connections_v2_connect` translates into
+// `ConnectResultV2`. Driving the IPC command directly would need a Tauri
+// AppHandle + state; building options directly is sufficient because the
+// IPC layer's mapping is purely mechanical (one match arm per variant)
+// and unit-tested separately in commands/connection_v2.rs.
+//
+// Each test asserts:
+//   * the FIRST attempt produces the prompt outcome (PassphraseRequired /
+//     HostKeyUnknown), with structured fields populated.
+//   * the RETRY (passphrase set / accept_host_key=true) produces Ready
+//     and a real `ping` round-trips successfully.
+// ══════════════════════════════════════════════════════════════════════════
+
+// ──────────────────────────────────────────────────────────────────────────
+// 9. connect_v2 happy path — Ready outcome + ping
+// ──────────────────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_09_connect_v2_success_returns_connected() {
+    if !is_integration() {
+        eprintln!("skip: set INTEGRATION=1");
+        return;
+    }
+    if !require_docker() {
+        return;
+    }
+
+    let name = unique_name("conn-v2-connect-ok");
+    let _guard = ContainerGuard::new(name.clone());
+
+    run_docker(&[
+        "run", "-d",
+        "--label", TEST_LABEL,
+        "--name", &name,
+        "-p", "0:27017",
+        MONGO_IMAGE,
+    ])
+    .expect("docker run mongo");
+
+    let host_port = assigned_port(&name, 27017).expect("assigned port");
+    wait_for_tcp("127.0.0.1", host_port, Duration::from_secs(30))
+        .await
+        .expect("tcp up");
+    wait_for_mongo_ready_in_container(&name, &[], Duration::from_secs(30))
+        .expect("mongod ready");
+
+    let conn = direct_conn(
+        "127.0.0.1",
+        host_port,
+        mongo_lens::connection::model::AuthMode::None,
+        None,
+    );
+    let resolved = ResolvedConnection::bare(&conn);
+    let kind = connect_outcome(&resolved, false).await.expect("connect_outcome");
+    assert!(
+        matches!(kind, OutcomeKind::Ready),
+        "expected Ready for no-auth mongo:7 direct connection"
+    );
+    println!("test_09_connect_v2_success_returns_connected: Ready ok");
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// 10. connect_v2 passphrase-required on encrypted key, then succeed on retry
+// ──────────────────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_10_connect_v2_passphrase_required_when_key_encrypted() {
+    if !is_integration() {
+        eprintln!("skip: set INTEGRATION=1");
+        return;
+    }
+    if !require_docker() {
+        return;
+    }
+
+    let passphrase = "trapdoor-passphrase";
+    let (keypair, _pp) =
+        generate_ssh_keypair_with_passphrase(passphrase).expect("ssh-keygen with passphrase");
+
+    let net = NetworkGuard::create("conn-v2-net-pp").expect("create network");
+
+    // Mongo on the test-net, unreachable from host.
+    let mongo_name = unique_name("conn-v2-mongo-pp");
+    let _mongo_guard = ContainerGuard::new(mongo_name.clone());
+    run_docker(&[
+        "run", "-d",
+        "--label", TEST_LABEL,
+        "--name", &mongo_name,
+        "--network", &net.name,
+        "--network-alias", "mongo",
+        MONGO_IMAGE,
+    ])
+    .expect("docker run mongo");
+    wait_for_mongo_ready_in_container(&mongo_name, &[], Duration::from_secs(45))
+        .expect("mongod ready");
+
+    // SSH server accepts the (encrypted) key's public half.
+    let ssh_name = unique_name("conn-v2-ssh-pp");
+    let _ssh_guard = ContainerGuard::new(ssh_name.clone());
+    let public_key_env = format!("PUBLIC_KEY={}", keypair.public_str);
+    run_docker(&[
+        "run", "-d",
+        "--label", TEST_LABEL,
+        "--name", &ssh_name,
+        "--network", &net.name,
+        "-p", "0:2222",
+        "-e", "PUID=1000",
+        "-e", "PGID=1000",
+        "-e", "USER_NAME=mongo",
+        "-e", &public_key_env,
+        SSH_IMAGE,
+    ])
+    .expect("docker run sshd");
+    let ssh_port = assigned_port(&ssh_name, 2222).expect("ssh port");
+    wait_for_tcp("127.0.0.1", ssh_port, Duration::from_secs(60))
+        .await
+        .expect("ssh tcp up");
+    enable_ssh_tcp_forwarding(&ssh_name).expect("enable tcp forwarding");
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    // The connection record references the encrypted key with
+    // has_passphrase=true. Policy is AcceptAny so host-key signaling
+    // doesn't shadow the passphrase signal.
+    let mut conn = direct_conn(
+        "mongo",
+        27017,
+        mongo_lens::connection::model::AuthMode::None,
+        None,
+    );
+    add_ssh_key_with_passphrase(
+        &mut conn,
+        "127.0.0.1",
+        ssh_port,
+        "mongo",
+        &keypair.private_path,
+        mongo_lens::connection::model::KnownHostsPolicy::AcceptAny,
+    );
+
+    // First attempt: no passphrase resolved → PassphraseRequired.
+    let resolved_no_pp = ResolvedConnection::bare(&conn);
+    let first = connect_outcome(&resolved_no_pp, false)
+        .await
+        .expect("connect_outcome (no passphrase)");
+    assert!(
+        matches!(first, OutcomeKind::PassphraseRequired),
+        "expected PassphraseRequired on first attempt"
+    );
+
+    // Retry: dialog has populated the passphrase slot → Ready.
+    let mut resolved_with_pp = ResolvedConnection::bare(&conn);
+    resolved_with_pp.ssh_key_passphrase = Some(passphrase.to_string());
+    let second = connect_outcome(&resolved_with_pp, false)
+        .await
+        .expect("connect_outcome (with passphrase)");
+    assert!(
+        matches!(second, OutcomeKind::Ready),
+        "expected Ready after passphrase supplied"
+    );
+    println!("test_10_connect_v2_passphrase_required_when_key_encrypted: ok");
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// 11. connect_v2 host-key-unknown on Strict policy, then succeed on accept
+// ──────────────────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_11_connect_v2_host_key_unknown_on_strict_policy() {
+    if !is_integration() {
+        eprintln!("skip: set INTEGRATION=1");
+        return;
+    }
+    if !require_docker() {
+        return;
+    }
+
+    // The SSH host-key verifier consults `~/.mongomacapp/known_hosts`.
+    // We sandbox HOME so:
+    //   1. The "first attempt" starts with an empty store (any persisted
+    //      key from a prior run can't shadow the test).
+    //   2. The key our retry-with-accept persists doesn't leak into the
+    //      developer's real known_hosts file.
+    // HomeGuard restores HOME on drop. Must hold for the whole test.
+    let _home = HomeGuard::fresh().expect("HomeGuard");
+
+    let keypair = generate_ssh_keypair().expect("ssh-keygen");
+    let net = NetworkGuard::create("conn-v2-net-hk").expect("create network");
+
+    let mongo_name = unique_name("conn-v2-mongo-hk");
+    let _mongo_guard = ContainerGuard::new(mongo_name.clone());
+    run_docker(&[
+        "run", "-d",
+        "--label", TEST_LABEL,
+        "--name", &mongo_name,
+        "--network", &net.name,
+        "--network-alias", "mongo",
+        MONGO_IMAGE,
+    ])
+    .expect("docker run mongo");
+    wait_for_mongo_ready_in_container(&mongo_name, &[], Duration::from_secs(45))
+        .expect("mongod ready");
+
+    let ssh_name = unique_name("conn-v2-ssh-hk");
+    let _ssh_guard = ContainerGuard::new(ssh_name.clone());
+    let public_key_env = format!("PUBLIC_KEY={}", keypair.public_str);
+    run_docker(&[
+        "run", "-d",
+        "--label", TEST_LABEL,
+        "--name", &ssh_name,
+        "--network", &net.name,
+        "-p", "0:2222",
+        "-e", "PUID=1000",
+        "-e", "PGID=1000",
+        "-e", "USER_NAME=mongo",
+        "-e", &public_key_env,
+        SSH_IMAGE,
+    ])
+    .expect("docker run sshd");
+    let ssh_port = assigned_port(&ssh_name, 2222).expect("ssh port");
+    wait_for_tcp("127.0.0.1", ssh_port, Duration::from_secs(60))
+        .await
+        .expect("ssh tcp up");
+    enable_ssh_tcp_forwarding(&ssh_name).expect("enable tcp forwarding");
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    let mut conn = direct_conn(
+        "mongo",
+        27017,
+        mongo_lens::connection::model::AuthMode::None,
+        None,
+    );
+    add_ssh_key(&mut conn, "127.0.0.1", ssh_port, "mongo", &keypair.private_path);
+    set_ssh_policy(&mut conn, mongo_lens::connection::model::KnownHostsPolicy::Strict);
+
+    // First attempt: empty known_hosts + Strict → HostKeyUnknown with
+    // structured fields populated.
+    let resolved = ResolvedConnection::bare(&conn);
+    let first = connect_outcome(&resolved, false)
+        .await
+        .expect("connect_outcome (strict first)");
+    let (host, port, algorithm, fingerprint) = match first {
+        OutcomeKind::HostKeyUnknown {
+            host,
+            port,
+            algorithm,
+            fingerprint,
+        } => (host, port, algorithm, fingerprint),
+        OutcomeKind::Ready => panic!("expected HostKeyUnknown, got Ready"),
+        OutcomeKind::PassphraseRequired => {
+            panic!("expected HostKeyUnknown, got PassphraseRequired")
+        }
+    };
+    assert_eq!(host, "127.0.0.1");
+    assert_eq!(port, ssh_port);
+    assert!(!algorithm.is_empty(), "algorithm should be populated");
+    assert!(
+        fingerprint.starts_with("SHA256:"),
+        "fingerprint should be SHA256: prefixed (got: {fingerprint})"
+    );
+
+    // Retry: accept_host_key=true → verifier persists the key → Ready.
+    let second = connect_outcome(&resolved, true)
+        .await
+        .expect("connect_outcome (strict accept)");
+    assert!(
+        matches!(second, OutcomeKind::Ready),
+        "expected Ready after accept_host_key=true"
+    );
+    println!("test_11_connect_v2_host_key_unknown_on_strict_policy: ok");
+}
+
 // ──────────────────────────────────────────────────────────────────────────
 // Final cleanup sweep — runs alphabetically last (`zzz_`) under --test-threads=1.
 // Catches anything that survived a panicking Drop or a `kill -9`.

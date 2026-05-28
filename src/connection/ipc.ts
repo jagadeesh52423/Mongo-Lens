@@ -30,6 +30,9 @@ export type SecretSlotName =
   | 'aws-secret-key'
   | 'oidc-refresh-token';
 
+/// Alias for ergonomic imports in dialog code.
+export type SecretSlot = SecretSlotName;
+
 export interface SecretInput {
   slot: SecretSlotName;
   value: string;
@@ -65,6 +68,38 @@ export const deleteV2 = (id: string): Promise<void> =>
 
 export const testV2 = (input: SaveInput): Promise<TestResult> =>
   invoke<TestResult>('connections_v2_test', { input });
+
+/// Outcome of `connections_v2_connect`. The dialog routes on `type`:
+///   - `'connected'`             → close the dialog, flip to "live"
+///   - `'passphraseRequired'`    → open PassphraseDialog; retry with `passphrase`
+///   - `'hostKeyUnknown'`        → open HostKeyDialog; retry with `acceptHostKey:true`
+///
+/// Mirrors `ConnectResultV2` in src-tauri/src/commands/connection_v2.rs.
+export type ConnectResultV2 =
+  | { type: 'connected' }
+  | { type: 'passphraseRequired'; connectionId: string }
+  | {
+      type: 'hostKeyUnknown';
+      connectionId: string;
+      fingerprint: string;
+      algorithm: string;
+      host: string;
+      port: number;
+    };
+
+export const connectV2 = (
+  id: string,
+  passphrase?: string,
+  acceptHostKey?: boolean,
+): Promise<ConnectResultV2> =>
+  invoke<ConnectResultV2>('connections_v2_connect', {
+    id,
+    passphrase,
+    acceptHostKey,
+  });
+
+export const disconnectV2 = (id: string): Promise<void> =>
+  invoke<void>('connections_v2_disconnect', { id });
 
 // ──────────────────────────────────────────────────────────────────────────
 // prefs_*

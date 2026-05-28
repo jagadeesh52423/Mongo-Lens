@@ -38,9 +38,15 @@ use crate::connection::model::{
 };
 use crate::connection::secrets::{SecretError, SecretSlot, SecretStore};
 use crate::connection::store::{self, StoreError};
-use crate::db::connections::{self as legacy_db, ConnectionRecord};
 use crate::logctx;
 use crate::logger::Logger;
+
+// `ConnectionRecord` + the minimal SQL surface needed by `migrate_all`
+// live in a private submodule here. They used to live in `db::connections`
+// (deleted in PR 5 along with the legacy IPC). Bringing them in-module
+// keeps the bootstrap migration self-contained — no other code in the
+// crate touches the legacy `connections` table directly anymore.
+use legacy_db::ConnectionRecord;
 
 // ──────────────────────────────────────────────────────────────────────────
 // Constants — kept in sync with src/connection/migration.ts
@@ -160,11 +166,12 @@ fn to_u16_or(value: Option<i64>, default: u16) -> u16 {
 /// Migrate one legacy row into v2: upsert the payload row in
 /// `connections_v2`, and (if a legacy password is supplied and non-empty)
 /// write it to `SecretSlot::AuthPassword` for the same connection id.
-/// **The legacy keychain entry is intentionally left in place** — the
-/// old dialog still reads from it.
 ///
-/// Returns the materialised [`Connection`] so callers can log/diagnose.
-pub fn sync_row_to_v2<S: SecretStore + ?Sized>(
+/// Private to the module: the prior external caller (legacy
+/// `commands::connection::sync_v2_after_save`) was deleted in PR 5. The
+/// only remaining caller is `migrate_all` below, which sweeps the legacy
+/// table at app boot. In-module tests also drive it directly.
+fn sync_row_to_v2<S: SecretStore + ?Sized>(
     sqlite: &SqliteConnection,
     secrets: &S,
     legacy: &ConnectionRecord,
@@ -563,8 +570,10 @@ mod tests {
         assert_eq!(second.migrated, 1);
 
         // Exactly one v2 row regardless of how many sweeps happened.
+        // (Post-PR-5 the v2 table is named `connections`; this test was
+        // written against the dual-table phase's `connections_v2`.)
         let count: i64 = sqlite
-            .query_row("SELECT COUNT(*) FROM connections_v2", [], |row| row.get(0))
+            .query_row("SELECT COUNT(*) FROM connections", [], |row| row.get(0))
             .unwrap();
         assert_eq!(count, 1);
     }
@@ -577,5 +586,103 @@ mod tests {
 
         let summary = migrate_all(&sqlite, &secrets, &pw_for_c1_only, log.as_ref()).unwrap();
         assert_eq!(summary, MigrationSummary::default());
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Legacy-table read surface
+//
+// Previously lived in `db::connections` (deleted in PR 5). Bringing it
+// in here keeps the bootstrap migration self-contained: the rest of the
+// crate has moved off `ConnectionRecord` entirely, and this submodule is
+// the only place the legacy column layout is still touched. The
+// `connections` table name is hardcoded here for now; Task 20's atomic
+// rename migration will retarget this at `connections_v1_backup`.
+mod legacy_db {
+    // `params!` is only used by the test-only insert/get helpers; gate
+    // the import so prod builds don't warn about an unused symbol.
+    #[cfg(test)]
+    use rusqlite::params;
+    use rusqlite::{Connection, Row};
+    use serde::{Deserialize, Serialize};
+
+    /// Legacy flat-column row shape. Kept here only so the bootstrap
+    /// migration can read pre-v2 data; never written by current code.
+    /// `Serialize` retained for the migration's fixture-based unit tests
+    /// (paired with the `legacy/*.json` fixtures under
+    /// `tests/fixtures/connection/`).
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct ConnectionRecord {
+        pub id: String,
+        pub name: String,
+        pub host: Option<String>,
+        pub port: Option<i64>,
+        pub auth_db: Option<String>,
+        pub username: Option<String>,
+        pub conn_string: Option<String>,
+        pub ssh_host: Option<String>,
+        pub ssh_port: Option<i64>,
+        pub ssh_user: Option<String>,
+        pub ssh_key_path: Option<String>,
+        pub created_at: String,
+    }
+
+    fn map_row(row: &Row) -> rusqlite::Result<ConnectionRecord> {
+        Ok(ConnectionRecord {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            host: row.get(2)?,
+            port: row.get(3)?,
+            auth_db: row.get(4)?,
+            username: row.get(5)?,
+            conn_string: row.get(6)?,
+            ssh_host: row.get(7)?,
+            ssh_port: row.get(8)?,
+            ssh_user: row.get(9)?,
+            ssh_key_path: row.get(10)?,
+            created_at: row.get(11)?,
+        })
+    }
+
+    // All reads target `connections_v1_backup` — the post-rename home of
+    // the pre-PR-5 legacy table. `db::migrate.rs` always ensures the
+    // backup table exists (creating it empty on fresh installs), so this
+    // module never has to guard against a missing table.
+
+    pub fn list(conn: &Connection) -> rusqlite::Result<Vec<ConnectionRecord>> {
+        let mut stmt = conn.prepare(
+            "SELECT id,name,host,port,auth_db,username,conn_string,ssh_host,ssh_port,ssh_user,ssh_key_path,created_at
+             FROM connections_v1_backup ORDER BY name",
+        )?;
+        let rows = stmt.query_map([], map_row)?;
+        rows.collect()
+    }
+
+    #[cfg(test)]
+    pub fn get(conn: &Connection, id: &str) -> rusqlite::Result<Option<ConnectionRecord>> {
+        let mut stmt = conn.prepare(
+            "SELECT id,name,host,port,auth_db,username,conn_string,ssh_host,ssh_port,ssh_user,ssh_key_path,created_at
+             FROM connections_v1_backup WHERE id = ?1",
+        )?;
+        let mut rows = stmt.query_map(params![id], map_row)?;
+        match rows.next() {
+            Some(r) => Ok(Some(r?)),
+            None => Ok(None),
+        }
+    }
+
+    #[cfg(test)]
+    pub fn insert(conn: &Connection, rec: &ConnectionRecord) -> rusqlite::Result<()> {
+        conn.execute(
+            "INSERT INTO connections_v1_backup (id,name,host,port,auth_db,username,conn_string,ssh_host,ssh_port,ssh_user,ssh_key_path,created_at)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+            params![
+                rec.id, rec.name, rec.host, rec.port, rec.auth_db, rec.username,
+                rec.conn_string, rec.ssh_host, rec.ssh_port, rec.ssh_user, rec.ssh_key_path,
+                rec.created_at,
+            ],
+        )?;
+        Ok(())
     }
 }

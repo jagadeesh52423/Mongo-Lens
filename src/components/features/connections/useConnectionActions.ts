@@ -1,14 +1,8 @@
 import { useCallback, useState } from 'react';
-import {
-  createConnection,
-  updateConnection as ipcUpdate,
-  deleteConnection as ipcDelete,
-  connectConnection,
-  disconnectConnection,
-} from '../../../ipc';
-import { useConnectionsStore } from '../../../store/connections';
+import { connectV2, disconnectV2, type SaveInput } from '../../../connection/ipc';
+import { useConnectionsV2 } from './useConnectionsV2';
 import { nextDuplicateName } from './nameUtils';
-import type { Connection, ConnectionInput } from '../../../types';
+import type { Connection } from '../../../connection/model';
 
 /** Pending host-key confirmation while waiting on the user. */
 interface PendingHostKey {
@@ -22,8 +16,8 @@ interface PendingHostKey {
 }
 
 interface UseConnectionActions {
-  // CRUD
-  save: (input: ConnectionInput, editing: Connection | null) => Promise<void>;
+  // CRUD (save lives on the v2 store directly; dialog calls it; the hook only
+  // surfaces the right-click duplicate + delete actions).
   duplicate: (c: Connection) => Promise<void>;
   remove: (c: Connection) => Promise<void>;
   // Connect lifecycle
@@ -46,21 +40,23 @@ interface UseConnectionActions {
 }
 
 /**
- * Encapsulates the connection CRUD + connect/disconnect lifecycle, including
- * SSH passphrase and host-key prompt state. The panel layer reads these
- * callbacks/state directly so it stays focused on rendering.
+ * Encapsulates the connection duplicate/delete + connect/disconnect lifecycle,
+ * including SSH passphrase and host-key prompt state. The panel layer reads
+ * these callbacks/state directly so it stays focused on rendering.
+ *
+ * All CRUD and connect IPC goes through the v2 commands
+ * (`src/connection/ipc.ts`); the legacy `src/ipc.ts` connection wrappers
+ * were dropped from this file in PR 5 / Task 18.
  */
 export function useConnectionActions(): UseConnectionActions {
-  const {
-    connections,
-    activeConnectionId,
-    addConnection,
-    updateConnection,
-    removeConnection,
-    setActive,
-    markConnected,
-    markDisconnected,
-  } = useConnectionsStore();
+  const connections = useConnectionsV2((s) => s.connections);
+  const activeConnectionId = useConnectionsV2((s) => s.activeConnectionId);
+  const saveV2Store = useConnectionsV2((s) => s.save);
+  const removeV2Store = useConnectionsV2((s) => s.remove);
+  const setActive = useConnectionsV2((s) => s.setActive);
+  const markConnected = useConnectionsV2((s) => s.markConnected);
+  const markDisconnected = useConnectionsV2((s) => s.markDisconnected);
+
   const [passphraseFor, setPassphraseFor] = useState<Connection | null>(null);
   const [pendingHostKey, setPendingHostKey] = useState<PendingHostKey | null>(null);
   const [connectError, setConnectError] = useState<string | null>(null);
@@ -77,7 +73,7 @@ export function useConnectionActions(): UseConnectionActions {
   /** Core connect logic, shared by first attempt, passphrase retry, and host-key retry. */
   const doConnect = useCallback(async (c: Connection, passphrase?: string, acceptHostKey?: boolean) => {
     try {
-      const result = await connectConnection(c.id, passphrase, acceptHostKey);
+      const result = await connectV2(c.id, passphrase, acceptHostKey);
       if (result.type === 'connected') {
         markConnected(c.id);
         setExpandedConns((s) => new Set(s).add(c.id));
@@ -101,43 +97,28 @@ export function useConnectionActions(): UseConnectionActions {
     }
   }, [markConnected, setActive]);
 
-  const save = useCallback(async (input: ConnectionInput, editing: Connection | null) => {
-    if (editing) {
-      const updated = await ipcUpdate(editing.id, input);
-      updateConnection(updated);
-    } else {
-      const c = await createConnection(input);
-      addConnection(c);
-    }
-  }, [addConnection, updateConnection]);
-
   const duplicate = useCallback(async (c: Connection) => {
-    const input: ConnectionInput = {
-      name: nextDuplicateName(c.name, connections.map((x) => x.name)),
-      host: c.host,
-      port: c.port,
-      authDb: c.authDb,
-      username: c.username,
-      connString: c.connString,
-      sshHost: c.sshHost,
-      sshPort: c.sshPort,
-      sshUser: c.sshUser,
-      sshKeyPath: c.sshKeyPath,
+    // Clone the v2 connection wholesale, but stamp a fresh id (empty triggers
+    // server-side gen by `connections_v2_save`), a unique name, and a new
+    // createdAt. Secrets are intentionally not copied — the keychain entries
+    // belong to the source id; the user can re-enter them via the dialog if
+    // needed. This matches the legacy duplicate semantics.
+    const input: SaveInput = {
+      connection: {
+        ...c,
+        id: '',
+        name: nextDuplicateName(c.name, connections.map((x) => x.name)),
+        createdAt: new Date().toISOString(),
+      },
+      secrets: [],
     };
-    const created = await createConnection(input);
-    addConnection(created);
-  }, [connections, addConnection]);
-
-  const remove = useCallback(async (c: Connection) => {
-    if (!confirm(`Delete connection "${c.name}"?`)) return;
-    await ipcDelete(c.id);
-    removeConnection(c.id);
-  }, [removeConnection]);
+    await saveV2Store(input);
+  }, [connections, saveV2Store]);
 
   const connect = useCallback((c: Connection) => doConnect(c), [doConnect]);
 
   const disconnect = useCallback(async (c: Connection) => {
-    await disconnectConnection(c.id);
+    await disconnectV2(c.id);
     markDisconnected(c.id);
     setExpandedConns((s) => {
       const n = new Set(s);
@@ -146,6 +127,11 @@ export function useConnectionActions(): UseConnectionActions {
     });
     if (activeConnectionId === c.id) setActive(null, null);
   }, [activeConnectionId, markDisconnected, setActive]);
+
+  const remove = useCallback(async (c: Connection) => {
+    if (!confirm(`Delete connection "${c.name}"?`)) return;
+    await removeV2Store(c.id);
+  }, [removeV2Store]);
 
   const submitPassphrase = useCallback((passphrase: string) => {
     const c = passphraseFor;
@@ -162,7 +148,7 @@ export function useConnectionActions(): UseConnectionActions {
   }, [pendingHostKey, connections, doConnect]);
 
   return {
-    save, duplicate, remove,
+    duplicate, remove,
     connect, disconnect,
     passphraseFor, setPassphraseFor, submitPassphrase,
     pendingHostKey, setPendingHostKey, acceptHostKey,

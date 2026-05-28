@@ -1,6 +1,5 @@
 pub mod ai;
 pub mod collection;
-pub mod connection;
 pub mod connection_v2;
 pub mod document;
 pub mod logging;

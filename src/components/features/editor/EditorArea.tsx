@@ -3,7 +3,7 @@ import { Panel, PanelGroup } from 'react-resizable-panels';
 import { loader } from '@monaco-editor/react';
 import { modelPathForTab, ScriptEditor } from './ScriptEditor';
 import { useEditorStore, DEFAULT_PANEL_SIZES } from '../../../store/editor';
-import { useConnectionsStore } from '../../../store/connections';
+import { useConnectionsV2 } from '../connections/useConnectionsV2';
 import { ContextBar } from './ContextBar';
 import { EditorTabBar } from './EditorTabBar';
 import { ResultsPanel } from '../results/ResultsPanel';
@@ -23,7 +23,7 @@ export function EditorArea() {
     tabs, activeTabId, setActive, closeTab, updateContent, openTab, updateTab,
     panelSizes, setPanelSizes, selections, setSelection,
   } = useEditorStore();
-  const { activeConnectionId, activeDatabase } = useConnectionsStore();
+  const { activeConnectionId, activeDatabase } = useConnectionsV2();
   const active = tabs.find((t) => t.id === activeTabId);
   const completions = useCollectionCompletions(
     active?.connectionId ?? activeConnectionId,

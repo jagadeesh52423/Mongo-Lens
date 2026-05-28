@@ -46,6 +46,24 @@ function mergeBlock<T extends object>(
   return merged;
 }
 
+/// Fully-populated defaults used by the UI when the user hasn't customised
+/// global prefs yet. Mirrors the Rust-side defaults in
+/// `src-tauri/src/prefs/mod.rs::GlobalPrefs::default`.
+export const DEFAULT_GLOBAL_PREFS: GlobalPrefs = {
+  intelliShell: { commandTimeoutMs: 30000, autoCompleteEnabled: true, printLimit: 1000 },
+  tools: {
+    mongodumpPath: '/usr/bin/mongodump',
+    mongorestorePath: '/usr/bin/mongorestore',
+    mongoexportPath: '/usr/bin/mongoexport',
+    mongoimportPath: '/usr/bin/mongoimport',
+  },
+  advanced: {
+    appName: 'mongo-lens', retryWrites: true, retryReads: true,
+    compressors: ['snappy'],
+    serverSelectionTimeoutMs: 30000, connectTimeoutMs: 10000, socketTimeoutMs: 0,
+  },
+};
+
 export function resolveEffective(
   global: GlobalPrefs,
   overrides?: ConnectionOverrides,

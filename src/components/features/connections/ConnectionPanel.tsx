@@ -1,26 +1,33 @@
 import { useEffect, useState } from 'react';
-import { listConnections, onSshSessionLost } from '../../../ipc';
-import { useConnectionsStore } from '../../../store/connections';
+import { onSshSessionLost } from '../../../ipc';
+import { useConnectionsV2 } from './useConnectionsV2';
 import { useEditorStore } from '../../../store/editor';
-import { ConnectionDialog } from './ConnectionDialog';
+import { ConnectionDialogV2 } from './dialog-v2/ConnectionDialogV2';
 import { ConnectionTree } from './ConnectionTree';
+import { prefsGet } from '../../../connection/ipc';
+import { DEFAULT_GLOBAL_PREFS, type GlobalPrefs } from '../../../connection/overrides';
 import { ContextMenu } from '../../ui/ContextMenu';
 import { PassphraseDialog } from './PassphraseDialog';
 import { HostKeyDialog } from './HostKeyDialog';
 import { ConnectionErrorDialog } from './ConnectionErrorDialog';
 import { useConnectionActions } from './useConnectionActions';
 import { IconButton, Panel } from '../../ui';
-import type { Connection } from '../../../types';
+import type { Connection } from '../../../connection/model';
 import styles from './ConnectionPanel.module.css';
 
 export { nextDuplicateName } from './nameUtils';
 
 export function ConnectionPanel() {
-  const { connections, connectedIds, setConnections, markDisconnected } = useConnectionsStore();
+  const connections = useConnectionsV2((s) => s.connections);
+  const connectedIds = useConnectionsV2((s) => s.connectedIds);
+  const markDisconnected = useConnectionsV2((s) => s.markDisconnected);
+  const refreshV2 = useConnectionsV2((s) => s.refresh);
+  const saveV2Store = useConnectionsV2((s) => s.save);
   const actions = useConnectionActions();
   const [editing, setEditing] = useState<Connection | null>(null);
   const [creating, setCreating] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; connection: Connection } | null>(null);
+  const [globals, setGlobals] = useState<GlobalPrefs>(DEFAULT_GLOBAL_PREFS);
   const openTab = useEditorStore((s) => s.openTab);
 
   function openCollectionScriptTab(db: string, col: string, cId: string) {
@@ -37,8 +44,14 @@ export function ConnectionPanel() {
   }
 
   useEffect(() => {
-    listConnections().then(setConnections).catch((e) => console.error(e));
-  }, [setConnections]);
+    // The v2 store is the sole source of truth for the connection list.
+    refreshV2().catch((e) => console.error('refreshV2 failed:', e));
+    // Wrapped in Promise.resolve so an undefined IPC response (test mocks
+    // that don't enumerate every call) doesn't throw on `.then`.
+    Promise.resolve(prefsGet())
+      .then((p) => p && setGlobals(p))
+      .catch((e) => console.error('prefsGet failed:', e));
+  }, [refreshV2]);
 
   // Listen for SSH session-loss events from the Rust backend and flip the
   // connection state to disconnected so the UI reflects the drop immediately.
@@ -56,12 +69,6 @@ export function ConnectionPanel() {
     // every expansion change would thrash the IPC subscription.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [markDisconnected]);
-
-  async function handleSave(input: Parameters<typeof actions.save>[0]) {
-    await actions.save(input, editing);
-    setEditing(null);
-    setCreating(false);
-  }
 
   return (
     <Panel>
@@ -81,6 +88,7 @@ export function ConnectionPanel() {
         <ul className={styles.list}>
           {connections.map((c) => {
             const connected = connectedIds.has(c.id);
+            const envColor = c.color;
             return (
               <li
                 key={c.id}
@@ -90,7 +98,11 @@ export function ConnectionPanel() {
                   setContextMenu({ x: e.clientX, y: e.clientY, connection: c });
                 }}
               >
-                <div className={styles.row}>
+                <div
+                  className={styles.row}
+                  data-testid={`conn-row-${c.id}`}
+                  style={envColor ? { borderLeftColor: envColor } : undefined}
+                >
                   <span className={connected ? styles.statusDotConnected : styles.statusDot}>●</span>
                   <span
                     onClick={() => connected && actions.toggleExpanded(c.id)}
@@ -116,9 +128,15 @@ export function ConnectionPanel() {
         </ul>
       </Panel.Body>
       {(creating || editing) && (
-        <ConnectionDialog
-          initial={editing ?? undefined}
-          onSave={handleSave}
+        <ConnectionDialogV2
+          initial={editing}
+          globals={globals}
+          onSave={async (input) => {
+            const saved = await saveV2Store(input);
+            setEditing(null);
+            setCreating(false);
+            return saved;
+          }}
           onCancel={() => { setEditing(null); setCreating(false); }}
         />
       )}

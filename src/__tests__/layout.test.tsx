@@ -3,15 +3,15 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { invoke } from '@tauri-apps/api/core';
 import App from '../App';
-import { useConnectionsStore } from '../store/connections';
+import { useConnectionsV2 } from '../components/features/connections/useConnectionsV2';
 
 const invokeMock = invoke as unknown as ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   invokeMock.mockReset();
   invokeMock.mockResolvedValue([]);
-  useConnectionsStore.setState({
-    connections: [], activeConnectionId: null, activeDatabase: null, connectedIds: new Set(),
+  useConnectionsV2.setState({
+    connections: [], activeConnectionId: null, activeDatabase: null, connectedIds: new Set(), loading: false,
   });
 });
 

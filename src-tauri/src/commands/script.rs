@@ -1,5 +1,4 @@
-use crate::db;
-use crate::keychain;
+use crate::connection::store as connection_store;
 use crate::logctx;
 use crate::mongo;
 use crate::runner::executor::spawn_script;
@@ -87,31 +86,34 @@ pub async fn run_script(
         "script" => script.clone(),          // redacted inside the logger
     });
 
-    let conn = state.open_db().map_err(|e| {
-        log.error("open_db failed", logctx! { "err" => e.to_string() });
-        e.to_string()
+    // Re-use the URI that the v2 connect path already validated and
+    // stored. That URI has any SSH-tunnel rewrites and fallback params
+    // (directConnection / tls) applied, so the Node runner connects with
+    // the exact same string the Rust driver succeeded with — no extra
+    // SDAM round-trip, no repeat of the legacy 30s fallback.
+    //
+    // If `active_uri` is None, the connection was never connected (or was
+    // disconnected behind our back). The dialog requires Connect before
+    // Run; reaching this path means the UI is out of sync. Error
+    // explicitly rather than re-deriving a URI from scratch — the prior
+    // re-derive path leaked legacy `ConnectionRecord` shape into the v2
+    // world and silently used stale keychain creds.
+    let uri = mongo::active_uri(&state, &connection_id).ok_or_else(|| {
+        log.error("connection not established (no active URI)", logctx! {});
+        "connection not established — connect first".to_string()
     })?;
-    let rec = db::connections::get(&conn, &connection_id)
-        .map_err(|e| {
-            log.error("connection lookup failed", logctx! { "err" => e.to_string() });
-            e.to_string()
-        })?
-        .ok_or_else(|| {
-            log.error("connection not found", logctx! {});
-            "connection not found".to_string()
-        })?;
-    drop(conn);
-    // Prefer the URI that the active client succeeded with — it already has whatever
-    // fallback params (directConnection, tls) were needed to reach the cluster, so the
-    // Node runner doesn't repeat the 30s SDAM hang the Rust side already worked around.
-    let uri = match mongo::active_uri(&state, &connection_id) {
-        Some(u) => u,
-        None => {
-            let pw = keychain::get_password(&connection_id, log.as_ref())?;
-            mongo::build_uri(&rec, pw.as_deref())
+
+    // For diagnostics only — derive a one-line "where" string from the v2
+    // model. Failure to look up the connection here is non-fatal (we have
+    // a working URI already); just emit a tag-free debug log.
+    if let Ok(conn) = state.open_db() {
+        if let Ok(Some(c)) = connection_store::get(&conn, &connection_id) {
+            log.debug(
+                "resolved connection",
+                logctx! { "name" => c.name.clone(), "target" => host_tag(&c.target) },
+            );
         }
-    };
-    log.debug("resolved host", logctx! { "host" => rec.host.clone() });
+    }
 
     let tmp_dir = std::env::temp_dir();
     let script_path = tmp_dir.join(format!("mongomacapp-{}.js", uuid::Uuid::new_v4()));
@@ -380,4 +382,15 @@ pub async fn run_script(
 
     let _ = std::fs::remove_file(&script_path);
     result
+}
+
+/// Compact "where" tag for a v2 `ConnectionTarget`, used only in debug
+/// logs (`resolved connection`) so a glance at the log line tells you
+/// host:port or "uri". Not load-bearing — never parsed back.
+fn host_tag(target: &crate::connection::model::ConnectionTarget) -> String {
+    use crate::connection::model::ConnectionTarget;
+    match target {
+        ConnectionTarget::Direct { host, port, .. } => format!("{host}:{port}"),
+        ConnectionTarget::Uri { .. } => "uri".to_string(),
+    }
 }

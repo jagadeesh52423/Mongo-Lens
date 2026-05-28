@@ -4,7 +4,15 @@ import {
   ContextCollector,
 } from '../services/ai/ContextCollector';
 import { useEditorStore } from '../store/editor';
-import { useConnectionsStore } from '../store/connections';
+import { useConnectionsV2 } from '../components/features/connections/useConnectionsV2';
+import type { Connection } from '../connection/model';
+
+const mkConn = (id: string, name: string): Connection => ({
+  id, name,
+  target: { kind: 'direct', host: 'localhost', port: 27017 },
+  auth: { kind: 'none' },
+  createdAt: 't',
+});
 import { useResultsStore } from '../store/results';
 import type { EditorTab } from '../types';
 
@@ -18,7 +26,7 @@ const baseTab = (over: Partial<EditorTab> = {}): EditorTab => ({
 });
 
 beforeEach(() => {
-  useConnectionsStore.setState({
+  useConnectionsV2.setState({
     connections: [],
     activeConnectionId: null,
     activeDatabase: null,
@@ -285,8 +293,8 @@ describe('ContextCollector orchestration — selection scenarios', () => {
       '- _id: string\n' +
       '- n: number';
 
-    useConnectionsStore.setState({
-      connections: [{ id: 'c1', name: 'local', createdAt: 't' }],
+    useConnectionsV2.setState({
+      connections: [mkConn('c1', 'local')],
       activeConnectionId: 'c1',
       activeDatabase: 'mydb',
       connectedIds: new Set(['c1']),
@@ -309,8 +317,8 @@ describe('ContextCollector orchestration — selection scenarios', () => {
   });
 
   it('section ordering: Connection → Editor → Selection → Results → Schema', async () => {
-    useConnectionsStore.setState({
-      connections: [{ id: 'c1', name: 'local', createdAt: 't' }],
+    useConnectionsV2.setState({
+      connections: [mkConn('c1', 'local')],
       activeConnectionId: 'c1',
       activeDatabase: 'mydb',
       connectedIds: new Set(['c1']),
