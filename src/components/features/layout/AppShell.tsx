@@ -9,7 +9,7 @@ import { AIChatPanel } from '../ai/AIChatPanel';
 import { SettingsView } from '../../../settings/SettingsView';
 import { SplitHandle } from '../../shared/SplitHandle';
 import type { ActivityItem } from '../../../layout/activityBar';
-import { useConnectionsStore } from '../../../store/connections';
+import { useConnectionsV2 } from '../connections/useConnectionsV2';
 import styles from './AppShell.module.css';
 
 interface Props {
@@ -50,7 +50,7 @@ export function AppShell({
   onClearContext,
 }: Props) {
   const sidePanelRef = useRef<ImperativePanelHandle>(null);
-  const { connections, activeConnectionId, activeDatabase } = useConnectionsStore();
+  const { connections, activeConnectionId, activeDatabase } = useConnectionsV2();
   const active = connections.find((c) => c.id === activeConnectionId);
 
   return (

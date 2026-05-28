@@ -1,4 +1,4 @@
-import { useConnectionsStore } from '../../store/connections';
+import { useConnectionsV2 } from '../../components/features/connections/useConnectionsV2';
 import { useEditorStore } from '../../store/editor';
 import { useResultsStore } from '../../store/results';
 
@@ -78,7 +78,7 @@ export class ResultsContextCollector implements ContextCollectorInterface {
 export class ConnectionContextCollector implements ContextCollectorInterface {
   async collect(): Promise<string> {
     const { tabs, activeTabId } = useEditorStore.getState();
-    const { connections, activeConnectionId, activeDatabase } = useConnectionsStore.getState();
+    const { connections, activeConnectionId, activeDatabase } = useConnectionsV2.getState();
 
     const activeTab = tabs.find((t) => t.id === activeTabId);
 

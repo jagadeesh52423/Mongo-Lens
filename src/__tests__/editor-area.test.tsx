@@ -4,7 +4,8 @@ import userEvent from '@testing-library/user-event';
 import { EditorArea } from '../components/features/editor/EditorArea';
 import * as ipc from '../ipc';
 import { useEditorStore } from '../store/editor';
-import { useConnectionsStore } from '../store/connections';
+import { useConnectionsV2 } from '../components/features/connections/useConnectionsV2';
+import type { Connection } from '../connection/model';
 import { useResultsStore } from '../store/results';
 
 vi.mock('@monaco-editor/react', () => ({
@@ -26,10 +27,15 @@ vi.mock('../ipc', () => ({
   updateScript: vi.fn().mockResolvedValue({ id: 'id', name: 'test', content: '', tags: '', createdAt: '' }),
 }));
 
-const mockConn = { id: 'conn1', name: 'Test Connection', createdAt: new Date().toISOString() };
+const mockConn: Connection = {
+  id: 'conn1', name: 'Test Connection',
+  target: { kind: 'direct', host: 'localhost', port: 27017 },
+  auth: { kind: 'none' },
+  createdAt: new Date().toISOString(),
+};
 
 function openScriptTab() {
-  useConnectionsStore.setState({
+  useConnectionsV2.setState({
     connections: [mockConn],
     activeConnectionId: 'conn1',
     activeDatabase: 'mydb',
@@ -43,8 +49,8 @@ function openScriptTab() {
 beforeEach(() => {
   useEditorStore.setState({ tabs: [], activeTabId: null });
   useResultsStore.setState({ byTab: {} });
-  useConnectionsStore.setState({
-    connections: [], activeConnectionId: null, activeDatabase: null, connectedIds: new Set(),
+  useConnectionsV2.setState({
+    connections: [], activeConnectionId: null, activeDatabase: null, connectedIds: new Set(), loading: false,
   });
 });
 
@@ -121,8 +127,14 @@ describe('EditorArea', () => {
 describe('EditorArea Save/Save As handlers', () => {
   beforeEach(() => {
     useEditorStore.setState({ tabs: [], activeTabId: null, savedScriptsVersion: 0 });
-    useConnectionsStore.setState({
-      connections: [{ id: 'conn-1', name: 'Test', createdAt: '2026-01-01' }],
+    const conn: Connection = {
+      id: 'conn-1', name: 'Test',
+      target: { kind: 'direct', host: 'localhost', port: 27017 },
+      auth: { kind: 'none' },
+      createdAt: '2026-01-01',
+    };
+    useConnectionsV2.setState({
+      connections: [conn],
       connectedIds: new Set(['conn-1']),
       activeConnectionId: 'conn-1',
       activeDatabase: 'testdb',

@@ -3,32 +3,38 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { invoke } from '@tauri-apps/api/core';
 import { ConnectionPanel, nextDuplicateName } from '../components/features/connections/ConnectionPanel';
-import { useConnectionsStore } from '../store/connections';
+import { useConnectionsV2 } from '../components/features/connections/useConnectionsV2';
 
 const invokeMock = invoke as unknown as ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   invokeMock.mockReset();
-  useConnectionsStore.setState({
-    connections: [], activeConnectionId: null, activeDatabase: null, connectedIds: new Set(),
+  useConnectionsV2.setState({
+    connections: [], activeConnectionId: null, activeDatabase: null, connectedIds: new Set(), loading: false,
   });
 });
 
+const v2Conn = (id: string, name: string) => ({
+  id, name,
+  target: { kind: 'direct', host: 'localhost', port: 27017 },
+  auth: { kind: 'none' },
+  createdAt: 't',
+});
+
 describe('ConnectionPanel', () => {
-  it('loads connections on mount', async () => {
-    invokeMock.mockResolvedValueOnce([
-      { id: '1', name: 'local', host: 'localhost', port: 27017, createdAt: 't' },
-    ]);
+  it('loads connections on mount via the v2 list IPC', async () => {
+    invokeMock
+      .mockResolvedValueOnce([v2Conn('1', 'local')])  // connections_v2_list
+      .mockResolvedValueOnce(undefined);              // prefs_get
     render(<ConnectionPanel />);
     await waitFor(() => expect(screen.getByText('local')).toBeInTheDocument());
-    expect(invokeMock).toHaveBeenCalledWith('list_connections');
+    expect(invokeMock).toHaveBeenCalledWith('connections_v2_list');
   });
 
   it('opens the v2 add dialog', async () => {
-    // list_connections → []; connections_v2_list → []; prefs_get → undefined
-    // (ConnectionPanel falls back to DEFAULT_GLOBAL_PREFS).
+    // connections_v2_list → []; prefs_get → undefined (ConnectionPanel falls
+    // back to DEFAULT_GLOBAL_PREFS).
     invokeMock
-      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce(undefined);
     const user = userEvent.setup();
@@ -41,24 +47,32 @@ describe('ConnectionPanel', () => {
   });
 
   it('duplicates a connection via the right-click menu with smart naming', async () => {
-    invokeMock.mockResolvedValueOnce([
-      { id: '1', name: 'test', host: 'localhost', port: 27017, createdAt: 't' },
-      { id: '2', name: 'test(1)', host: 'localhost', port: 27017, createdAt: 't' },
-    ]);
+    // Mount: connections_v2_list → 2 rows; prefs_get → undefined.
+    invokeMock
+      .mockResolvedValueOnce([v2Conn('1', 'test'), v2Conn('2', 'test(1)')])
+      .mockResolvedValueOnce(undefined);
     const user = userEvent.setup();
     render(<ConnectionPanel />);
     await waitFor(() => expect(screen.getByText('test(1)')).toBeInTheDocument());
 
-    invokeMock.mockResolvedValueOnce({
-      id: '3', name: 'test(2)', host: 'localhost', port: 27017, createdAt: 't',
-    });
+    // Duplicate triggers saveV2 (returns the new connection) → refresh()
+    // (returns the updated list including the duplicate).
+    invokeMock
+      .mockResolvedValueOnce(v2Conn('3', 'test(2)'))  // connections_v2_save
+      .mockResolvedValueOnce([                         // connections_v2_list
+        v2Conn('1', 'test'), v2Conn('2', 'test(1)'), v2Conn('3', 'test(2)'),
+      ]);
+
     await user.pointer({ keys: '[MouseRight]', target: screen.getByText('test') });
     await user.click(screen.getByText('Duplicate'));
 
     await waitFor(() => expect(screen.getByText('test(2)')).toBeInTheDocument());
-    expect(invokeMock).toHaveBeenLastCalledWith('create_connection', {
-      input: expect.objectContaining({ name: 'test(2)', host: 'localhost', port: 27017 }),
-    });
+    // saveV2 was called with a SaveInput whose connection cloned from 'test'
+    // but with empty id (server gen) and the next free name.
+    const saveCall = invokeMock.mock.calls.find((c) => c[0] === 'connections_v2_save');
+    expect(saveCall).toBeDefined();
+    expect(saveCall![1].input.connection).toMatchObject({ id: '', name: 'test(2)' });
+    expect(saveCall![1].input.secrets).toEqual([]);
   });
 });
 

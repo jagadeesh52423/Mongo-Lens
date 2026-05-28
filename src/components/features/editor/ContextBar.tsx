@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Toolbar } from '../../ui';
 import { SaveScriptDialog } from '../saved-scripts/SaveScriptDialog';
-import { useConnectionsStore } from '../../../store/connections';
+import { useConnectionsV2 } from '../connections/useConnectionsV2';
 import { listDatabases } from '../../../ipc';
 import type { ExecutionMode } from '../../../execution-modes';
 import styles from './ContextBar.module.css';
@@ -41,8 +41,8 @@ export function ContextBar({
   hasSavedScript,
   isRunning,
 }: Props) {
-  const connections = useConnectionsStore((s) => s.connections);
-  const connectedIds = useConnectionsStore((s) => s.connectedIds);
+  const connections = useConnectionsV2((s) => s.connections);
+  const connectedIds = useConnectionsV2((s) => s.connectedIds);
   const connectedList = connections.filter((c) => connectedIds.has(c.id));
   const hasConnections = connectedList.length > 0;
 

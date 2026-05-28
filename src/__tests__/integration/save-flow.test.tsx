@@ -4,7 +4,8 @@ import userEvent from '@testing-library/user-event';
 import { EditorArea } from '../../components/features/editor/EditorArea';
 import * as ipc from '../../ipc';
 import { useEditorStore } from '../../store/editor';
-import { useConnectionsStore } from '../../store/connections';
+import { useConnectionsV2 } from '../../components/features/connections/useConnectionsV2';
+import type { Connection } from '../../connection/model';
 import { useResultsStore } from '../../store/results';
 
 vi.mock('@monaco-editor/react', () => ({
@@ -26,10 +27,15 @@ vi.mock('../../ipc', () => ({
   updateScript: vi.fn().mockResolvedValue({ id: 'id', name: 'test', content: '', tags: '', createdAt: '' }),
 }));
 
-const mockConn = { id: 'conn-1', name: 'Test Connection', createdAt: '2026-01-01' };
+const mockConn: Connection = {
+  id: 'conn-1', name: 'Test Connection',
+  target: { kind: 'direct', host: 'localhost', port: 27017 },
+  auth: { kind: 'none' },
+  createdAt: '2026-01-01',
+};
 
 function setupConnection() {
-  useConnectionsStore.setState({
+  useConnectionsV2.setState({
     connections: [mockConn],
     activeConnectionId: 'conn-1',
     activeDatabase: 'testdb',
@@ -40,11 +46,12 @@ function setupConnection() {
 beforeEach(() => {
   useEditorStore.setState({ tabs: [], activeTabId: null, savedScriptsVersion: 0 });
   useResultsStore.setState({ byTab: {} });
-  useConnectionsStore.setState({
+  useConnectionsV2.setState({
     connections: [],
     activeConnectionId: null,
     activeDatabase: null,
     connectedIds: new Set(),
+    loading: false,
   });
   vi.mocked(ipc.createScript).mockClear();
   vi.mocked(ipc.updateScript).mockClear();

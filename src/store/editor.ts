@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { EditorSelection, EditorTab } from '../types';
-import { useConnectionsStore } from './connections';
+import { useConnectionsV2 } from '../components/features/connections/useConnectionsV2';
 import { confirmDiscardUnsaved } from '../utils/confirmDiscard';
 
 export const DEFAULT_PANEL_SIZES: [number, number] = [60, 40];
@@ -59,7 +59,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       if (existing) return { activeTabId: tab.id };
       let next = tab;
       if (tab.type === 'script' && !tab.connectionId) {
-        const { activeConnectionId, activeDatabase } = useConnectionsStore.getState();
+        const { activeConnectionId, activeDatabase } = useConnectionsV2.getState();
         if (activeConnectionId) {
           next = {
             ...tab,

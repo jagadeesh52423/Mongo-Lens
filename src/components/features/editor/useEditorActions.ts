@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { runScript, cancelScript, createScript, updateScript } from '../../../ipc';
-import { useConnectionsStore } from '../../../store/connections';
+import { useConnectionsV2 } from '../connections/useConnectionsV2';
 import { useEditorStore } from '../../../store/editor';
 import { useResultsStore } from '../../../store/results';
 import { useLogger } from '../../../services/logger';
@@ -13,7 +13,7 @@ import type { EditorTab } from '../../../types';
  * on layout. All handlers are no-ops when `active` is null.
  */
 export function useEditorActions(active: EditorTab | undefined) {
-  const { activeConnectionId, activeDatabase } = useConnectionsStore();
+  const { activeConnectionId, activeDatabase } = useConnectionsV2();
   const { updateTab, bumpScriptsVersion, selections } = useEditorStore();
   const startRun = useResultsStore((s) => s.startRun);
   const finishRun = useResultsStore((s) => s.finishRun);
