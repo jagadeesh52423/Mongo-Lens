@@ -113,6 +113,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         commands::saved_script::update_script,
         commands::saved_script::delete_script,
         commands::saved_script::touch_script,
+        commands::saved_script::rename_tag,
+        commands::saved_script::delete_tag,
         commands::logging::log_write,
         runner::executor::check_node_runner,
         runner::executor::install_node_runner,

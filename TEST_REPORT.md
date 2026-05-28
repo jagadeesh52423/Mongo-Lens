@@ -433,3 +433,126 @@ The Tauri menu fix from Phase 1 (pre-refactor) preserves the system copy command
 - ✅ No `--no-verify` used on any commit.
 - ✅ `--no-cache` used on first vitest run per worktree convention.
 - ✅ All 4 PRs branched off the previous PR tip; this PR branched off PR 3 tip `7201ae1`.
+
+---
+
+# T9 — Saved Script Tags: Full Test Sweep Report
+
+Date: 2026-05-28
+Tester: tester (team feature-saved-script-tags)
+Worktree: `.claude/worktrees/saved-scripts-tags`
+Branch: `worktree-saved-scripts-tags`
+Plan: `docs/superpowers/plans/2026-05-28-saved-script-tags.md`
+
+## Summary
+
+| Check | Result |
+|---|---|
+| `cargo test` | 179 passed / 8 failed — failures are pre-existing keychain `PoisonError`s, **not** in T1–T9 scope |
+| `npx tsc --noEmit` | Only pre-existing `usePluginHostBootstrap.ts` errors (excluded by task) — **zero new errors in scope** |
+| `npm test -- --run` | **714 passed / 0 failed** across 114 files (~23s) |
+| Saved-script Rust unit tests | **7 passed / 0 failed** (all T1 ops) |
+| Manual smoke (`npm run tauri dev`) | cargo backend launched; vite blocked by port 1420 already in use (another local instance) |
+
+**Overall: all in-scope checks pass.** Out-of-scope pre-existing failures documented below.
+
+## 1. `cargo test --manifest-path src-tauri/Cargo.toml`
+
+`179 passed; 8 failed; 0 ignored; finished in 1.14s`.
+
+### In-scope: saved-script DB & command tests — ALL PASS
+
+```
+test db::scripts::tests::parse_tags_trims_dedupes_drops_empty ... ok
+test db::scripts::tests::touch_sets_last_run ... ok
+test db::scripts::tests::round_trip_preserves_canonical_tags ... ok
+test db::scripts::tests::insert_then_list_scripts ... ok
+test db::scripts::tests::rename_collapses_when_target_already_present ... ok
+test db::scripts::tests::rename_tag_everywhere_renames_and_dedupes ... ok
+test db::scripts::tests::delete_tag_everywhere_removes_case_insensitively ... ok
+
+test result: ok. 7 passed; 0 failed
+```
+
+### Out-of-scope failures (pre-existing, unrelated)
+
+All 8 failures are in `src-tauri/src/keychain.rs` tests:
+
+```
+keychain::tests::delete_password_removes_encrypted_file
+keychain::tests::get_or_create_master_key_generates_32_bytes
+keychain::tests::get_or_create_master_key_returns_same_key_twice
+keychain::tests::get_password_gracefully_handles_master_key_recreation
+keychain::tests::get_password_handles_corrupted_file
+keychain::tests::get_password_new_impl_returns_decrypted
+keychain::tests::set_get_delete_roundtrip
+keychain::tests::set_password_new_impl_creates_encrypted_file
+```
+
+All panic with `PoisonError { .. }` on `MASTER_KEY_LOCK.lock().unwrap()` (e.g. `src/keychain.rs:496:44`). The tests share a `static MASTER_KEY_LOCK: Mutex<()>`; when one panics (likely on macOS keychain ACL race in headless/CI-like env), the lock becomes poisoned and every subsequent test inherits the poison. Reproduces with `--test-threads=1` too, confirming environmental, not concurrency from new code.
+
+Evidence these are **not** caused by T1–T9:
+
+- `git diff main --stat src-tauri/` touches only:
+  - `src-tauri/src/commands/saved_script.rs` (+36)
+  - `src-tauri/src/db/scripts.rs` (+195)
+  - `src-tauri/src/main.rs` (+2)
+  No `keychain.rs` modified.
+- `git log src-tauri/src/keychain.rs` last touched in commits well before this branch (`c19d16b chore(keychain): drop unused account_for helper` and earlier).
+
+Flagging for a future keychain-infra ticket; outside T9 scope.
+
+## 2. `npx tsc --noEmit`
+
+Only output:
+
+```
+src/hooks/usePluginHostBootstrap.ts(22,17): error TS2339: Property 'listConnections' does not exist on type 'typeof import(".../src/ipc")'.
+src/hooks/usePluginHostBootstrap.ts(22,34): error TS2339: Property 'updateConnection' does not exist on type 'typeof import(".../src/ipc")'.
+src/hooks/usePluginHostBootstrap.ts(48,31): error TS7006: Parameter 'c' implicitly has an 'any' type.
+src/hooks/usePluginHostBootstrap.ts(54,41): error TS7006: Parameter 'c' implicitly has an 'any' type.
+```
+
+All four are in `src/hooks/usePluginHostBootstrap.ts` — explicitly **declared out of scope** in the task brief.
+
+**In-scope paths (`src/components/features/saved-scripts/**`, `src/components/features/editor/**`, `src/types.ts`, `src/ipc.ts`): zero errors.**
+
+## 3. `npm test -- --run`
+
+```
+ Test Files  114 passed (114)
+      Tests  714 passed (714)
+   Duration  23.10s
+```
+
+Zero failures. Pre-existing stderr noise (`act(...)` warnings, `Failed to persist settings TypeError` from Tauri store under jsdom) is unchanged from prior PR reports above and does not fail any test.
+
+## 4. Manual smoke — `npm run tauri dev`
+
+Attempted; the Rust/cargo backend launched cleanly:
+
+```
+Running DevCommand (`cargo run --no-default-features --features socks5-proxy ...`)
+Info Watching .../src-tauri for changes...
+```
+
+Vite then failed:
+
+```
+error when starting dev server:
+Error: Port 1420 is already in use
+The "beforeDevCommand" terminated with a non-zero status code.
+```
+
+Another local `tauri dev` instance is already holding 1420. This is an environment conflict, **not a regression** — the cargo side compiled and started watching successfully, confirming T1/T2 Rust additions don't break the dev build. Full UI interaction wasn't required per the task brief.
+
+## Conclusion
+
+T1–T9 implementation is verified at the test level:
+
+- All 7 new Rust unit tests for tags (canonical parse, round-trip, rename-tag-everywhere with case-insensitive collapsing, delete-tag-everywhere) pass.
+- All 714 frontend tests pass.
+- TypeScript surface for tags (`string[]` everywhere, new IPC `renameTag`/`deleteTag`) is type-clean across saved-scripts, editor, `types.ts`, `ipc.ts`.
+- No production code modified by tester.
+
+Outstanding (out of scope): pre-existing keychain `PoisonError` failures and pre-existing `usePluginHostBootstrap.ts` type drift — to be tracked separately.

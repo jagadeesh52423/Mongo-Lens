@@ -3,14 +3,29 @@ import { Button, Dialog, FormField } from '../../ui';
 
 interface Props {
   initialName?: string;
-  initialTags?: string;
-  onSave: (name: string, tags: string) => Promise<void>;
+  initialTags?: string[];
+  onSave: (name: string, tags: string[]) => Promise<void>;
   onCancel: () => void;
 }
 
-export function SaveScriptDialog({ initialName = '', initialTags = '', onSave, onCancel }: Props) {
+/**
+ * Canonical tag parsing: trim, drop empties, case-insensitive dedupe,
+ * preserve first-seen order. Matches Rust `parse_tags` behaviour.
+ */
+function parseTags(input: string): string[] {
+  const seen = new Map<string, string>(); // lowercase -> first-seen original
+  for (const part of input.split(',')) {
+    const t = part.trim();
+    if (!t) continue;
+    const k = t.toLowerCase();
+    if (!seen.has(k)) seen.set(k, t);
+  }
+  return [...seen.values()];
+}
+
+export function SaveScriptDialog({ initialName = '', initialTags = [], onSave, onCancel }: Props) {
   const [name, setName] = useState(initialName);
-  const [tags, setTags] = useState(initialTags);
+  const [tagsText, setTagsText] = useState(initialTags.join(', '));
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -22,7 +37,7 @@ export function SaveScriptDialog({ initialName = '', initialTags = '', onSave, o
     setBusy(true);
     setErr(null);
     try {
-      await onSave(name.trim(), tags);
+      await onSave(name.trim(), parseTags(tagsText));
     } catch (e) {
       setErr((e as Error).message ?? String(e));
     } finally {
@@ -47,8 +62,8 @@ export function SaveScriptDialog({ initialName = '', initialTags = '', onSave, o
           <FormField.Label htmlFor="save-script-tags">Tags (comma-separated)</FormField.Label>
           <FormField.Input
             id="save-script-tags"
-            value={tags}
-            onChange={(e) => setTags(e.target.value)}
+            value={tagsText}
+            onChange={(e) => setTagsText(e.target.value)}
           />
         </FormField>
         <FormField.Error>{err}</FormField.Error>

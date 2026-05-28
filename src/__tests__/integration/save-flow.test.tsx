@@ -23,8 +23,8 @@ vi.mock('../../ipc', () => ({
   cancelScript: vi.fn().mockResolvedValue(undefined),
   listCollections: vi.fn().mockResolvedValue([]),
   listDatabases: vi.fn().mockResolvedValue(['testdb']),
-  createScript: vi.fn().mockResolvedValue({ id: 'new-id', name: 'test', content: '', tags: '', createdAt: '' }),
-  updateScript: vi.fn().mockResolvedValue({ id: 'id', name: 'test', content: '', tags: '', createdAt: '' }),
+  createScript: vi.fn().mockResolvedValue({ id: 'new-id', name: 'test', content: '', tags: [], createdAt: '' }),
+  updateScript: vi.fn().mockResolvedValue({ id: 'id', name: 'test', content: '', tags: [], createdAt: '' }),
 }));
 
 const mockConn: Connection = {
@@ -73,7 +73,7 @@ describe('Save/Save As integration flow', () => {
       connectionId: 'conn-1',
       database: 'testdb',
       savedScriptId: 'script-100',
-      savedScriptTags: 'users,query',
+      savedScriptTags: ['users', 'query'],
     });
 
     render(<EditorArea />);
@@ -81,7 +81,7 @@ describe('Save/Save As integration flow', () => {
     // Verify the saved script metadata is set
     const tab1 = useEditorStore.getState().tabs[0];
     expect(tab1.savedScriptId).toBe('script-100');
-    expect(tab1.savedScriptTags).toBe('users,query');
+    expect(tab1.savedScriptTags).toEqual(['users', 'query']);
 
     // Both Save and Save As buttons should be visible (since savedScriptId exists)
     await waitFor(() => {
@@ -102,7 +102,7 @@ describe('Save/Save As integration flow', () => {
       id: 'script-100',
       name: 'My Query',
       content: 'db.users.find({ active: true })',
-      tags: 'users,query',
+      tags: ['users', 'query'],
       connectionId: 'conn-1',
       createdAt: '2026-01-01T00:00:00Z',
     });
@@ -114,7 +114,7 @@ describe('Save/Save As integration flow', () => {
         'script-100',
         'My Query',
         expect.any(String),
-        'users,query',
+        ['users', 'query'],
         'conn-1',
       );
     });
@@ -133,7 +133,7 @@ describe('Save/Save As integration flow', () => {
       id: 'script-201',
       name: 'Admin Users Query',
       content: 'db.users.find({ role: "admin" })',
-      tags: 'admin',
+      tags: ['admin'],
       connectionId: 'conn-1',
       createdAt: '2026-04-27T00:00:00Z',
     });
@@ -159,7 +159,7 @@ describe('Save/Save As integration flow', () => {
       expect(ipc.createScript).toHaveBeenCalledWith(
         'Admin Users Query',
         expect.any(String),
-        'admin',
+        ['admin'],
         'conn-1',
       );
     });
@@ -206,7 +206,7 @@ describe('Save/Save As integration flow', () => {
       id: 'script-300',
       name: 'Orders Query',
       content: 'db.orders.find({})',
-      tags: 'orders',
+      tags: ['orders'],
       connectionId: 'conn-1',
       createdAt: '2026-04-27T00:00:00Z',
     });
@@ -227,7 +227,7 @@ describe('Save/Save As integration flow', () => {
       expect(ipc.createScript).toHaveBeenCalledWith(
         'Orders Query',
         'db.orders.find({})',
-        'orders',
+        ['orders'],
         'conn-1',
       );
     });
@@ -256,7 +256,7 @@ describe('Save/Save As integration flow', () => {
       id: 'script-300',
       name: 'Orders Query',
       content: 'db.orders.find({ status: "shipped" })',
-      tags: 'orders',
+      tags: ['orders'],
       connectionId: 'conn-1',
       createdAt: '2026-04-27T00:00:00Z',
     });
@@ -268,7 +268,7 @@ describe('Save/Save As integration flow', () => {
         'script-300',
         'Orders Query',
         expect.any(String),
-        'orders',
+        ['orders'],
         'conn-1',
       );
     });

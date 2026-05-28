@@ -23,8 +23,8 @@ vi.mock('../ipc', () => ({
   cancelScript: vi.fn().mockResolvedValue(undefined),
   listCollections: vi.fn().mockResolvedValue([]),
   listDatabases: vi.fn().mockResolvedValue(['mydb']),
-  createScript: vi.fn().mockResolvedValue({ id: 'new-id', name: 'test', content: '', tags: '', createdAt: '' }),
-  updateScript: vi.fn().mockResolvedValue({ id: 'id', name: 'test', content: '', tags: '', createdAt: '' }),
+  createScript: vi.fn().mockResolvedValue({ id: 'new-id', name: 'test', content: '', tags: [], createdAt: '' }),
+  updateScript: vi.fn().mockResolvedValue({ id: 'id', name: 'test', content: '', tags: [], createdAt: '' }),
 }));
 
 const mockConn: Connection = {
@@ -147,7 +147,7 @@ describe('EditorArea Save/Save As handlers', () => {
       id: 'script-1',
       name: 'Existing Script',
       content: 'db.test.find({updated: true})',
-      tags: 'original,tags',
+      tags: ['original', 'tags'],
       connectionId: 'conn-1',
       createdAt: '2026-04-27T00:00:00Z',
     });
@@ -162,7 +162,7 @@ describe('EditorArea Save/Save As handlers', () => {
         connectionId: 'conn-1',
         database: 'testdb',
         savedScriptId: 'script-1',
-        savedScriptTags: 'original,tags',
+        savedScriptTags: ['original', 'tags'],
       }],
       activeTabId: 'tab-1',
     });
@@ -177,7 +177,7 @@ describe('EditorArea Save/Save As handlers', () => {
       'script-1',
       'Existing Script',
       'db.test.find({updated: true})',
-      'original,tags',
+      ['original', 'tags'],
       'conn-1'
     );
 
@@ -190,7 +190,7 @@ describe('EditorArea Save/Save As handlers', () => {
       id: 'new-script-id',
       name: 'New Script Name',
       content: 'db.test.find({})',
-      tags: '',
+      tags: [],
       connectionId: 'conn-1',
       createdAt: '2026-04-27T01:00:00Z',
     });
@@ -229,7 +229,7 @@ describe('EditorArea Save/Save As handlers', () => {
       expect(vi.mocked(ipc.createScript)).toHaveBeenCalledWith(
         'New Script Name',
         'db.test.find({})',
-        '',
+        [],
         'conn-1'
       );
     });

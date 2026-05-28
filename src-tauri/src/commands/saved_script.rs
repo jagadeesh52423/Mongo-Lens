@@ -26,7 +26,7 @@ pub fn create_script(
     state: State<'_, AppState>,
     name: String,
     content: String,
-    tags: String,
+    tags: Vec<String>,
     connection_id: Option<String>,
 ) -> Result<SavedScriptRecord, String> {
     let log = state.logger.child(logctx! { "logger" => "commands.saved_script" });
@@ -57,7 +57,7 @@ pub fn update_script(
     id: String,
     name: String,
     content: String,
-    tags: String,
+    tags: Vec<String>,
     connection_id: Option<String>,
 ) -> Result<SavedScriptRecord, String> {
     let log = state.logger.child(logctx! {
@@ -107,6 +107,38 @@ pub fn delete_script(state: State<'_, AppState>, id: String) -> Result<(), Strin
     })?;
     db::scripts::delete(&conn, &id).map_err(|e| {
         log.error("delete failed", logctx! { "err" => e.to_string() });
+        e.to_string()
+    })
+}
+
+#[tauri::command]
+pub fn rename_tag(
+    state: State<'_, AppState>,
+    old: String,
+    new: String,
+) -> Result<usize, String> {
+    let log = state.logger.child(logctx! { "logger" => "commands.saved_script" });
+    log.info("rename_tag", logctx! { "old" => old.clone(), "new" => new.clone() });
+    let conn = state.open_db().map_err(|e| {
+        log.error("open_db failed", logctx! { "err" => e.to_string() });
+        e.to_string()
+    })?;
+    db::scripts::rename_tag_everywhere(&conn, &old, &new).map_err(|e| {
+        log.error("rename_tag failed", logctx! { "err" => e.to_string() });
+        e.to_string()
+    })
+}
+
+#[tauri::command]
+pub fn delete_tag(state: State<'_, AppState>, tag: String) -> Result<usize, String> {
+    let log = state.logger.child(logctx! { "logger" => "commands.saved_script" });
+    log.info("delete_tag", logctx! { "tag" => tag.clone() });
+    let conn = state.open_db().map_err(|e| {
+        log.error("open_db failed", logctx! { "err" => e.to_string() });
+        e.to_string()
+    })?;
+    db::scripts::delete_tag_everywhere(&conn, &tag).map_err(|e| {
+        log.error("delete_tag failed", logctx! { "err" => e.to_string() });
         e.to_string()
     })
 }

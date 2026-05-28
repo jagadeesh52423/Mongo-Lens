@@ -70,7 +70,7 @@ export async function listScripts(): Promise<SavedScript[]> {
 export async function createScript(
   name: string,
   content: string,
-  tags: string,
+  tags: string[],
   connectionId?: string,
 ): Promise<SavedScript> {
   return invoke('create_script', { name, content, tags, connectionId });
@@ -80,7 +80,7 @@ export async function updateScript(
   id: string,
   name: string,
   content: string,
-  tags: string,
+  tags: string[],
   connectionId?: string,
 ): Promise<SavedScript> {
   return invoke('update_script', { id, name, content, tags, connectionId });
@@ -88,6 +88,14 @@ export async function updateScript(
 
 export async function deleteScript(id: string): Promise<void> {
   return invoke('delete_script', { id });
+}
+
+export async function renameTag(oldTag: string, newTag: string): Promise<number> {
+  return invoke('rename_tag', { old: oldTag, new: newTag });
+}
+
+export async function deleteTag(tag: string): Promise<number> {
+  return invoke('delete_tag', { tag });
 }
 
 export async function touchScript(id: string): Promise<void> {

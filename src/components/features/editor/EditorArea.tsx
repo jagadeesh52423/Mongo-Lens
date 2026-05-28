@@ -95,6 +95,7 @@ export function EditorArea() {
           onSaveAs={handleSaveAs}
           hasSavedScript={!!active.savedScriptId}
           isRunning={isRunning}
+          initialTags={active.savedScriptTags ?? []}
         />
       )}
       <div className={styles.body}>
