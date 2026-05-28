@@ -70,12 +70,25 @@ export function dialogReducer(state: DialogState, action: DialogAction): DialogS
     case 'set-field':
       // Whole-replace escape hatch: path === '' means replace the entire draft
       // with `value`. Used by tab forms that need to swap a whole sub-tree.
+      // Any edit invalidates a prior test result — clearing avoids a stale
+      // failure heading lingering in the footer after the user starts fixing
+      // the offending field (PR-4 review finding #2).
       if (action.path === '') {
-        return { ...state, draft: action.value as Connection };
+        return { ...state, draft: action.value as Connection, testResult: null };
       }
-      return { ...state, draft: setByPath(state.draft, action.path, action.value) };
+      return {
+        ...state,
+        draft: setByPath(state.draft, action.path, action.value),
+        testResult: null,
+      };
     case 'set-auth-kind':
-      return { ...state, draft: { ...state.draft, auth: authBlank(action.kind) } };
+      // Switching auth mode wipes the previous test result for the same
+      // reason — the prior result was about a different auth shape.
+      return {
+        ...state,
+        draft: { ...state.draft, auth: authBlank(action.kind) },
+        testResult: null,
+      };
     case 'set-target-kind':
       return {
         ...state,
@@ -85,9 +98,16 @@ export function dialogReducer(state: DialogState, action: DialogAction): DialogS
             ? { kind: 'direct', host: '', port: 27017 }
             : { kind: 'uri', uri: '' },
         },
+        testResult: null,
       };
     case 'set-secret':
-      return { ...state, secrets: { ...state.secrets, [action.slot]: action.value } };
+      // A secret edit also invalidates the test result (e.g. user is fixing
+      // a wrong password after an auth-stage failure).
+      return {
+        ...state,
+        secrets: { ...state.secrets, [action.slot]: action.value },
+        testResult: null,
+      };
     case 'test-start':
       return { ...state, testResult: { kind: 'pending' } };
     case 'test-result':

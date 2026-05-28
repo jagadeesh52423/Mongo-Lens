@@ -49,4 +49,25 @@ describe('dialogReducer', () => {
     });
     expect(next.testResult).toEqual({ kind: 'fail', stage: 'auth', error: 'bad creds' });
   });
+
+  it('clears testResult when the user edits a field (PR-4 review finding #2)', () => {
+    // First seed a failing test result …
+    const failed = dialogReducer(init, {
+      type: 'test-result',
+      result: { ok: false, stage: 'auth', error: 'bad creds' },
+    });
+    expect(failed.testResult).toEqual({ kind: 'fail', stage: 'auth', error: 'bad creds' });
+
+    // … then any field edit / auth-kind switch / secret change must wipe it,
+    // so the stale failure heading does not linger in the footer.
+    expect(
+      dialogReducer(failed, { type: 'set-field', path: 'name', value: 'Renamed' }).testResult,
+    ).toBeNull();
+    expect(
+      dialogReducer(failed, { type: 'set-auth-kind', kind: 'x509' }).testResult,
+    ).toBeNull();
+    expect(
+      dialogReducer(failed, { type: 'set-secret', slot: 'auth-password', value: 'pw' }).testResult,
+    ).toBeNull();
+  });
 });
