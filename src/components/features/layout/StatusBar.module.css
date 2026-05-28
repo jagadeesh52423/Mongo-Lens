@@ -1,23 +1,54 @@
 .bar {
   height: 22px;
-  background: var(--bg-panel);
+  background: var(--bg-elev-1);
   border-top: 1px solid var(--border);
   display: flex;
   align-items: center;
   padding: 0 var(--space-3);
-  font-size: var(--fs-sm);
-  color: var(--fg-dim);
+  font-size: var(--fs-xs);
+  color: var(--fg-muted);
   gap: 14px;
 }
 
-.dot {
-  color: var(--fg-dim);
+/* Connection segment: dot + name side by side */
+.connSegment {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
 }
 
+/* Database segment: tabular numerics for any version/count strings */
+.dbSegment {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Disconnected dot — muted grey, no pulse */
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--fg-dim);
+  flex-shrink: 0;
+}
+
+/* Connected dot — accent colour with a subtle outward pulse ring */
 .dotConnected {
-  color: var(--accent-green);
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+  box-shadow: 0 0 0 0 var(--focus-ring-color);
+  animation: statusPulse 2s infinite;
+}
+
+@keyframes statusPulse {
+  0%   { box-shadow: 0 0 0 0 var(--focus-ring-color); }
+  70%  { box-shadow: 0 0 0 6px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
 }
 
 .spacer {
   margin-left: auto;
+  font-variant-numeric: tabular-nums;
 }
