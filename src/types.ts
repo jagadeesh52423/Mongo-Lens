@@ -31,7 +31,7 @@ export interface SavedScript {
   id: string;
   name: string;
   content: string;
-  tags: string;
+  tags: string[];
   connectionId?: string;
   lastRunAt?: string;
   createdAt: string;
@@ -58,7 +58,7 @@ export interface EditorTab {
   database?: string;
   collection?: string;
   savedScriptId?: string;
-  savedScriptTags?: string;
+  savedScriptTags?: string[];
 }
 
 export type QueryCategory =
