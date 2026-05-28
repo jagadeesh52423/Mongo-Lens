@@ -1151,7 +1151,9 @@ The slot name `AwsSessionToken` is the OLD name from before commit 5994f34 (whic
 
 ---
 
-## Task 12 Review (commits bc2ff80 + e1ac370 + 8baf4cd)
+## Task 12 Review (commits bc2ff80 + e1ac370 + 8baf4cd + 7428ffa)
+
+> **Commit chain correction (post-review):** the doc-string fix flagged in the Task 10 review (`AwsSessionToken` → `AwsSecretKey` at builder.rs:605) landed as its own one-line commit 7428ffa on top of 8baf4cd, not as part of 8baf4cd itself as the original review text implied. I observed the fixed state during review because the live worktree was already at 7428ffa when I grepped. Tests + build were run in an isolated worktree at 8baf4cd; the 7428ffa diff is a pure string literal change with no test impact.
 
 **Files:**
 - bc2ff80: `src-tauri/src/commands/connection_v2.rs` (new, 562 lines), `src-tauri/src/commands/prefs.rs` (new, 97 lines), `src-tauri/src/commands/mod.rs` (+module registrations), `src-tauri/src/main.rs` (CONN_V2 gating + handler-list split), `src/connection/ipc.ts` (new, 82 lines), `src/connection/__tests__/ipc.test.ts` (new, 144 lines)
