@@ -1,0 +1,22 @@
+.warning {
+  color: #ef4444;
+  margin-top: 8px;
+}
+
+.radioGroup {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.checkRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.fieldRow {
+  display: flex;
+  gap: 12px;
+}

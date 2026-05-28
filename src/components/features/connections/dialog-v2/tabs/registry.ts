@@ -2,7 +2,8 @@ import { ServerTab } from './ServerTab';
 import { AuthTab } from './AuthTab';
 import { TlsTab } from './TlsTab';
 import { SshTab } from './SshTab';
-import { validateTarget, validateAuth, validateTls, validateSsh } from '../../../../../connection/validation';
+import { ProxyTab } from './ProxyTab';
+import { validateTarget, validateAuth, validateTls, validateSsh, validateProxy } from '../../../../../connection/validation';
 import type { TabSpec } from './types';
 
 /**
@@ -39,5 +40,12 @@ export const TABS: TabSpec[] = [
     group: 'transport',
     Form: SshTab,
     validate: (c) => validateSsh(c.ssh),
+  },
+  {
+    id: 'proxy',
+    label: 'Proxy',
+    group: 'transport',
+    Form: ProxyTab,
+    validate: (c) => validateProxy(c.proxy),
   },
 ];
