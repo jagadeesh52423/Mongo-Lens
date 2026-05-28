@@ -1,38 +1,70 @@
 /* src/styles/tokens.css
- * Design tokens for the UI layer.
- * To add a new token: append under the matching category. Never reference
- * these values as JS string literals — read them through CSS variables only.
+ * Design tokens — the single source of truth for the visual language.
+ * Taxonomy: docs/superpowers/specs/2026-05-28-ui-precision-refactor-design.md §3
+ *  - themeable hex/font + shadow strings: defaults here, overridden at runtime
+ *    by applyTheme() from src/themes/definitions.ts.
+ *  - global derived: alpha tokens computed from themeable hex via color-mix().
+ *  - global constants: radii, spacing, type, motion, z-index (same every theme).
+ * To add a token: see the spec's "Extension Contract".
  */
 :root {
-  /* color tokens — copied from globals.css so this file is self-contained */
-  --bg: #001e2b;
-  --bg-panel: #0d2d3c;
-  --bg-rail: #022e45;
-  --bg-hover: #1a3d4f;
-  --fg: #d4d4d4;
-  --fg-dim: #858585;
-  --border: #1e4d63;
-  --accent: #00ed64;
-  --accent-green: #00ed64;
-  --accent-red: #f48771;
+  /* ---- themeable defaults (fallback = precision-dark) ---- */
+  --bg: #0a0b0d;
+  --bg-elev-1: #0e1012;
+  --bg-elev-2: #131619;
+  --bg-elev-3: #181b1f;
+  --bg-rail: #08090b;
+  --bg-panel: #0e1012;          /* retained alias → Monaco/editor surface */
+  --fg: #e6e8eb;
+  --fg-muted: #9aa0a8;
+  --fg-dim: #6b7079;
+  --border: #1c1f24;
+  --border-strong: #2a2e34;
+  --accent: #3ddc84;
+  --accent-press: #2fc472;
+  --accent-contrast: #05140c;   /* text/icon drawn on top of --accent */
+  --accent-green: #3ddc84;      /* alias */
+  --accent-red: #f0796a;
+  --accent-red-dim: #3a1714;
+  --accent-blue: #7fb3ff;
+  --accent-blue-dim: #16263a;
+  --syntax-key: #3ddc84;
+  --syntax-string: #e3b341;
+  --syntax-number: #7fb3ff;
+  --syntax-func: #b39bff;
+  --syntax-punct: #9aa0a8;
 
-  /* fonts */
+  /* theme-only string defaults (overridden per theme) */
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, .45);
+  --shadow-2: 0 6px 18px rgba(0, 0, 0, .45);
+  --shadow-3: 0 20px 50px rgba(0, 0, 0, .6);
+  --shadow-dialog: var(--shadow-3); /* retained alias for legacy refs */
+
+  /* ---- global derived (alpha from themeable hex; rgba fallback then color-mix) ---- */
+  --bg-hover: rgba(255, 255, 255, .045);
+  --bg-hover: color-mix(in srgb, var(--fg) 4.5%, transparent);
+  --bg-active: rgba(61, 220, 132, .10);
+  --bg-active: color-mix(in srgb, var(--accent) 10%, transparent);
+  --accent-soft: rgba(61, 220, 132, .12);
+  --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
+  --focus-ring-color: rgba(61, 220, 132, .35);
+  --focus-ring-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  --focus-ring: 0 0 0 3px var(--focus-ring-color);
+
+  /* ---- global constants ---- */
   --font-mono: "SF Mono", Menlo, Consolas, monospace;
   --font-sans: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
 
-  /* spacing — 4px base */
   --space-1: 4px;  --space-2: 8px;  --space-3: 12px;
   --space-4: 16px; --space-5: 20px; --space-6: 24px;
 
-  /* radii */
-  --radius-sm: 3px; --radius-md: 6px; --radius-lg: 10px;
+  --radius-sm: 6px; --radius-md: 9px; --radius-lg: 13px; --radius-pill: 999px;
 
-  /* font sizes */
-  --fs-xs: 11px; --fs-sm: 12px; --fs-md: 13px; --fs-lg: 15px;
+  --fs-xs: 11px; --fs-sm: 12px; --fs-md: 13px; --fs-lg: 15px; --fs-xl: 18px; --fs-2xl: 22px;
 
-  /* z-index scale */
+  --dur-fast: 120ms; --dur-base: 180ms;
+  --ease-standard: cubic-bezier(.2, .6, .2, 1);
+  --ease-out: cubic-bezier(.16, 1, .3, 1);
+
   --z-dropdown: 80; --z-dialog: 100; --z-tooltip: 120;
-
-  /* shadows */
-  --shadow-dialog: 0 12px 32px rgba(0, 0, 0, 0.4);
 }
