@@ -1,8 +1,10 @@
 import { MouseEvent, useEffect, useMemo, useState } from 'react';
-import { listScripts, deleteScript, createScript } from '../../../ipc';
+import { listScripts, deleteScript, createScript, updateScript } from '../../../ipc';
 import { useEditorStore } from '../../../store/editor';
 import { IconButton, ListRow, Panel } from '../../ui';
 import type { SavedScript, EditorTab } from '../../../types';
+import { TagList } from './TagList';
+import { EditTagsPopover } from './EditTagsPopover';
 import styles from './SavedScriptsPanel.module.css';
 
 function nextDuplicateName(existingNames: string[], base: string): string {
@@ -15,10 +17,17 @@ function nextDuplicateName(existingNames: string[], base: string): string {
   }
 }
 
-export function SavedScriptsPanel() {
+interface PanelProps {
+  /** Optional: when set, the "Manage tags" button is rendered in the header. */
+  onOpenManageTags?: () => void;
+}
+
+export function SavedScriptsPanel({ onOpenManageTags }: PanelProps = {}) {
   const [scripts, setScripts] = useState<SavedScript[]>([]);
   const [query, setQuery] = useState('');
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
+  const [activeFilter, setActiveFilter] = useState<string | null>(null);
+  const [editingTagsId, setEditingTagsId] = useState<string | null>(null);
   const { openTab, savedScriptsVersion } = useEditorStore();
 
   async function reload() {
@@ -29,13 +38,27 @@ export function SavedScriptsPanel() {
     reload();
   }, [savedScriptsVersion]);
 
+  /** Canonical set of all tags currently in use across scripts (first-seen casing). */
+  const allTags = useMemo(
+    () =>
+      Array.from(
+        new Map(scripts.flatMap((s) => s.tags).map((t) => [t.toLowerCase(), t])).values(),
+      ),
+    [scripts],
+  );
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return scripts;
-    return scripts.filter(
-      (s) => s.name.toLowerCase().includes(q) || s.tags.toLowerCase().includes(q),
-    );
-  }, [scripts, query]);
+    const f = activeFilter?.toLowerCase() ?? null;
+    return scripts.filter((s) => {
+      if (f && !s.tags.some((t) => t.toLowerCase() === f)) return false;
+      if (!q) return true;
+      return (
+        s.name.toLowerCase().includes(q) ||
+        s.tags.some((t) => t.toLowerCase().includes(q))
+      );
+    });
+  }, [scripts, query, activeFilter]);
 
   function open(script: SavedScript) {
     const tab: EditorTab = {
@@ -62,11 +85,24 @@ export function SavedScriptsPanel() {
     reload();
   }
 
+  async function handleEditTagsSave(script: SavedScript, tags: string[]) {
+    await updateScript(script.id, script.name, script.content, tags, script.connectionId);
+    setEditingTagsId(null);
+    reload();
+  }
+
   function stop(e: MouseEvent<HTMLButtonElement>) { e.stopPropagation(); }
 
   return (
     <Panel>
-      <Panel.Header title="Saved Scripts" />
+      <Panel.Header
+        title="Saved Scripts"
+        right={
+          onOpenManageTags ? (
+            <button type="button" onClick={onOpenManageTags}>Manage tags</button>
+          ) : undefined
+        }
+      />
       <Panel.Body>
         <div className={styles.searchBar}>
           <input
@@ -76,6 +112,15 @@ export function SavedScriptsPanel() {
             className={styles.searchInput}
           />
         </div>
+        {activeFilter && (
+          <div className={styles.filterStrip}>
+            <span>Filter:</span>
+            <TagList
+              tags={[activeFilter]}
+              onRemove={() => setActiveFilter(null)}
+            />
+          </div>
+        )}
         <ul className={styles.list}>
           {filtered.map((script) => (
             <li key={script.id} className={styles.rowWrap}>
@@ -83,6 +128,13 @@ export function SavedScriptsPanel() {
                 onClick={() => open(script)}
                 trailing={
                   <div className={styles.actions}>
+                    <IconButton
+                      aria-label={`Edit tags for ${script.name}`}
+                      tooltip="Edit tags"
+                      size="sm"
+                      icon="📝"
+                      onClick={(e) => { stop(e); setEditingTagsId(script.id); }}
+                    />
                     <IconButton
                       aria-label={`Duplicate script ${script.name}`}
                       tooltip="Duplicate"
@@ -103,8 +155,24 @@ export function SavedScriptsPanel() {
                 }
               >
                 {script.name}
-                {script.tags && <span className={styles.tags}>{script.tags}</span>}
+                {script.tags.length > 0 && (
+                  <span className={styles.tagsWrap}>
+                    <TagList
+                      tags={script.tags}
+                      onClick={(tag) => setActiveFilter(tag)}
+                      selectedTag={activeFilter ?? undefined}
+                    />
+                  </span>
+                )}
               </ListRow>
+              {editingTagsId === script.id && (
+                <EditTagsPopover
+                  initial={script.tags}
+                  allTags={allTags}
+                  onSave={(tags) => handleEditTagsSave(script, tags)}
+                  onCancel={() => setEditingTagsId(null)}
+                />
+              )}
               {confirmingId === script.id && (
                 <div className={styles.confirm}>
                   <span>Delete "{script.name}"? This cannot be undone.</span>
