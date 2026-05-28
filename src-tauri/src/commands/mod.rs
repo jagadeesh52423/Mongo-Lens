@@ -1,8 +1,10 @@
 pub mod ai;
-pub mod connection;
 pub mod collection;
+pub mod connection;
+pub mod connection_v2;
 pub mod document;
 pub mod logging;
 pub mod plugin_secrets;
-pub mod script;
+pub mod prefs;
 pub mod saved_script;
+pub mod script;

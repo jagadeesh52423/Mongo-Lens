@@ -6,9 +6,6 @@ mod db;
 mod keychain;
 mod logger;
 mod mongo;
-// Public API (load/save/resolve_effective) is consumed by IPC commands
-// (Task 12). Until that lands, silence per-symbol dead-code warnings.
-#[allow(dead_code)]
 mod prefs;
 mod runner;
 mod ssh;
@@ -28,12 +25,17 @@ fn main() {
 }
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
-    tauri::Builder::default()
+    // CONN_V2 toggles registration of the new tagged-union IPC commands.
+    // Resolved once here so setup() and the invoke_handler branch agree
+    // on the same value for the lifetime of the process.
+    let conn_v2_enabled = std::env::var("CONN_V2").is_ok();
+
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .menu(|handle| Menu::default(handle))
-        .setup(|app| {
+        .setup(move |app| {
             let base = dirs_dir()?;
             fs::create_dir_all(&base)
                 .map_err(|e| format!("failed to create app dir {}: {}", base.display(), e))?;
@@ -73,7 +75,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             // migrate_all over the legacy `connections` table so the v2
             // table starts in sync. Failures here log a warning and
             // continue — the legacy path is unaffected.
-            if std::env::var("CONN_V2").is_ok() {
+            if conn_v2_enabled {
                 bootstrap_conn_v2(app, &db_path, tracing_logger.as_ref());
             }
 
@@ -89,8 +91,56 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             tracing_logger.info("app boot", LogCtx::new());
 
             Ok(())
-        })
-        .invoke_handler(tauri::generate_handler![
+        });
+
+    // Existing v1 handlers stay registered unconditionally so the old
+    // dialog keeps working. The v2 surface (connection_v2_* + prefs_*)
+    // is appended only when CONN_V2 is enabled — generate_handler! is a
+    // compile-time macro, so we pick one of two pre-built handler lists
+    // at runtime here rather than mutating a single list.
+    let builder = if conn_v2_enabled {
+        builder.invoke_handler(tauri::generate_handler![
+            commands::connection::list_connections,
+            commands::connection::create_connection,
+            commands::connection::update_connection,
+            commands::connection::delete_connection,
+            commands::connection::test_connection,
+            commands::connection::connect_connection,
+            commands::connection::disconnect_connection,
+            commands::collection::list_databases,
+            commands::collection::list_collections,
+            commands::collection::list_indexes,
+            commands::collection::browse_collection,
+            commands::document::update_document,
+            commands::document::delete_document,
+            commands::script::run_script,
+            commands::script::cancel_script,
+            commands::saved_script::list_scripts,
+            commands::saved_script::create_script,
+            commands::saved_script::update_script,
+            commands::saved_script::delete_script,
+            commands::saved_script::touch_script,
+            commands::logging::log_write,
+            runner::executor::check_node_runner,
+            runner::executor::install_node_runner,
+            commands::ai::set_ai_token,
+            commands::ai::get_ai_token,
+            commands::ai::delete_ai_token,
+            commands::plugin_secrets::set_plugin_secret,
+            commands::plugin_secrets::get_plugin_secret,
+            commands::plugin_secrets::delete_plugin_secret,
+            // CONN_V2 gated surface — see commands/connection_v2.rs and
+            // commands/prefs.rs.
+            commands::connection_v2::connections_v2_list,
+            commands::connection_v2::connections_v2_save,
+            commands::connection_v2::connections_v2_delete,
+            commands::connection_v2::connections_v2_test,
+            commands::prefs::prefs_get,
+            commands::prefs::prefs_set,
+            commands::prefs::prefs_resolve_effective,
+        ])
+    } else {
+        builder.invoke_handler(tauri::generate_handler![
             commands::connection::list_connections,
             commands::connection::create_connection,
             commands::connection::update_connection,
@@ -121,6 +171,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             commands::plugin_secrets::get_plugin_secret,
             commands::plugin_secrets::delete_plugin_secret,
         ])
+    };
+
+    builder
         .on_window_event(|window, event| {
             // On close: shut down all MongoDB pools (parallel, 1 s each), then all tunnels
             // (parallel, 2 s each). Parallel execution keeps total stall at max(1 s, 2 s)
