@@ -15,9 +15,10 @@ interface Props {
   modes: readonly ExecutionMode[];
   onExecute: (modeId: string) => void;
   onSave: () => Promise<void>;
-  onSaveAs: (name: string, tags: string) => Promise<void>;
+  onSaveAs: (name: string, tags: string[]) => Promise<void>;
   hasSavedScript: boolean;
   isRunning: boolean;
+  initialTags?: string[];
 }
 
 function modeButtonClass(style: ExecutionMode['buttonStyle'], canRun: boolean): string {
@@ -40,6 +41,7 @@ export function ContextBar({
   onSaveAs,
   hasSavedScript,
   isRunning,
+  initialTags,
 }: Props) {
   const connections = useConnectionsV2((s) => s.connections);
   const connectedIds = useConnectionsV2((s) => s.connectedIds);
@@ -156,6 +158,7 @@ export function ContextBar({
       <Toolbar data-tab-id={tabId} left={left} right={right} />
       {saving && (
         <SaveScriptDialog
+          initialTags={initialTags ?? []}
           onSave={async (name, tags) => { await onSaveAs(name, tags); setSaving(false); }}
           onCancel={() => setSaving(false)}
         />

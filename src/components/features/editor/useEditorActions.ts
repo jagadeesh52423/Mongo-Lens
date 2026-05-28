@@ -80,7 +80,7 @@ export function useEditorActions(active: EditorTab | undefined) {
     try {
       const updated = await updateScript(
         active.savedScriptId, active.title, active.content,
-        active.savedScriptTags ?? '', active.connectionId,
+        active.savedScriptTags ?? [], active.connectionId,
       );
       updateTab(active.id, { isDirty: false, savedScriptTags: updated.tags });
       bumpScriptsVersion();
@@ -90,7 +90,7 @@ export function useEditorActions(active: EditorTab | undefined) {
     }
   }
 
-  async function handleSaveAs(name: string, tags: string) {
+  async function handleSaveAs(name: string, tags: string[]) {
     if (!active || active.type !== 'script') return;
     const created = await createScript(name, active.content, tags, active.connectionId);
     updateTab(active.id, {
