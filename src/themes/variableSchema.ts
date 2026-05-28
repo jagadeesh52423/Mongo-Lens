@@ -32,6 +32,7 @@ export const VARIABLE_SCHEMA: VariableSpec[] = [
   { name: '--accent-red-dim', label: 'Accent · red (dim)',   group: 'Accents',    kind: 'color' },
   { name: '--accent-blue',    label: 'Accent · blue',        group: 'Accents',    kind: 'color' },
   { name: '--accent-blue-dim',label: 'Accent · blue (dim)',  group: 'Accents',    kind: 'color' },
+  { name: '--accent-amber',   label: 'Accent · amber',       group: 'Accents',    kind: 'color' },
   // Syntax
   { name: '--syntax-key',     label: 'Syntax · keyword',     group: 'Syntax',     kind: 'color' },
   { name: '--syntax-string',  label: 'Syntax · string',      group: 'Syntax',     kind: 'color' },

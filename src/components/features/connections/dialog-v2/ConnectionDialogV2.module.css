@@ -7,7 +7,7 @@
 .tab, .tabActive { padding: 8px 12px; text-align: left; background: transparent; border: none; border-left: 3px solid transparent; cursor: pointer; color: var(--fg-muted); font-size: var(--fs-sm); }
 .tabActive { background: var(--bg-elev-2); border-left-color: var(--accent); font-weight: 600; color: var(--accent); }
 .errBadge { color: var(--accent-red); }
-.overrideBadge { color: #f59e0b; }
+.overrideBadge { color: var(--accent-amber); }
 .divider { border: none; border-top: 1px dashed var(--border); margin: 6px 8px; }
 .panel { flex: 1; padding: 16px; }
 .footer { display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; border-top: 1px solid var(--border); }
