@@ -1,3 +1,5 @@
+use crate::connection::model::{AuthMode, Connection};
+use crate::connection::store as connection_store;
 use crate::logctx;
 use crate::mongo;
 use crate::state::AppState;
@@ -45,12 +47,16 @@ pub async fn list_databases(
         Err(e) if mongo::authz::is_unauthorized(&e) => {
             log.warn("list_databases unauthorized, falling back to default db",
                 logctx! { "err" => e.to_string() });
-            // Look up the connection record for its default DB.
+            // Look up the v2 connection model for its auth_db. Only
+            // SCRAM and Legacy-CR carry an explicit auth_db; other auth
+            // modes don't have a client-side default to fall back to,
+            // so we surface an empty list (the UI then shows nothing,
+            // matching the no-default-db case).
             let sql = state.open_db().map_err(|e| e.to_string())?;
-            let rec = crate::db::connections::get(&sql, &connection_id)
+            let connection = connection_store::get(&sql, &connection_id)
                 .map_err(|e| e.to_string())?
                 .ok_or("connection not found")?;
-            match mongo::default_db(&rec) {
+            match default_db_for_unauthorized(&connection) {
                 Some(db) => Ok(vec![db]),
                 None => Ok(vec![]),
             }
@@ -174,4 +180,25 @@ pub async fn browse_collection(
         docs.push(json);
     }
     Ok(BrowsePage { docs, total, page, page_size })
+}
+
+/// Best-effort default-database name for the Unauthorized fallback in
+/// `list_databases`. Only SCRAM and Legacy-CR auth modes carry an
+/// explicit `auth_db` in the v2 model — that's the right fallback target.
+/// All other modes (X.509, LDAP, Kerberos, AWS IAM, OIDC, None) don't
+/// have a comparable client-side hint; returning `None` yields an empty
+/// DB list (caller's responsibility to render that gracefully).
+///
+/// `admin` is filtered out because it's never a useful "show me my data"
+/// default — it's the auth realm, not a user DB.
+fn default_db_for_unauthorized(c: &Connection) -> Option<String> {
+    let candidate = match &c.auth {
+        AuthMode::Scram { auth_db, .. } | AuthMode::LegacyCr { auth_db, .. } => auth_db.clone(),
+        _ => return None,
+    };
+    if candidate.is_empty() || candidate == "admin" {
+        None
+    } else {
+        Some(candidate)
+    }
 }
