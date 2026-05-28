@@ -872,3 +872,109 @@ The `feat-ui-design-system-pr4-final-sweep` branch lands the **final PR of a 4-P
 8. **Plugin-source glob extension** (PR 1 N-1) — `plugin-agnostic-host.test.ts` doesn't yet glob `.json` files; spec §2 had intended it to.
 
 None of the above blocks merge. The branch is **production-ready** at `35ce7f1`.
+
+---
+
+## Task 11 Review (commits 7bcb8e4 + 5994f34)
+
+**Files added/modified:**
+- 7bcb8e4: `src-tauri/src/connection/migration.rs` (new), `src-tauri/src/connection/mod.rs` (+`pub mod migration;`), `src-tauri/src/state.rs` (+`connection_secrets` field + getter/setter), `src-tauri/src/main.rs` (+`bootstrap_conn_v2` gated on `CONN_V2`), `src-tauri/src/commands/connection.rs` (+`sync_v2_after_save` called after both `create_connection` and `update_connection`)
+- 5994f34: `src-tauri/src/connection/secrets.rs` (SecretSlot rename: `MongoPassword` → `AuthPassword`, `AwsSessionToken` → `AwsSecretKey`; Phase-2 hardening items captured as docstring), `src-tauri/src/connection/migration.rs` (call sites updated to `AuthPassword`)
+
+**Plan ref:** §Task 11 and §Migration
+
+> **Build verification (isolated):** `git worktree add /tmp/task11-review 5994f34` → `cargo test --bin mongo-lens connection::` → **67/67 PASS** (1.14s). `cargo build` clean. Worktree removed.
+
+### Stage 1 — Spec compliance: **PASS**
+
+#### `migrate(legacy) → Connection` mirrors `src/connection/migration.ts`
+
+- Module doc reproduces the 5 migration rules verbatim — diff-able against the TS migrator.
+- **Critical: tests load the SAME paired fixtures Task 4 created** (`tests/fixtures/connection/{legacy,migrated}/`). Six fixture-pair tests (`pair_host_no_auth`, `pair_host_scram`, `pair_host_scram_missing_authdb`, `pair_host_scram_with_ssh_key`, `pair_uri_only`, `pair_uri_with_ssh_key`) load the legacy fixture, run `migrate()`, serialize via serde_json, and `assert_eq!` against the pre-computed migrated fixture. This locks Rust and TS to byte-equal output on the wire contract.
+- Constants extracted (`DEFAULT_HOST`/`DEFAULT_PORT`/`DEFAULT_AUTH_DB`/`DEFAULT_SSH_PORT`/`MIGRATED_SSH_HOST_KEY_POLICY`), one named constant per defaulted value — matches the TS migrator's style.
+- Edge cases beyond the fixture matrix: bare `bare` connection (all defaults), `migrate_clamps_out_of_range_port_to_default` (port=99_999 and ssh_port=-1 both fall back to defaults), `migrate_empty_username_treated_as_no_auth`, `migrate_empty_authdb_falls_back_to_admin`.
+
+#### Port i64→u16 bounds check
+
+```rust
+fn to_u16_or(value: Option<i64>, default: u16) -> u16 {
+    match value {
+        Some(n) if (0..=u16::MAX as i64).contains(&n) => n as u16,
+        _ => default,
+    }
+}
+```
+
+Explicit range guard prevents a corrupted SQLite INTEGER (negative or > 65535) from wrapping into a valid u16. Test `migrate_clamps_out_of_range_port_to_default` exercises both bounds.
+
+#### `sync_row_to_v2` semantics
+
+- Upserts the v2 payload row via `store::upsert(sqlite, &connection)?`.
+- **Writes the legacy password to `SecretSlot::AuthPassword`** only when `legacy_password` is `Some(non_empty)`. Test `sync_writes_v2_row_and_keychain_slot` confirms the secret is at the right slot. Tests `sync_does_not_write_secret_when_password_is_none` and `sync_does_not_write_secret_when_password_is_empty` cover the absent/empty branches.
+- **Never touches the legacy keychain entry** — verified by code (no `keychain::set_password` / `keychain::delete_password` calls in migration.rs) and by test `sync_does_not_touch_legacy_secret_or_row` which seeds a legacy row, calls sync, and confirms the legacy row survives.
+- After the 5994f34 fix, the slot wire name is `auth-password` — matches plan §Migration's `conn:<id>:auth-password` requirement. **Cross-task coordination resolved.**
+
+#### `migrate_all` shape + safety
+
+- Returns `MigrationSummary { total, migrated, skipped_secret, failed }` — exactly the team-lead-specified shape.
+- Per-row failure paths: password-fetch failure → `skipped_secret += 1`, the row is still upserted (test `migrate_all_counts_password_fetch_failures_as_skipped_secret`); upsert failure → `failed += 1`, the row is logged and skipped.
+- Top-level only errors on the initial `legacy_db::list(sqlite)?` query — once the row list is in hand, nothing else can bubble up to bootstrap.
+- Idempotent: test `migrate_all_is_idempotent` runs migrate_all twice and asserts exactly one v2 row exists.
+- Empty-table edge case: test `migrate_all_handles_empty_legacy_table` returns `MigrationSummary::default()` (all zeros).
+
+#### `bootstrap_conn_v2` cannot block startup
+
+Every step in `main.rs::bootstrap_conn_v2` is independently recoverable:
+1. **CONN_V2 env-var gate**: `if std::env::var("CONN_V2").is_ok()` — entire function is a no-op without the flag.
+2. **Open secret store**: failure → `log.warn(...)` + `return`. App continues.
+3. **Install on AppState**: infallible (mutex set).
+4. **Open db handle**: failure → `log.warn(...)` + `return`. App continues.
+5. **Run migrate_all**: errors are caught at the `match` level and warn-logged; nothing propagates back to the caller.
+
+The function returns unit. Bootstrap cannot panic and cannot return an error that the Tauri setup hook would surface. ✓
+
+#### Legacy paths untouched
+
+- **`src-tauri/src/keychain.rs`** — `git diff 7bcb8e4~1 5994f34 --stat -- src-tauri/src/keychain.rs` shows zero changes. Legacy single-password path intact.
+- **`src-tauri/src/db/migrate.rs`** — also unchanged in this range. Legacy `connections` table DDL untouched (`connections_v2` was added in Task 5 and is not modified here).
+- **Old dialog still reads/writes `connections`** — `commands/connection.rs` still calls `db::connections::insert`, `keychain::set_password`, `keychain::delete_password` for the legacy paths. The new `sync_v2_after_save` runs **after** those, additively.
+
+#### `commands/connection.rs` integration
+
+The diff is small and surgical. In both `create_connection` and `update_connection`:
+1. Legacy save happens first (`db::connections::insert/update`).
+2. Legacy keychain write happens next (`keychain::set_password` / `delete_password`).
+3. **Then** `sync_v2_after_save(&state, &conn, &rec, input.password.as_deref(), log.as_ref())` is called.
+4. Within `sync_v2_after_save`, if `state.connection_secrets()` returns `None` (CONN_V2 disabled), the function is a pure no-op.
+5. If `Some(store)`, any error from `migration::sync_row_to_v2` is **logged at warn** and swallowed: `if let Err(err) = ... { log.warn(...) }`. The user's save has already succeeded. ✓
+
+One subtle cosmetic change: `input.password` is now bound by reference (`if let Some(ref pw) = input.password`) so it survives past the legacy write into the v2 sync call. UX behaviour identical; just borrow-lifetime accommodation.
+
+### 5994f34 — Wire-name fix verified
+
+- **`MongoPassword` → `AuthPassword`** (wire: `mongo-password` → `auth-password`). Resolves the Task 6 deviation flagged earlier; the new wire name matches plan §Migration's `conn:<id>:auth-password` exactly.
+- **`AwsSessionToken` → `AwsSecretKey`** (wire: `aws-session-token` → `aws-secret-key`). Doc comment now distinguishes "long-lived IAM secret access key" (this slot, persisted) from "short-lived STS-derived `sessionToken`" (model field, not persisted). Explicit guidance: "if a future flow needs to cache it across launches, add a new `AwsSessionToken` slot rather than overloading this one."
+- **`OidcRefreshToken` kept** — additive, no plan conflict.
+- **Phase-2 hardening items captured in secrets.rs module docstring** — both `delete_all_for` prefix-collision and `fetch_or_create_master_key` silent overwrite are now tracked items inside the codebase, with concrete remediation sketches. ✓
+
+### Stage 2 — Code quality: **PASS**
+
+- **Layering** — `migrate()` is pure (no I/O); `sync_row_to_v2` is side-effectful but tightly scoped (one upsert + one secret write); `migrate_all` is the only function with a database-list operation. Each layer is independently testable.
+- **`MigrationError`** uses thiserror with `#[from]` for both `StoreError` and `SecretError`. `?` works across both failure modes.
+- **`MigrationSummary`** derives `Default`, `PartialEq`, `Eq`, `Copy` — fits cleanly with `migrate_all_handles_empty_legacy_table`'s `assert_eq!(summary, MigrationSummary::default())`.
+- **`AppState::set_connection_secrets` / `connection_secrets()`** — late-binding via `Mutex<Option<Arc<dyn SecretStore>>>`. Caller gets an `Arc` clone (cheap), no allocation. Lock is not held across migrate_all (clone first, then call).
+- **`bootstrap_conn_v2` uses `app.state::<AppState>()`** to install the store inside a tight scope, then drops the State guard before opening the db handle. Avoids holding the State guard across long-running work. Clean.
+- **Documentation** — migration.rs has the migration rules reproduced inline as a checklist against the TS migrator. Module docs on every public function. `sync_v2_after_save` doc explicitly says "user-visible save has already succeeded" so any future reader understands the warn-and-swallow choice.
+
+### Minor findings (non-blocking)
+
+1. **`sync_v2_after_save` could filter empty passwords to `None`** before calling `sync_row_to_v2`. As-is, it passes `Some("")` through and the downstream `if !password.is_empty()` check absorbs it. Cosmetic; current behaviour is correct.
+2. **`bootstrap_conn_v2` opens a second DB handle** rather than reusing the AppState one. Intentional (migrate_all needs a raw `&SqliteConnection`), but it means migrate_all and the very-first user save could race on `connections_v2`. SQLite WAL/locks handle this safely; just noting the read-after-write semantics.
+3. **`sync_does_not_touch_legacy_secret_or_row` only verifies the legacy DB row** — a complete invariant test would also seed a legacy keychain entry and assert it survives. Acceptable: a code-level grep confirms migration.rs never calls `keychain::delete_password`, and `secrets::` only writes to v2 slots.
+4. **`AppState::set_connection_secrets` uses `.unwrap()` on the mutex lock.** A poisoned mutex here would mean a previous panic happened mid-set — defensible to propagate, but a one-line comment matching `MemStore::locked`'s "panic = unrecoverable" rationale would help future readers.
+
+### Result
+
+**Stage 1: PASS · Stage 2: PASS · 0 blocking · 4 minor findings.**
+
+The wire-name fix (5994f34) closes the cross-task coordination concern raised in Task 6. The Phase-2 hardening items now live as tracked docstrings in `secrets.rs`. Task 11 wires the legacy→v2 sync end-to-end without touching a single legacy code path. Task 12 (IPC + frontend bindings) is the next unlock; Task 13 is manual QA.
