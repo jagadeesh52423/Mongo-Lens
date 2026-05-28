@@ -26,7 +26,7 @@ pub fn create_script(
     state: State<'_, AppState>,
     name: String,
     content: String,
-    tags: String,
+    tags: Vec<String>,
     connection_id: Option<String>,
 ) -> Result<SavedScriptRecord, String> {
     let log = state.logger.child(logctx! { "logger" => "commands.saved_script" });
@@ -57,7 +57,7 @@ pub fn update_script(
     id: String,
     name: String,
     content: String,
-    tags: String,
+    tags: Vec<String>,
     connection_id: Option<String>,
 ) -> Result<SavedScriptRecord, String> {
     let log = state.logger.child(logctx! {
