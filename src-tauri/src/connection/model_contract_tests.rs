@@ -29,12 +29,21 @@ fn fixtures_dir() -> PathBuf {
         .join("connection")
 }
 
-/// Collect every `*.json` fixture file, sorted for stable test ordering.
+/// Collect every `*.json` fixture file at the **top level** of the
+/// fixtures dir, sorted for stable test ordering.
+///
+/// The dir also contains `legacy/` and `migrated/` subdirectories (paired
+/// fixtures for Task 4's migration logic — see src/connection/migration*).
+/// Those are validated by the TS migration tests and must NOT be
+/// round-tripped here: they intentionally use a different shape.
+/// We mirror `model.test.ts`'s non-recursive `*.json` glob by filtering
+/// to regular files with a `.json` extension only.
 fn fixture_files() -> Vec<PathBuf> {
     let dir = fixtures_dir();
     let mut paths: Vec<PathBuf> = fs::read_dir(&dir)
         .unwrap_or_else(|e| panic!("read fixtures dir {}: {e}", dir.display()))
         .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.file_type().map(|ft| ft.is_file()).unwrap_or(false))
         .map(|entry| entry.path())
         .filter(|path| path.extension().and_then(|s| s.to_str()) == Some("json"))
         .collect();
