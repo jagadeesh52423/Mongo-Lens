@@ -1,0 +1,23 @@
+{
+  "id": "lc-host-scram-with-ssh-key",
+  "name": "Legacy: SCRAM + SSH key",
+  "target": { "kind": "direct", "host": "internal.example", "port": 27017 },
+  "auth": {
+    "kind": "scram",
+    "username": "carol",
+    "authDb": "admin",
+    "mechanism": "auto"
+  },
+  "ssh": {
+    "host": "bastion.example",
+    "port": 2222,
+    "user": "carol",
+    "auth": {
+      "kind": "key",
+      "keyPath": "/Users/carol/.ssh/id_ed25519",
+      "hasPassphrase": false
+    },
+    "knownHostsPolicy": "add-and-trust"
+  },
+  "createdAt": "2026-05-05T00:00:00Z"
+}

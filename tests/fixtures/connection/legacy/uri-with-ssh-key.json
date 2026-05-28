@@ -1,0 +1,9 @@
+{
+  "id": "lc-uri-with-ssh-key",
+  "name": "Legacy: URI + SSH key",
+  "connString": "mongodb://user:pw@127.0.0.1:27017/admin",
+  "sshHost": "bastion.example",
+  "sshUser": "dave",
+  "sshKeyPath": "/Users/dave/.ssh/id_rsa",
+  "createdAt": "2026-05-06T00:00:00Z"
+}

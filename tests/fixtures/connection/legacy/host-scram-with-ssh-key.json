@@ -1,0 +1,13 @@
+{
+  "id": "lc-host-scram-with-ssh-key",
+  "name": "Legacy: SCRAM + SSH key",
+  "host": "internal.example",
+  "port": 27017,
+  "username": "carol",
+  "authDb": "admin",
+  "sshHost": "bastion.example",
+  "sshPort": 2222,
+  "sshUser": "carol",
+  "sshKeyPath": "/Users/carol/.ssh/id_ed25519",
+  "createdAt": "2026-05-05T00:00:00Z"
+}

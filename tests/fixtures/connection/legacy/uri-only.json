@@ -1,0 +1,6 @@
+{
+  "id": "lc-uri-only",
+  "name": "Legacy: URI only",
+  "connString": "mongodb+srv://user:pw@cluster0.example.mongodb.net/admin",
+  "createdAt": "2026-05-01T00:00:00Z"
+}

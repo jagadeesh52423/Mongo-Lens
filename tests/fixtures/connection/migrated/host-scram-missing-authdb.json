@@ -1,0 +1,12 @@
+{
+  "id": "lc-host-scram-missing-authdb",
+  "name": "Legacy: host + SCRAM, no authDb",
+  "target": { "kind": "direct", "host": "db.example", "port": 27017 },
+  "auth": {
+    "kind": "scram",
+    "username": "bob",
+    "authDb": "admin",
+    "mechanism": "auto"
+  },
+  "createdAt": "2026-05-04T00:00:00Z"
+}

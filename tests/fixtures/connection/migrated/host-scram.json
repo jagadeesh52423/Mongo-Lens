@@ -1,0 +1,12 @@
+{
+  "id": "lc-host-scram",
+  "name": "Legacy: host + SCRAM",
+  "target": { "kind": "direct", "host": "db.example", "port": 27017 },
+  "auth": {
+    "kind": "scram",
+    "username": "alice",
+    "authDb": "myapp",
+    "mechanism": "auto"
+  },
+  "createdAt": "2026-05-03T00:00:00Z"
+}

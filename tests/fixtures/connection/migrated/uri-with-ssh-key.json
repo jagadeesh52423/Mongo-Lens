@@ -1,0 +1,21 @@
+{
+  "id": "lc-uri-with-ssh-key",
+  "name": "Legacy: URI + SSH key",
+  "target": {
+    "kind": "uri",
+    "uri": "mongodb://user:pw@127.0.0.1:27017/admin"
+  },
+  "auth": { "kind": "none" },
+  "ssh": {
+    "host": "bastion.example",
+    "port": 22,
+    "user": "dave",
+    "auth": {
+      "kind": "key",
+      "keyPath": "/Users/dave/.ssh/id_rsa",
+      "hasPassphrase": false
+    },
+    "knownHostsPolicy": "add-and-trust"
+  },
+  "createdAt": "2026-05-06T00:00:00Z"
+}

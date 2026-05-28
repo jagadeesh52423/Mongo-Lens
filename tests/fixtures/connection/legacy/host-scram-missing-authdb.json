@@ -1,0 +1,8 @@
+{
+  "id": "lc-host-scram-missing-authdb",
+  "name": "Legacy: host + SCRAM, no authDb",
+  "host": "db.example",
+  "port": 27017,
+  "username": "bob",
+  "createdAt": "2026-05-04T00:00:00Z"
+}
