@@ -1,0 +1,7 @@
+{
+  "id": "fx-auth-oidc",
+  "name": "Fixture: OIDC auth",
+  "target": { "kind": "direct", "host": "atlas.example", "port": 27017 },
+  "auth": { "kind": "oidc", "principal": "eve@example.com", "providerName": "okta" },
+  "createdAt": "2026-05-28T00:00:00Z"
+}

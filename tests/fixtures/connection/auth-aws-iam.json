@@ -1,0 +1,12 @@
+{
+  "id": "fx-auth-aws-iam",
+  "name": "Fixture: AWS IAM auth",
+  "target": { "kind": "direct", "host": "docdb.aws.example", "port": 27017 },
+  "auth": {
+    "kind": "aws-iam",
+    "accessKeyId": "AKIAIOSFODNN7EXAMPLE",
+    "sessionToken": "AQoDYXdzEJr...session...token",
+    "useEnvCreds": false
+  },
+  "createdAt": "2026-05-28T00:00:00Z"
+}

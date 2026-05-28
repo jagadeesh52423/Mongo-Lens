@@ -1,0 +1,7 @@
+{
+  "id": "fx-auth-ldap",
+  "name": "Fixture: LDAP auth",
+  "target": { "kind": "direct", "host": "ldap.example", "port": 27017 },
+  "auth": { "kind": "ldap", "username": "cn=carol,dc=example,dc=com" },
+  "createdAt": "2026-05-28T00:00:00Z"
+}

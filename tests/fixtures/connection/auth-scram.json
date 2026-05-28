@@ -1,0 +1,7 @@
+{
+  "id": "fx-auth-scram",
+  "name": "Fixture: SCRAM auth",
+  "target": { "kind": "direct", "host": "db.example", "port": 27017 },
+  "auth": { "kind": "scram", "username": "alice", "authDb": "admin", "mechanism": "auto" },
+  "createdAt": "2026-05-28T00:00:00Z"
+}

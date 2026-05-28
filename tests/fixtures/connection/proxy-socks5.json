@@ -1,0 +1,13 @@
+{
+  "id": "fx-proxy-socks5",
+  "name": "Fixture: SOCKS5 proxy",
+  "target": { "kind": "direct", "host": "internal.example", "port": 27017 },
+  "auth": { "kind": "none" },
+  "proxy": {
+    "kind": "socks5",
+    "host": "proxy.example",
+    "port": 1080,
+    "auth": { "username": "ivan" }
+  },
+  "createdAt": "2026-05-28T00:00:00Z"
+}

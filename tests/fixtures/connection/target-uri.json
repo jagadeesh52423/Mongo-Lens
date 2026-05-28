@@ -1,0 +1,7 @@
+{
+  "id": "fx-target-uri",
+  "name": "Fixture: URI target",
+  "target": { "kind": "uri", "uri": "mongodb+srv://cluster0.example.mongodb.net/admin" },
+  "auth": { "kind": "none" },
+  "createdAt": "2026-05-28T00:00:00Z"
+}

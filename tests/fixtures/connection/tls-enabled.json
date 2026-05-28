@@ -1,0 +1,14 @@
+{
+  "id": "fx-tls-enabled",
+  "name": "Fixture: TLS enabled",
+  "target": { "kind": "direct", "host": "tls.example", "port": 27017 },
+  "auth": { "kind": "none" },
+  "tls": {
+    "enabled": true,
+    "allowInvalidCerts": false,
+    "allowInvalidHostnames": false,
+    "caFile": "/etc/ssl/ca.pem",
+    "clientCertFile": "/etc/ssl/client.pem"
+  },
+  "createdAt": "2026-05-28T00:00:00Z"
+}
