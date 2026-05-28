@@ -1,0 +1,15 @@
+.boolRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 4px 0;
+}
+
+.boolLabel {
+  flex: 1;
+}
+
+.inputRow {
+  display: flex;
+  gap: 6px;
+}
