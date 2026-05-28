@@ -49,7 +49,7 @@ export function applyMonacoTheme(themeId: string): void {
   const panel = merged['--bg-elev-1'] ?? merged['--bg-panel'] ?? merged['--bg'] ?? '#0a0b0d';
   const base = isLightColor(panel) ? 'vs' : 'vs-dark';
   const read = (name: string) => merged[name] ?? '';
-  const rules = buildMonacoSyntaxRules(read).filter((r) => r.foreground.length === 6);
+  const rules = buildMonacoSyntaxRules(read).filter((r) => /^[0-9a-fA-F]{6}$/.test(r.foreground));
 
   loader.init().then((monaco) => {
     monaco.editor.defineTheme(MONACO_THEME_ID, {
