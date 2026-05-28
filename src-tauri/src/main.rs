@@ -6,6 +6,10 @@ mod db;
 mod keychain;
 mod logger;
 mod mongo;
+// Public API (load/save/resolve_effective) is consumed by IPC commands
+// (Task 12). Until that lands, silence per-symbol dead-code warnings.
+#[allow(dead_code)]
+mod prefs;
 mod runner;
 mod ssh;
 mod state;
