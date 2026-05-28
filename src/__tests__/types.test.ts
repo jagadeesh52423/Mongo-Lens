@@ -26,11 +26,11 @@ describe('EditorTab type', () => {
       connectionId: 'conn-1',
       database: 'testdb',
       savedScriptId: 'abc-123',
-      savedScriptTags: 'query,users',
+      savedScriptTags: ['query', 'users'],
     };
 
     expect(tabWithSavedScript.savedScriptId).toBe('abc-123');
-    expect(tabWithSavedScript.savedScriptTags).toBe('query,users');
+    expect(tabWithSavedScript.savedScriptTags).toEqual(['query', 'users']);
   });
 
   it('should allow EditorTab without savedScriptId', () => {
