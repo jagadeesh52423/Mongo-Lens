@@ -24,12 +24,20 @@ describe('ConnectionPanel', () => {
     expect(invokeMock).toHaveBeenCalledWith('list_connections');
   });
 
-  it('opens the add dialog', async () => {
-    invokeMock.mockResolvedValueOnce([]);
+  it('opens the v2 add dialog', async () => {
+    // list_connections → []; connections_v2_list → []; prefs_get → undefined
+    // (ConnectionPanel falls back to DEFAULT_GLOBAL_PREFS).
+    invokeMock
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce(undefined);
     const user = userEvent.setup();
     render(<ConnectionPanel />);
     await user.click(screen.getByLabelText('Add connection'));
-    expect(screen.getByText('New Connection')).toBeInTheDocument();
+    expect(
+      await screen.findByRole('dialog', { name: /connection editor/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText(/connection name/i)).toBeInTheDocument();
   });
 
   it('duplicates a connection via the right-click menu with smart naming', async () => {

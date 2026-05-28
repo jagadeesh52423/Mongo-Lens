@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { invoke } from '@tauri-apps/api/core';
@@ -8,26 +8,16 @@ import { useConnectionsV2 } from '../useConnectionsV2';
 
 const invokeMock = invoke as unknown as ReturnType<typeof vi.fn>;
 
-const originalLocation = window.location;
-
 beforeEach(() => {
   invokeMock.mockReset();
   useConnectionsStore.setState({
     connections: [], activeConnectionId: null, activeDatabase: null, connectedIds: new Set(),
   });
   useConnectionsV2.setState({ connections: [], loading: false });
-  Object.defineProperty(window, 'location', {
-    value: { ...originalLocation, search: '?dialog=v2' },
-    writable: true,
-  });
 });
 
-afterEach(() => {
-  Object.defineProperty(window, 'location', { value: originalLocation, writable: true });
-});
-
-describe('ConnectionPanel DIALOG_V2 escape hatch', () => {
-  it('renders ConnectionDialogV2 when ?dialog=v2 is set and Add is clicked', async () => {
+describe('ConnectionPanel — v2 dialog is the default', () => {
+  it('renders ConnectionDialogV2 when Add is clicked (no escape hatch needed)', async () => {
     // legacy list_connections → empty; v2 list → empty; prefs_get → defaults
     invokeMock
       .mockResolvedValueOnce([])

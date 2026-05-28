@@ -3,9 +3,8 @@ import {
   createConnection,
   updateConnection as ipcUpdate,
   deleteConnection as ipcDelete,
-  connectConnection,
-  disconnectConnection,
 } from '../../../ipc';
+import { connectV2, disconnectV2 } from '../../../connection/ipc';
 import { useConnectionsStore } from '../../../store/connections';
 import { nextDuplicateName } from './nameUtils';
 import type { Connection, ConnectionInput } from '../../../types';
@@ -77,7 +76,7 @@ export function useConnectionActions(): UseConnectionActions {
   /** Core connect logic, shared by first attempt, passphrase retry, and host-key retry. */
   const doConnect = useCallback(async (c: Connection, passphrase?: string, acceptHostKey?: boolean) => {
     try {
-      const result = await connectConnection(c.id, passphrase, acceptHostKey);
+      const result = await connectV2(c.id, passphrase, acceptHostKey);
       if (result.type === 'connected') {
         markConnected(c.id);
         setExpandedConns((s) => new Set(s).add(c.id));
@@ -137,7 +136,7 @@ export function useConnectionActions(): UseConnectionActions {
   const connect = useCallback((c: Connection) => doConnect(c), [doConnect]);
 
   const disconnect = useCallback(async (c: Connection) => {
-    await disconnectConnection(c.id);
+    await disconnectV2(c.id);
     markDisconnected(c.id);
     setExpandedConns((s) => {
       const n = new Set(s);

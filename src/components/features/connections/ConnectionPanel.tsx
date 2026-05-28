@@ -3,7 +3,6 @@ import { listConnections, onSshSessionLost } from '../../../ipc';
 import { useConnectionsStore } from '../../../store/connections';
 import { useConnectionsV2 } from './useConnectionsV2';
 import { useEditorStore } from '../../../store/editor';
-import { ConnectionDialog } from './ConnectionDialog';
 import { ConnectionDialogV2 } from './dialog-v2/ConnectionDialogV2';
 import { ConnectionTree } from './ConnectionTree';
 import { prefsGet } from '../../../connection/ipc';
@@ -30,13 +29,6 @@ export function ConnectionPanel() {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; connection: Connection } | null>(null);
   const [globals, setGlobals] = useState<GlobalPrefs>(DEFAULT_GLOBAL_PREFS);
   const openTab = useEditorStore((s) => s.openTab);
-
-  // Dev escape hatch: enable the new tabbed dialog via either
-  // VITE_DIALOG_V2=1 at build time, or `?dialog=v2` in the URL at runtime.
-  const dialogV2Enabled =
-    import.meta.env.VITE_DIALOG_V2 === '1' ||
-    (typeof window !== 'undefined' &&
-      new URLSearchParams(window.location.search).get('dialog') === 'v2');
 
   function openCollectionScriptTab(db: string, col: string, cId: string) {
     openTab({
@@ -80,12 +72,6 @@ export function ConnectionPanel() {
     // every expansion change would thrash the IPC subscription.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [markDisconnected]);
-
-  async function handleSave(input: Parameters<typeof actions.save>[0]) {
-    await actions.save(input, editing);
-    setEditing(null);
-    setCreating(false);
-  }
 
   return (
     <Panel>
@@ -145,29 +131,21 @@ export function ConnectionPanel() {
         </ul>
       </Panel.Body>
       {(creating || editing) && (
-        dialogV2Enabled ? (
-          <ConnectionDialogV2
-            initial={
-              editing
-                ? (v2Connections.find((v) => v.id === editing.id) ?? null)
-                : null
-            }
-            globals={globals}
-            onSave={async (input) => {
-              const saved = await saveV2Store(input);
-              setEditing(null);
-              setCreating(false);
-              return saved;
-            }}
-            onCancel={() => { setEditing(null); setCreating(false); }}
-          />
-        ) : (
-          <ConnectionDialog
-            initial={editing ?? undefined}
-            onSave={handleSave}
-            onCancel={() => { setEditing(null); setCreating(false); }}
-          />
-        )
+        <ConnectionDialogV2
+          initial={
+            editing
+              ? (v2Connections.find((v) => v.id === editing.id) ?? null)
+              : null
+          }
+          globals={globals}
+          onSave={async (input) => {
+            const saved = await saveV2Store(input);
+            setEditing(null);
+            setCreating(false);
+            return saved;
+          }}
+          onCancel={() => { setEditing(null); setCreating(false); }}
+        />
       )}
       {contextMenu && (
         <ContextMenu
