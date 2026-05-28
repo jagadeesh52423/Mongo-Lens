@@ -1,11 +1,12 @@
 .backdrop {
-  position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+  position: fixed; inset: 0; background: rgba(0,0,0,0.5); backdrop-filter: blur(3px);
   display: flex; align-items: center; justify-content: center; z-index: var(--z-dialog);
 }
 .dialog {
-  background: var(--bg-panel); border: 1px solid var(--border);
-  border-radius: var(--radius-md); box-shadow: var(--shadow-dialog);
+  background: var(--bg-elev-3); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-3);
   max-height: 90vh; display: flex; flex-direction: column; min-width: 320px;
+  transition: transform var(--dur-base) var(--ease-out), opacity var(--dur-base) var(--ease-out);
 }
 .header {
   display: flex; align-items: center; justify-content: space-between;

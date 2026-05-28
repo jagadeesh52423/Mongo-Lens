@@ -40,10 +40,10 @@ export function ContextMenu({ x, y, items, onClose }: Props) {
         position: 'fixed',
         top: y,
         left: x,
-        background: 'var(--bg-panel)',
+        background: 'var(--bg-elev-3)',
         border: '1px solid var(--border)',
-        borderRadius: 4,
-        boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+        borderRadius: 'var(--radius-md)',
+        boxShadow: 'var(--shadow-3)',
         minWidth: 200,
         zIndex: 1000,
         padding: '4px 0',
@@ -69,7 +69,7 @@ export function ContextMenu({ x, y, items, onClose }: Props) {
             fontSize: 12,
           }}
           onMouseEnter={(e) => {
-            if (!item.disabled) (e.currentTarget as HTMLDivElement).style.background = 'var(--bg-hover, rgba(0,0,0,0.06))';
+            if (!item.disabled) (e.currentTarget as HTMLDivElement).style.background = 'var(--bg-hover)';
           }}
           onMouseLeave={(e) => {
             (e.currentTarget as HTMLDivElement).style.background = '';
