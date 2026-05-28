@@ -185,7 +185,7 @@ pub fn create_connection(
 /// Best-effort dual-table sync: if the v2 secret store is installed (i.e.
 /// the app was launched with `CONN_V2` set), upsert the migrated payload
 /// row in `connections_v2` and re-key the legacy password into
-/// `SecretSlot::MongoPassword`. Any failure is logged at warn level and
+/// `SecretSlot::AuthPassword`. Any failure is logged at warn level and
 /// returned as unit — the user-visible save has already succeeded and
 /// the legacy path is unaffected.
 fn sync_v2_after_save(
