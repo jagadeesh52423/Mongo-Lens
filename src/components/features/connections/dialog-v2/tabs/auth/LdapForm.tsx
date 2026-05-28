@@ -1,7 +1,7 @@
 import { FormField } from '../../../../../ui/FormField';
-import type { AuthSubFormProps } from './registry';
+import type { SubFormProps } from '../types';
 
-export function LdapForm({ value, onChange, secrets, onSecretChange }: AuthSubFormProps) {
+export function LdapForm({ value, onChange, secrets, onSecretChange }: SubFormProps) {
   if (value.auth.kind !== 'ldap') return null;
   const auth = value.auth;
   const editingExisting = !!value.id;

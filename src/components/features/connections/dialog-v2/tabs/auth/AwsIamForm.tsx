@@ -1,7 +1,7 @@
 import { FormField } from '../../../../../ui/FormField';
-import type { AuthSubFormProps } from './registry';
+import type { SubFormProps } from '../types';
 
-export function AwsIamForm({ value, onChange, secrets, onSecretChange }: AuthSubFormProps) {
+export function AwsIamForm({ value, onChange, secrets, onSecretChange }: SubFormProps) {
   if (value.auth.kind !== 'aws-iam') return null;
   const auth = value.auth;
   const editingExisting = !!value.id;

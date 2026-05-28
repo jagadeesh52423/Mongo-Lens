@@ -14,7 +14,13 @@ const baseScram: Connection = {
 
 const baseNone: Connection = { ...baseScram, auth: { kind: 'none' } };
 
-function renderAuthTab(value: Connection, secrets: Record<string, string> = {}, onChange = vi.fn(), onSecretChange = vi.fn()) {
+function renderAuthTab(
+  value: Connection,
+  secrets: Record<string, string> = {},
+  onChange = vi.fn(),
+  onSecretChange = vi.fn(),
+  onAuthKindChange = vi.fn(),
+) {
   render(
     <AuthTab
       value={value}
@@ -22,9 +28,10 @@ function renderAuthTab(value: Connection, secrets: Record<string, string> = {}, 
       globals={DEFAULT_GLOBAL_PREFS}
       secrets={secrets}
       onSecretChange={onSecretChange}
+      onAuthKindChange={onAuthKindChange}
     />,
   );
-  return { onChange, onSecretChange };
+  return { onChange, onSecretChange, onAuthKindChange };
 }
 
 describe('AuthTab', () => {
@@ -40,10 +47,12 @@ describe('AuthTab', () => {
     expect(screen.getByText(/no authentication will be attempted/i)).toBeInTheDocument();
   });
 
-  it('switching mode replaces auth with blank variant', () => {
-    const { onChange } = renderAuthTab(baseScram);
+  it('switching mode dispatches onAuthKindChange with the new kind', () => {
+    const { onAuthKindChange, onChange } = renderAuthTab(baseScram);
     fireEvent.change(screen.getByLabelText(/authentication mode/i), { target: { value: 'x509' } });
-    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ auth: { kind: 'x509', certFile: '' } }));
+    // The reducer owns blank-variant logic via set-auth-kind; AuthTab only signals the kind.
+    expect(onAuthKindChange).toHaveBeenCalledWith('x509');
+    expect(onChange).not.toHaveBeenCalled();
   });
 
   it('password placeholder reads "(stored in Keychain…)" when editing an existing connection without a typed secret', () => {

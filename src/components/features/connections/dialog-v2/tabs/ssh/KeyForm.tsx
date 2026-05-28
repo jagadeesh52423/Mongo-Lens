@@ -1,8 +1,8 @@
 import { FormField } from '../../../../../ui/FormField';
 import { FilePicker } from '../shared/FilePicker';
-import type { AuthSubFormProps } from '../auth/registry';
+import type { SubFormProps } from '../types';
 
-export function KeyForm({ value, onChange, secrets, onSecretChange }: AuthSubFormProps) {
+export function KeyForm({ value, onChange, secrets, onSecretChange }: SubFormProps) {
   if (!value.ssh || value.ssh.auth.kind !== 'key') return null;
   const ssh = value.ssh;
   const auth = ssh.auth;

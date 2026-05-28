@@ -1,7 +1,7 @@
 import { FormField } from '../../../../../ui/FormField';
-import type { AuthSubFormProps } from '../auth/registry';
+import type { SubFormProps } from '../types';
 
-export function PasswordForm({ value, secrets, onSecretChange }: AuthSubFormProps) {
+export function PasswordForm({ value, secrets, onSecretChange }: SubFormProps) {
   if (!value.ssh || value.ssh.auth.kind !== 'password') return null;
   const editingExisting = !!value.id;
   return (

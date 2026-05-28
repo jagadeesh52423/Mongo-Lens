@@ -1,6 +1,6 @@
 import type { ComponentType } from 'react';
 import type { AuthMode } from '../../../../../../connection/model';
-import type { TabFormProps } from '../types';
+import type { SubFormProps } from '../types';
 import { NoneForm } from './NoneForm';
 import { ScramForm } from './ScramForm';
 import { LegacyCrForm } from './LegacyCrForm';
@@ -9,10 +9,6 @@ import { LdapForm } from './LdapForm';
 import { KerberosForm } from './KerberosForm';
 import { AwsIamForm } from './AwsIamForm';
 import { OidcForm } from './OidcForm';
-
-export interface AuthSubFormProps extends TabFormProps {
-  // value.auth is the active variant; each sub-form narrows by `kind`.
-}
 
 /**
  * Auth-mode sub-form registry.
@@ -23,7 +19,7 @@ export interface AuthSubFormProps extends TabFormProps {
  *   3. Register here under AUTH_FORMS + add a human label to AUTH_LABELS.
  * No edits needed elsewhere.
  */
-export const AUTH_FORMS: Record<AuthMode['kind'], ComponentType<AuthSubFormProps>> = {
+export const AUTH_FORMS: Record<AuthMode['kind'], ComponentType<SubFormProps>> = {
   'none': NoneForm,
   'scram': ScramForm,
   'legacy-cr': LegacyCrForm,

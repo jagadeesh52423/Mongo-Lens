@@ -1,6 +1,6 @@
 import type { ComponentType } from 'react';
 import type { SshAuth } from '../../../../../../connection/model';
-import type { AuthSubFormProps } from '../auth/registry';
+import type { SubFormProps } from '../types';
 import { PasswordForm } from './PasswordForm';
 import { KeyForm } from './KeyForm';
 import { AgentForm } from './AgentForm';
@@ -13,7 +13,7 @@ import { AgentForm } from './AgentForm';
  *   2. Implement <Variant>Form.tsx alongside the existing forms.
  *   3. Register under SSH_AUTH_FORMS + SSH_AUTH_LABELS.
  */
-export const SSH_AUTH_FORMS: Record<SshAuth['kind'], ComponentType<AuthSubFormProps>> = {
+export const SSH_AUTH_FORMS: Record<SshAuth['kind'], ComponentType<SubFormProps>> = {
   password: PasswordForm,
   key: KeyForm,
   agent: AgentForm,

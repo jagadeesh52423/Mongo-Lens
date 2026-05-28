@@ -16,7 +16,19 @@ export interface TabFormProps {
   globals: GlobalPrefs;
   secrets: Partial<Record<SecretSlot, string>>;
   onSecretChange: (slot: SecretSlot, value: string) => void;
+  /** Optional callback the shell wires to the reducer's `set-auth-kind`. */
+  onAuthKindChange?: (kind: import('../../../../../connection/model').AuthMode['kind']) => void;
 }
+
+/**
+ * Props for variant sub-forms inside a tab (auth/* and ssh/*). Shape is
+ * identical to TabFormProps — kept as a distinct alias so sub-forms can
+ * declare their narrower intent at the type level.
+ *
+ * To add a new sub-form: import this type, narrow on the variant kind in
+ * the body, and return JSX bound to the active variant's fields.
+ */
+export type SubFormProps = TabFormProps;
 
 export interface TabSpec {
   id: TabId;

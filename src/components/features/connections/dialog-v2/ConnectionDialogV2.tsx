@@ -88,6 +88,7 @@ export function ConnectionDialogV2({ initial, globals, onSave, onCancel }: Props
             globals={state.globals}
             secrets={state.secrets}
             onSecretChange={(slot, value) => dispatch({ type: 'set-secret', slot, value })}
+            onAuthKindChange={(kind) => dispatch({ type: 'set-auth-kind', kind })}
           />
         </div>
       </div>

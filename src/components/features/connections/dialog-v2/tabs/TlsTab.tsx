@@ -22,7 +22,7 @@ export function TlsTab({ value, onChange }: TabFormProps) {
         Enable TLS
       </label>
 
-      {enabled && tls?.enabled && (
+      {tls?.enabled && (
         <>
           <FilePicker
             id="tls-ca"

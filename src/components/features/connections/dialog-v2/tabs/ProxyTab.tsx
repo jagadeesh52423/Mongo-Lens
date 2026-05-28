@@ -73,9 +73,17 @@ export function ProxyTab({ value, onChange, secrets, onSecretChange }: TabFormPr
             <FormField.Input
               id="proxy-user"
               value={proxy.auth?.username ?? ''}
-              onChange={(e) =>
-                setProxy({ ...proxy, auth: e.target.value ? { username: e.target.value } : undefined })
-              }
+              onChange={(e) => {
+                const next = e.target.value;
+                if (next) {
+                  setProxy({ ...proxy, auth: { username: next } });
+                } else {
+                  // Clear the orphan keychain slot so we don't persist a
+                  // password the user can no longer see or edit.
+                  onSecretChange('proxy-password', '');
+                  setProxy({ ...proxy, auth: undefined });
+                }
+              }}
             />
           </FormField>
 

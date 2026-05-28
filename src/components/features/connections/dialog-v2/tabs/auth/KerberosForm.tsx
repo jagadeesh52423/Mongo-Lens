@@ -1,7 +1,7 @@
 import { FormField } from '../../../../../ui/FormField';
-import type { AuthSubFormProps } from './registry';
+import type { SubFormProps } from '../types';
 
-export function KerberosForm({ value, onChange }: AuthSubFormProps) {
+export function KerberosForm({ value, onChange }: SubFormProps) {
   if (value.auth.kind !== 'kerberos') return null;
   const auth = value.auth;
   return (

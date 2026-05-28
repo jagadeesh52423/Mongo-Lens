@@ -1,7 +1,7 @@
 import { FormField } from '../../../../../ui/FormField';
-import type { AuthSubFormProps } from './registry';
+import type { SubFormProps } from '../types';
 
-export function OidcForm({ value, onChange }: AuthSubFormProps) {
+export function OidcForm({ value, onChange }: SubFormProps) {
   if (value.auth.kind !== 'oidc') return null;
   const auth = value.auth;
   return (

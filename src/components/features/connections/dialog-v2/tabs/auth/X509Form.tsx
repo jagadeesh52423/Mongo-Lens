@@ -1,32 +1,27 @@
-import { FormField } from '../../../../../ui/FormField';
-import type { AuthSubFormProps } from './registry';
+import { FilePicker } from '../shared/FilePicker';
+import type { SubFormProps } from '../types';
 
-// X.509 client-cert auth. Task 8 will introduce a FilePicker shared
-// component; for now we accept a plain path string. Once FilePicker lands,
-// swap the inputs for <FilePicker /> with no other changes.
-export function X509Form({ value, onChange }: AuthSubFormProps) {
+const PEM_FILTERS = [{ name: 'PEM', extensions: ['pem', 'crt'] }];
+
+export function X509Form({ value, onChange }: SubFormProps) {
   if (value.auth.kind !== 'x509') return null;
   const auth = value.auth;
   return (
     <>
-      <FormField>
-        <FormField.Label htmlFor="x509-cert">Client certificate file</FormField.Label>
-        <FormField.Input
-          id="x509-cert"
-          value={auth.certFile}
-          placeholder="/path/to/client.pem"
-          onChange={(e) => onChange({ ...value, auth: { ...auth, certFile: e.target.value } })}
-        />
-      </FormField>
-      <FormField>
-        <FormField.Label htmlFor="x509-certkey">Client key file (optional)</FormField.Label>
-        <FormField.Input
-          id="x509-certkey"
-          value={auth.certKeyFile ?? ''}
-          placeholder="/path/to/client.key"
-          onChange={(e) => onChange({ ...value, auth: { ...auth, certKeyFile: e.target.value || undefined } })}
-        />
-      </FormField>
+      <FilePicker
+        id="x509-cert"
+        label="Client certificate file"
+        value={auth.certFile || undefined}
+        onChange={(path) => onChange({ ...value, auth: { ...auth, certFile: path ?? '' } })}
+        filters={PEM_FILTERS}
+      />
+      <FilePicker
+        id="x509-certkey"
+        label="Client key file (optional)"
+        value={auth.certKeyFile}
+        onChange={(path) => onChange({ ...value, auth: { ...auth, certKeyFile: path } })}
+        filters={PEM_FILTERS}
+      />
     </>
   );
 }

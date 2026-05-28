@@ -1,9 +1,9 @@
 import { FormField } from '../../../../../ui/FormField';
-import type { AuthSubFormProps } from './registry';
+import type { SubFormProps } from '../types';
 
 type ScramMechanism = 'SCRAM-SHA-1' | 'SCRAM-SHA-256' | 'auto';
 
-export function ScramForm({ value, onChange, secrets, onSecretChange }: AuthSubFormProps) {
+export function ScramForm({ value, onChange, secrets, onSecretChange }: SubFormProps) {
   if (value.auth.kind !== 'scram') return null;
   const auth = value.auth;
   const editingExisting = !!value.id;
