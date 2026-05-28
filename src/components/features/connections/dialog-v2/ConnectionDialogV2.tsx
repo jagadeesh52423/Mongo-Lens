@@ -7,9 +7,10 @@ import { TABS } from './tabs/registry';
 import { dialogReducer, initialDialogState } from './useDialogState';
 import { useConnectionsV2 } from '../useConnectionsV2';
 import { validateConnection } from '../../../../connection/validation';
+import { stageHeading } from '../../../../connection/staged-error';
 import type { Connection } from '../../../../connection/model';
 import type { GlobalPrefs } from '../../../../connection/overrides';
-import type { BuildStage, SaveInput, SecretInput, SecretSlot } from '../../../../connection/ipc';
+import type { SaveInput, SecretInput, SecretSlot } from '../../../../connection/ipc';
 import styles from './ConnectionDialogV2.module.css';
 
 interface Props {
@@ -17,20 +18,6 @@ interface Props {
   globals: GlobalPrefs;
   onSave: (input: SaveInput) => Promise<Connection>;
   onCancel: () => void;
-}
-
-/**
- * Maps a `BuildStage` discriminator to a human-readable failure heading.
- * Defined inline in PR 4 / Task 15; hoisted to `src/connection/staged-error.ts`
- * in Task 16 so `ConnectionErrorDialog` can share the same mapping.
- */
-function stageHeading(stage: BuildStage): string {
-  switch (stage) {
-    case 'ssh': return 'SSH tunnel failed';
-    case 'tls': return 'TLS handshake failed';
-    case 'auth': return 'Authentication failed';
-    case 'ping': return 'Server ping failed';
-  }
 }
 
 /** Collects the `state.secrets` map into the wire-format `SecretInput[]`. */
