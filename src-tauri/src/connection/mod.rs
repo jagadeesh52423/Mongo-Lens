@@ -39,5 +39,11 @@ pub mod proxy;
 #[allow(dead_code)]
 pub mod migration;
 
+// Connection → mongodb::options::ClientOptions builder with staged
+// errors (Ssh|Tls|Auth|Ping). Consumed by IPC commands (Task 12) and
+// the connections_v2_test command.
+#[allow(dead_code)]
+pub mod builder;
+
 #[cfg(test)]
 mod model_contract_tests;
