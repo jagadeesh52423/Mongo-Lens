@@ -8,12 +8,12 @@
 }
 
 .label {
-  color: var(--fg-dim);
-  font-size: 12px;
+  color: var(--fg-muted);
+  font-size: var(--fs-sm);
 }
 
 .labelOffset {
-  margin-left: 4px;
+  margin-left: var(--space-1);
 }
 
 /* pill wraps a label + the adjacent select so the pair reads as a unit */
@@ -50,7 +50,7 @@
 
 .errIcon {
   color: var(--accent-red);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .modeBtn {

@@ -13,11 +13,11 @@
 .bubble {
   max-width: 85%;
   padding: 8px 12px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--bg-elev-2);
   color: var(--fg);
   border: 1px solid transparent;
-  font-size: 13px;
+  font-size: var(--fs-md);
   line-height: 1.45;
   word-break: break-word;
   white-space: pre-wrap;
@@ -48,17 +48,17 @@
 
 .errorText {
   color: var(--accent-red);
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 
 .retryBtn {
   align-self: flex-start;
   padding: 2px 8px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--accent-red);
   background: transparent;
   color: var(--accent-red);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   cursor: pointer;
 }
 
