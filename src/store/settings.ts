@@ -13,9 +13,11 @@ const DEFAULT_THEME_ID = 'precision-dark';
 const DEFAULT_ACTIVE_SECTION = 'shortcuts';
 
 /**
- * Maps a persisted theme id onto a currently-registered theme. Handles the
- * v1 ids (mongodb-dark/light) and the retired ones (orangy/midnight); any
- * unknown id falls back to the default flagship.
+ * Remaps a persisted theme id when a built-in theme has been renamed/retired
+ * (v1 mongodb-dark/light, retired orangy/midnight). Unknown ids — e.g. user-
+ * installed external themes — pass through unchanged so a valid selection is
+ * never destroyed. A missing/non-string persisted id is defaulted to the
+ * flagship at the call site in loadSettings().
  * To retire/rename a theme later: add an entry here. No caller changes needed.
  */
 const THEME_ID_MIGRATION: Record<string, string> = {
@@ -28,7 +30,7 @@ const THEME_ID_MIGRATION: Record<string, string> = {
 };
 
 export function migrateThemeId(id: string): string {
-  return THEME_ID_MIGRATION[id] ?? DEFAULT_THEME_ID;
+  return THEME_ID_MIGRATION[id] ?? id;
 }
 
 export interface AIConfig {

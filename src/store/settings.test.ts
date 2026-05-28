@@ -90,6 +90,20 @@ describe('loadSettings', () => {
     // hydrateOverrides must NOT notify subscribers, so no persist write should occur
     expect(mockStoreSet).not.toHaveBeenCalled();
   });
+
+  it('applies migrateThemeId to the persisted themeId (legacy id -> precision)', async () => {
+    const persisted = {
+      themeId: 'mongodb-dark',
+      shortcutOverrides: {},
+      themeOverrides: {},
+      aiConfig: { baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o', streaming: true },
+    };
+    mockStoreGet.mockResolvedValue(persisted);
+
+    await loadSettings();
+
+    expect(useSettingsStore.getState().themeId).toBe('precision-dark');
+  });
 });
 
 describe('toPersisted includes themeOverrides', () => {
@@ -133,7 +147,7 @@ describe('migrateThemeId', () => {
     expect(migrateThemeId('precision-dark')).toBe('precision-dark');
     expect(migrateThemeId('precision-light')).toBe('precision-light');
   });
-  it('falls back to precision-dark for unknown ids', () => {
-    expect(migrateThemeId('totally-unknown')).toBe('precision-dark');
+  it('passes unknown / installed-theme ids through unchanged', () => {
+    expect(migrateThemeId('some-installed-theme')).toBe('some-installed-theme');
   });
 });
