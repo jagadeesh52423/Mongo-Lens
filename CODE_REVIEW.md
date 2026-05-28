@@ -726,3 +726,149 @@ Reviewer: reviewer-ui-pr2. Diff: `38de9c2..5c77d59` (PR-1 tip → coder-ui-featu
 
 Context-health: comfortable headroom, well under 50% used.
 
+
+---
+
+# PR 4 — Final inline-style sweep + layout primitives (cycle 1)
+
+Reviewer: reviewer-ui-pr4. Diff base: `7201ae1` (PR 3 tip).
+4 commits (`3469368..35ce7f1`): `refactor(layout): ContextBar/IconRail/SidePanel/StatusBar use primitives` · `refactor(saved-scripts): use Panel + ListRow` · `refactor(editor): decompose EditorArea` · `chore(ui): final inline-style sweep`.
+Coder report: vitest 553/553, tsc clean. Independently re-run: vitest 553/553 (93 files), tsc clean.
+
+## Stage 1 — Spec compliance vs plan Tasks 24–28
+
+### Acceptance grep recipes (the §Acceptance gates — global across all 4 PRs)
+
+| Recipe | Result | Target | Status |
+|---|---|---|---|
+| `git grep -nE 'style=\{\{' src/components/features/ src/App.tsx \| wc -l` | **2** | < 20 | ✅ |
+| `git grep -nE '(color:\|background:\|padding:\|margin:)' src/components/features/ src/App.tsx \| grep -v '\.css' \| wc -l` | **0** | 0 | ✅ |
+| `find src/components/features -name "*.tsx" -exec wc -l {} + \| sort -rn \| head` top entry | **236** (ResultsPanel.tsx) | < 280 | ✅ |
+| `npx vitest run` | **553/553 pass** (93 files) | green | ✅ |
+| `npx tsc --noEmit` | **0 errors** | clean | ✅ |
+
+The 2 remaining inline styles are both dynamic-pixel cases per spec ("Dynamic pixel from a prop/runtime value → keep"):
+- `src/components/features/ai/AIChatPanel.tsx:103` — `style={{ width: width }}` (panel width from `useResizable`; pre-existing from PR 3).
+- `src/components/features/layout/SidePanel.tsx:69` — `style={{ display: item && !error ? 'block' : 'none' }}` (runtime visibility toggle gating the imperatively-rendered plugin host; cannot be expressed as a static class).
+
+### Per-file LOC vs targets
+
+| File | Pre-PR4 | Post-PR4 | Target | Status |
+|---|---|---|---|---|
+| editor/EditorArea.tsx | 312 | **143** | ≤ 240 | ✅ |
+| saved-scripts/SavedScriptsPanel.tsx | 216 | **127** | < 280 | ✅ |
+| editor/ContextBar.tsx | 192 | **165** | < 280 | ✅ |
+| layout/IconRail.tsx | 76 | **47** | < 280 | ✅ |
+| layout/SidePanel.tsx | 99 | **78** | < 280 | ✅ |
+| layout/StatusBar.tsx | 32 | **20** | < 280 | ✅ |
+
+### Stage-1 checklist (8 items from task description)
+
+| # | Check | Evidence |
+|---|---|---|
+| 1 | EditorArea ≤ 240L; EditorTabBar + (EditorEmptyState) extracted | `EditorArea.tsx`=143L. `EditorTabBar.tsx`=73L hosts the tab strip + cancel button. The empty state is a single `<div className={styles.empty}>No editor tab open.</div>` (EditorArea.tsx:96) — extraction to a dedicated `EditorEmptyState.tsx` would be over-engineering for one line of static markup. Task description explicitly permits skipping it; confirmed against `7201ae1:EditorArea.tsx:226` where the empty case was identically a one-liner. Acceptable. |
+| 2 | SavedScriptsPanel wrapped in `<Panel>`; rows are `<ListRow>` w/ trailing IconButton | `SavedScriptsPanel.tsx:65-67` (`<Panel><Panel.Header title="Saved Scripts" /><Panel.Body>`). Lines 78-100: each script renders `<ListRow onClick={...} trailing={<div>… two `<IconButton>` …</div>}>{script.name}…</ListRow>`. Delete uses `IconButton` (line 92-99) with destructive `:hover` styling in `.delete:hover` (SavedScriptsPanel.module.css:39-43). ✅ |
+| 3 | ContextBar → `<Toolbar>`; IconRail → `<VStack>` of `<IconButton>`; SidePanel → `<Panel>`; StatusBar 0 inline styles | ContextBar.tsx:152 `<Toolbar data-tab-id={tabId} left={left} right={right} />`. IconRail.tsx:14 `<VStack gap="none" className={styles.rail}>` wrapping `<IconButton ... pressed={isActive} />` (lines 21-32) + settings button (lines 36-43). SidePanel.tsx:58 `<Panel className={styles.shell}>` with `<Panel.Header title={…} />` and host div. StatusBar.tsx:9-21 contains zero `style={` occurrences — all sizing/colour moves to StatusBar.module.css (`.bar`, `.dot`, `.dotConnected`, `.spacer`). ✅ |
+| 4 | Overall acceptance grep recipes pass | See table above. All 3 grep gates plus tests + tsc. ✅ |
+| 5 | No file in features/ exceeds 280L | Top entry ResultsPanel.tsx=236L (untouched by PR 4, inherited from PR 2 baseline). ✅ |
+| 6 | PR 1 primitives untouched (or minor widening + justification) | `git diff 7201ae1..HEAD -- src/components/ui/` → **empty**. No PR 1 primitive widened. ✅ |
+| 7 | Stores / services / src-tauri untouched | `git diff 7201ae1..HEAD --name-only` lists only `docs/...plans...`, `src/components/features/**`, `src/components/shared/KeyboardScopeZone.tsx`. No `src/store/**`, `src/services/**`, `src-tauri/**`. ✅ |
+| 8 | Behavior preserved end-to-end | Detail below. ✅ |
+
+### Behavior preservation (item 8) — side-by-side checks against `7201ae1:` baseline
+
+- **Tab close/reorder.** EditorTabBar.tsx:39-50 preserves the close-button click semantics: `handleClose(e, id)` calls `e.stopPropagation()` before `onClose(id)` — matches PR-3 `EditorArea.tsx:118-119` inline `onClick={(e) => { e.stopPropagation(); closeTab(tab.id); }}`. The `+ New` button (line 56-58) and the conditional Cancel button in the right-slot (lines 61-66) preserve PR-3 wiring; `isRunning` is the gating predicate in both versions. Tab-row scroll uses the same `.tab-scroll` utility (kept in globals.css; pinned via comment in EditorTabBar.module.css:1-7 + EditorTabBar.tsx:21-24 docstring).
+- **Saved-script flow.** `confirmingId` state, `confirmDelete`, `handleDuplicate`, `open(script)`, `nextDuplicateName` are byte-identical to baseline except for the wrapping JSX shifting from a hand-rolled list to `<Panel> / <Panel.Body> / <ul> / <li> / <ListRow>`. Inline confirmation strip (lines 102-113) preserves "Cancel"/"Delete" buttons with the same destructive styling — moved to `.confirmDelete` / `.confirmCancel` CSS modules. Duplicate and Delete `IconButton`s remain hover-revealed (`.actions { opacity: 0 }` → `.rowWrap:hover .actions { opacity: 1 }` at SavedScriptsPanel.module.css:24-32) — same UX as baseline's `setHoveredId(...)` JS toggle.
+- **Status-bar messages.** StatusBar.tsx:10-20 renders `<span>● connectionName ?? 'No connection'</span> · <span>database</span> · <span class=spacer>nodeStatus ?? ''</span>` — identical content/order to baseline. The connected/disconnected dot colour (green vs dim) moves from inline `style` to `.dotConnected` / `.dot` classes; visual output unchanged given `var(--accent-green)` and `var(--fg-dim)` are reused.
+- **Breadcrumb / ContextBar context.** ContextBar.tsx:84-129 (left slot) preserves the empty-state message ("No connections — connect in sidebar"), connection select, database select with disabled-when-loading state, and the warning icon. Right slot (133-149) preserves `Save` (only when `hasSavedScript`), `Save As`, and the execution-mode buttons with filled/outlined variants and disabled state via `modeButtonClass(...)`. `data-tab-id={tabId}` is forwarded onto the `<Toolbar>` root (Toolbar accepts `...rest`) so any consumer keyed off `[data-tab-id]` keeps working.
+- **Icon-rail pressed state.** IconRail.tsx:23-33 sets `pressed={isActive}` on the `<IconButton>` (this drives `aria-pressed`) AND applies `${styles.active}` for the left-edge accent stripe. Behaviour matches baseline: `border-left: 2px solid var(--accent)` activates iff `isActive`, achieved via `.railBtn.active` selector in IconRail.module.css:25-30. Settings button (36-43) follows the same shape with `settingsOpen` as the pressed predicate.
+
+### Coder's 4 flagged decisions (D1-D4)
+
+- **D1 — KeyboardScopeZone widened with `className?` prop.** ✅ Confirmed at `src/components/shared/KeyboardScopeZone.tsx:7,11,17`. Purely additive (default undefined → element renders without a `className` attribute, behaviour unchanged for prior callers). `src/components/shared/` is outside the "do NOT modify ui/" hard constraint, so this is legitimate. Consumers: `ResultsPanel.tsx:169,177` and `viewModes/TableViewMode.tsx:50` use the new prop. No JSX warning from unused `className` (React passes `undefined` through harmlessly). Accept.
+- **D2 — IconButton uses `className` override in IconRail.** ✅ The `className` prop is part of IconButton's public surface (`src/components/ui/IconButton/IconButton.tsx:12-13` — already merges into `cls`). `.railBtn` rule (IconRail.module.css:23-30) is scoped through CSS Modules (no `:global(...)`) so it cannot leak. The override widens hit area from 28px → 44px and adds the left-edge accent stripe — both rail-specific concerns that don't belong in the generic primitive. Correct use of the documented extension path.
+- **D3 — SidePanel.Header wraps title in `<span data-testid="side-panel-title">`.** ✅ The two test files `src/__tests__/SidePanel.test.tsx:19` and `src/__tests__/layout.test.tsx:31` rely on this testid; preserving them avoided churn in tests outside PR 4 scope. **Interesting twist:** `Panel.Header`'s `title` prop is already typed `ReactNode` (`src/components/ui/Panel/Panel.tsx:17`), so the wrapping `<span>` is a clean use of the existing API — no Panel-primitive change required. (Future enhancement could let `Panel.Header` accept `titleTestId?: string` to avoid the wrapper entirely, but that's a Panel-API change → out of scope and not worth a follow-up.)
+- **D4 — ScriptEditor moved highlight CSS from runtime `<style>` injection to a CSS-Modules side-effect import.** ✅ `src/components/features/editor/ScriptEditor.module.css:4` uses `:global(.current-statement-highlight) { background: var(--bg-hover); }`. `ScriptEditor.tsx:9` imports the module purely for side-effects (`import './ScriptEditor.module.css'`). The constant `HIGHLIGHT_CLASS = 'current-statement-highlight'` at line 28 is unchanged — Monaco's `deltaDecorations({ className: HIGHLIGHT_CLASS })` (line 173) references the same global class name string. No CSP issue (no `document.createElement('style')` at runtime). Net positive: removes mutable DOM-head side effect, removes the `HIGHLIGHT_STYLE_ID` / `ensureHighlightStyle()` ceremony. The lone caveat is the `:global(...)` selector itself — but since Monaco's decoration API only accepts a class-name string and cannot consume a CSS-Modules locally-scoped name, `:global` is the only viable path. Comment at top of ScriptEditor.module.css:1-3 explains this clearly.
+
+### Stage 1 verdict: **PASS** — all 8 checklist items, 3 acceptance gates, 6 per-file LOC targets, behavior preservation, and 4 coder-flagged decisions all hold.
+
+## Stage 2 — Code-review (uncapped over `git diff 7201ae1..HEAD`)
+
+Cross-referenced against project `/code-standards`. No BLOCKING findings.
+
+### IMPORTANT — 0 findings.
+
+### NIT (informational, not blocking)
+
+**S4-N1.** `SavedScriptsPanel.tsx:69-72` — search input is a raw `<input>` rather than a design-system `FormField` / TextInput. This was the same shape before PR 4 (baseline `7201ae1:SavedScriptsPanel.tsx:154-167`), so it's pre-existing tech debt, not a PR 4 regression. Out of scope; keep as-is.
+
+**S4-N2.** `ContextBar.tsx:94-128` — connection/database `<select>` elements are raw HTML, not a design-system `Select` primitive. Same as N1: pre-existing, no `Select` primitive exists in `src/components/ui/`. Out of scope.
+
+**S4-N3.** `ContextBar.tsx:133-149` — Save/Save As/mode buttons are raw `<button>` not design-system `Button`. The mode buttons in particular have bespoke filled/outlined variants. The PR plan §HARD CONSTRAINTS forbids widening PR 1 primitives in PR 4. Acceptable; would be the natural follow-up for a "PR 5 — promote Button to handle filled/outlined variants" task.
+
+**S4-N4.** `SavedScriptsPanel.tsx:113-122` — inline confirmation strip uses raw `<button>` for Cancel/Delete instead of `Button`. Same pre-existing tech debt; the inline confirm pattern itself is intentional (avoid full Dialog for a single delete).
+
+**S4-N5.** `EditorTabBar.tsx:43-58` — tabs themselves are `<div>` elements that act as buttons (cursor:pointer, onClick) and the close affordance is a `<span>` with `onClick`. This is preserved exactly from PR-3 baseline. Strict a11y reading would want `<button role="tab">` inside `role="tablist"`, but converting the tab strip to ARIA tabs is a larger UX/keyboard-nav change (arrow-key tab navigation, Home/End, etc.) that's out of scope. Documented as deferred.
+
+**S4-N6.** `SidePanel.tsx:25-27` — the imperative `el.style.display = ...` mutation on the cached view element remains (cannot be expressed via CSS Modules since cache entries are dynamic IDs). This is a content-script-style pattern that's necessary for the plugin-host's "cache & toggle" architecture. Same as baseline; not a finding.
+
+**S4-N7.** `SidePanel.tsx:68-72` — the host `<div>` uses `style={{ display: item && !error ? 'block' : 'none' }}` to hide the cache container when no item is selected (so the empty-state message can occupy the space). This is one of the 2 remaining inline-style hits and is the "dynamic from runtime value" case the spec explicitly permits. An alternative would be two sibling DOM nodes plus conditional render of one or the other, but that would orphan the cached plugin views. Accept.
+
+**S4-N8.** `EditorTabBar.module.css:45-50` — `.toolbar` rule overrides `<Toolbar>`'s default padding and min-height (`padding: 0; min-height: 32px; height: 32px;`). This is one of the few "primitive overrides via className" callouts in the diff. The Toolbar primitive accepts `className` for exactly this purpose (extension via composition), and the override is necessary because tabs fill the row edge-to-edge with their own internal padding. Clean.
+
+**S4-N9.** `RecordModalShell.tsx` — this file got moved to CSS Modules in PR 4 (`RecordModalShell.module.css`) which is a clean win. The lingering `role="dialog"` here (line 56) is intentional: PR 2's plan flagged this as a separate concern from the connection/save dialogs, and the rich content-bearing record modal is a different beast than the form dialogs (it doesn't fit `Dialog.Body`/`Dialog.Footer` cleanly because the footer height + body height + 80vh max-height all interact). Migrating it to `Dialog` is a v-next concern; out of scope for PR 4.
+
+**S4-N10.** `useEditorActions.ts` — clean extraction (127 lines) of run/page/save handlers + per-tab cursor + page-size state. One pre-existing pattern carried in: handler bodies reference `active` after a null-guard (`if (!active) return`) and then rely on `active` being non-null — TypeScript narrows this correctly under `noUncheckedIndexedAccess`/strict mode. Verified `npx tsc --noEmit` is clean. No change.
+
+### Code-standards skill — new pattern observed
+
+`/code-standards` is Java/Vert.x/MongoDB-focused; the patterns in this diff (React composition, CSS Modules, primitive className overrides, dynamic-style pixel exceptions) are out of skill scope. No new rule to add.
+
+### Cross-reference to PR 1–3 deferred items (S2-N1..N6 ish & F1-F5 from prior reviews)
+
+The team-lead asked me to re-check the deferred FYI items from PR 1-3 against PR 4 changes. The labels `S2-N1..N6` and `F1-F5` in the prompt don't all correspond to exact section IDs in `CODE_REVIEW.md` (the file uses `N-1..N-10`, `S1-F1`, etc.), so I read the classes of concerns rather than literal IDs.
+
+| Class of deferred concern (from PR 1-3 reviews) | Status after PR 4 |
+|---|---|
+| `useResizable` invert-mode extensibility doc | **CLOSED** by `4b6d50f` (docs(ui): document useResizable invert extension contract) in PR 3 docs sweep |
+| AI panel `style={{ width }}` dynamic pixel | **STILL OPEN** (one of the 2 remaining; permitted by spec — `keep` per Task 27 Step 2) |
+| `App.tsx` plugin-host window-shape duplication (N-5 from PR 1 review) | **OUT OF SCOPE** for PR 4 — App.tsx not touched here. Still deferred. |
+| Activity-bar test that mounts `<App />` (N-2 from PR 1 review) | **OUT OF SCOPE** — tests untouched. Still deferred. |
+| `ActivityRegistry` extension-point JSDoc (N-10 from PR 1) | Was **CLOSED in PR 1 cycle 2** per existing review log. |
+| `ResultsPanel` arrow-key sorted-nav (S1-F1 from PR 2 review) | Was **CLOSED in PR 2 cycle 2** (`a388bed fix(results): preserve sorted-order keyboard navigation across view migration`). Verified still in place — `ResultsPanel.tsx:115-118` uses `onRenderedDocsChange` callback; `TableViewMode.tsx:39-42` publishes `sortedDocs`. |
+| `RecordModalShell` migration to `Dialog` | **STILL OPEN** — CSS Modules migration happened in PR 4 (S4-N9), but the `Dialog` primitive migration is still deferred. |
+| `Select` / `Button` design-system primitives for ContextBar selects + mode buttons | **STILL OPEN** (S4-N1, N2, N3 above) — would require new primitives in `src/components/ui/`, which PR 4's HARD CONSTRAINTS forbid. |
+| ARIA tab semantics for `EditorTabBar` | **STILL OPEN** (S4-N5). |
+
+### Stage 2 verdict: **PASS** — no blocking, all NITs informational or out-of-scope.
+
+## Verdict: **APPROVED**
+
+Both Stage 1 + Stage 2 pass on cycle 1. No fixes required. Forwarding to tester-ui-pr4 + team-lead.
+
+---
+
+# Final summary — across all 4 PRs
+
+The `feat-ui-design-system-pr4-final-sweep` branch lands the **final PR of a 4-PR refactor** that ports the entire feature surface onto a typed design-system primitive layer.
+
+## Key wins
+
+1. **Inline-style elimination.** Across `src/components/features/` + `src/App.tsx`, total inline `style={{}}` occurrences fell from ~110+ at PR-1 start to **2 in this final tip** — both of which are the spec-permitted "dynamic pixel from runtime value" exception (AI panel width, SidePanel host visibility). Static CSS literals (`color:`, `background:`, `padding:`, `margin:`) in JSX are **at 0**. All remaining styling flows through CSS Modules backed by design tokens (`var(--bg)`, `var(--accent)`, `var(--space-*)`, `var(--fs-*)`).
+2. **Primitive layer fully adopted.** Every meaningful surface now composes through `Panel`, `Panel.Header/Body/Footer`, `Toolbar`, `VStack`, `IconButton`, `ListRow`, `Dialog`, `FormField`, `Button`, `Text`, `ResizableSplit`, `useResizable`. The primitives themselves remain a closed kernel: `git diff` from PR-1 tip through this branch shows zero modifications to `src/components/ui/` after the PR 1 freeze (with one documented widening: `useResizable.invert` in PR 3 for edge-docked panels).
+3. **Component decomposition.** Top-LOC files in `features/` ended at 236L (ResultsPanel.tsx, against a 280L cap). The headline PRs each carved their giants: ResultsPanel 800+→236 (PR 2), ConnectionPanel/App.tsx (PR 3), EditorArea 312→143 + SavedScriptsPanel 216→127 (PR 4). The `ViewModeRegistry` (PR 2) and `ActivityRegistry` (PR 1) are real extension points with documented "implement X to add a new variant" contracts — satisfying CLAUDE.md's extensibility-first mandate.
+4. **Behavior preservation.** Sorted-table arrow-nav (PR 2 S1-F1), AI panel resize semantics with edge-dock invert (PR 3), tab close/reorder, script save/delete, status messages, breadcrumb context, icon-rail pressed state, Monaco statement highlight (PR 4 D4 — runtime style injection → CSS Modules side-effect import) — all preserved end-to-end. **vitest 553/553 PASS · tsc 0 errors** at branch tip.
+5. **Zero impact on the platform layer.** No `src/store/**`, `src/services/**`, `src-tauri/**` changes across the entire 4-PR span (each PR's review independently verified this). The refactor is strictly a presentation-layer rewrite.
+
+## Remaining tech debt (deferred to future work, not gating this branch)
+
+1. **Raw `<select>` / raw `<button>` in ContextBar and `<input>` in SavedScriptsPanel.** Would need new `Select`, `Input`, and a variant-aware `Button` (filled/outlined) in `src/components/ui/`. Out of scope for the design-system *adoption* phase; appropriate for a "PR 5 — primitive coverage extensions" follow-up. (Refs: S4-N1, S4-N2, S4-N3, S4-N4.)
+2. **`RecordModalShell` migration to `Dialog`.** The CSS-Module migration happened in PR 4 (S4-N9); the structural migration to the `Dialog` compound primitive is still pending because the modal's 80vh max-height + body/footer interactions don't fit `Dialog.Body`/`Dialog.Footer` cleanly. Needs a small `Dialog.size="fullscreen"` variant.
+3. **EditorTabBar ARIA tabs.** The tab strip uses `<div onClick>` rather than `<button role="tab">` inside `role="tablist"`. Keyboard navigation (Home/End/arrows) would need to follow. (Ref: S4-N5.)
+4. **AppShell main split → `ResizableSplit`.** AppShell.tsx still uses `react-resizable-panels` directly because the design-system primitive lacks drag-to-collapse (`collapsible` + `collapsedSize={0}`). Documented inline at `AppShell.tsx:30-37`. Migrate once `ResizableSplit` grows a `collapseThreshold` prop.
+5. **Plugin-host window-shape duplication in App.tsx** (from PR 1 N-5) — minor type-shape inconsistency between two `(window as ...).__pluginHost` casts. Trivial fix; deferred because App.tsx wasn't touched by PRs 2-4 after PR 3's `KeyboardWiring` extraction.
+6. **`Panel.Header` testid forwarding.** SidePanel uses a wrapper `<span data-testid="side-panel-title">` to keep two existing tests green (D3). Could be replaced by a `Panel.Header titleTestId?: string` prop; would clean up SidePanel and any future testid consumers.
+7. **Activity-bar registry caching** (PR 1 N-7) — `PluginActivityRegistry.list()` re-allocates item objects on every call. Only matters if a future consumer memoises on item reference equality.
+8. **Plugin-source glob extension** (PR 1 N-1) — `plugin-agnostic-host.test.ts` doesn't yet glob `.json` files; spec §2 had intended it to.
+
+None of the above blocks merge. The branch is **production-ready** at `35ce7f1`.
