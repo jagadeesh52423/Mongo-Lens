@@ -24,7 +24,10 @@ export const useConnectionsV2 = create<ConnectionsV2Store>((set, get) => ({
   refresh: async () => {
     set({ loading: true });
     try {
-      const connections = await listV2();
+      // Defensive: an undefined/null IPC response (e.g. from an unmocked test
+      // path) must not poison the store with a non-array value, since UI code
+      // calls `.find` on this list.
+      const connections = (await listV2()) ?? [];
       set({ connections });
     } finally {
       set({ loading: false });

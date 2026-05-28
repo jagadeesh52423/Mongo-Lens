@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { listConnections, onSshSessionLost } from '../../../ipc';
 import { useConnectionsStore } from '../../../store/connections';
+import { useConnectionsV2 } from './useConnectionsV2';
 import { useEditorStore } from '../../../store/editor';
 import { ConnectionDialog } from './ConnectionDialog';
 import { ConnectionTree } from './ConnectionTree';
@@ -17,6 +18,8 @@ export { nextDuplicateName } from './nameUtils';
 
 export function ConnectionPanel() {
   const { connections, connectedIds, setConnections, markDisconnected } = useConnectionsStore();
+  const v2Connections = useConnectionsV2((s) => s.connections);
+  const refreshV2 = useConnectionsV2((s) => s.refresh);
   const actions = useConnectionActions();
   const [editing, setEditing] = useState<Connection | null>(null);
   const [creating, setCreating] = useState(false);
@@ -38,7 +41,11 @@ export function ConnectionPanel() {
 
   useEffect(() => {
     listConnections().then(setConnections).catch((e) => console.error(e));
-  }, [setConnections]);
+    // Mirror-read from connections_v2 so the env-color stripe and the new
+    // dialog have access to the v2 shape. Failures are non-fatal — the legacy
+    // store still drives the rest of the UI.
+    refreshV2().catch((e) => console.error('refreshV2 failed:', e));
+  }, [setConnections, refreshV2]);
 
   // Listen for SSH session-loss events from the Rust backend and flip the
   // connection state to disconnected so the UI reflects the drop immediately.
@@ -81,6 +88,7 @@ export function ConnectionPanel() {
         <ul className={styles.list}>
           {connections.map((c) => {
             const connected = connectedIds.has(c.id);
+            const envColor = v2Connections.find((v) => v.id === c.id)?.color;
             return (
               <li
                 key={c.id}
@@ -90,7 +98,11 @@ export function ConnectionPanel() {
                   setContextMenu({ x: e.clientX, y: e.clientY, connection: c });
                 }}
               >
-                <div className={styles.row}>
+                <div
+                  className={styles.row}
+                  data-testid={`conn-row-${c.id}`}
+                  style={envColor ? { borderLeftColor: envColor } : undefined}
+                >
                   <span className={connected ? styles.statusDotConnected : styles.statusDot}>●</span>
                   <span
                     onClick={() => connected && actions.toggleExpanded(c.id)}
