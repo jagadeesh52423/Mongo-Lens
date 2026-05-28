@@ -33,5 +33,11 @@ pub mod tunnel;
 #[allow(dead_code)]
 pub mod proxy;
 
+// Legacy→v2 migration: pure migrate() + side-effectful sync_row_to_v2 +
+// boot-time migrate_all sweep. Consumed by main.rs (gated on CONN_V2)
+// and commands/connection.rs (dual-table sync on every save).
+#[allow(dead_code)]
+pub mod migration;
+
 #[cfg(test)]
 mod model_contract_tests;

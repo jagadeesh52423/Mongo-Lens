@@ -1,3 +1,4 @@
+use crate::connection::secrets::SecretStore;
 use crate::logger::tracing_impl::TracingLogger;
 use crate::logger::Logger;
 use crate::ssh::TunnelHandle;
@@ -24,6 +25,11 @@ pub struct AppState {
     /// Concrete TracingLogger kept so the `log_write` handler can write frontend
     /// records directly to `app.log`.
     pub tracing_logger: Option<Arc<TracingLogger>>,
+    /// v2 connection secret store. `Some` only when `CONN_V2` is enabled
+    /// (initialised in main.rs); `None` keeps the legacy code path untouched.
+    /// Wrapped in a Mutex so it can be late-bound from setup() without
+    /// changing the AppState::new() signature.
+    pub connection_secrets: Mutex<Option<Arc<dyn SecretStore>>>,
 }
 
 impl AppState {
@@ -38,10 +44,23 @@ impl AppState {
             active_scripts: Mutex::new(HashMap::new()),
             logger,
             tracing_logger: Some(tracing_logger),
+            connection_secrets: Mutex::new(None),
         }
     }
 
     pub fn open_db(&self) -> rusqlite::Result<rusqlite::Connection> {
         crate::db::open(&self.db_path)
+    }
+
+    /// Install the v2 connection secret store. Called from setup() when
+    /// `CONN_V2` is enabled.
+    pub fn set_connection_secrets(&self, store: Arc<dyn SecretStore>) {
+        *self.connection_secrets.lock().unwrap() = Some(store);
+    }
+
+    /// Return a clone of the v2 secret store handle, or None when CONN_V2
+    /// is disabled. Cheap — `Arc` clone, no allocation.
+    pub fn connection_secrets(&self) -> Option<Arc<dyn SecretStore>> {
+        self.connection_secrets.lock().unwrap().clone()
     }
 }
