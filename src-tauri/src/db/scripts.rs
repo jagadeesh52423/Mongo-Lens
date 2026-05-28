@@ -117,10 +117,19 @@ pub fn rename_tag_everywhere(conn: &Connection, old: &str, new: &str) -> rusqlit
     if old_lower.is_empty() || new_trim.is_empty() {
         return Ok(0);
     }
-    let mut stmt = conn.prepare("SELECT id, tags FROM saved_scripts")?;
-    let rows: Vec<(String, String)> = stmt
-        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
+    // Wrap the read + per-row updates in a single transaction so that a
+    // mid-loop failure leaves the table untouched. `unchecked_transaction()`
+    // is used because the signature takes `&Connection`, not `&mut Connection`;
+    // `?` propagation drops the transaction (rolling it back) on error, and an
+    // explicit `commit()` finalizes the happy path.
+    let tx = conn.unchecked_transaction()?;
+    let rows: Vec<(String, String)> = {
+        let mut stmt = tx.prepare("SELECT id, tags FROM saved_scripts")?;
+        let collected = stmt
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        collected
+    };
     let mut affected = 0usize;
     for (id, raw) in rows {
         let parsed = parse_tags(&raw);
@@ -138,13 +147,14 @@ pub fn rename_tag_everywhere(conn: &Connection, old: &str, new: &str) -> rusqlit
             .collect();
         if changed {
             let canonical = serialize_tags(&mapped);
-            conn.execute(
+            tx.execute(
                 "UPDATE saved_scripts SET tags = ?2 WHERE id = ?1",
                 params![id, canonical],
             )?;
             affected += 1;
         }
     }
+    tx.commit()?;
     Ok(affected)
 }
 
@@ -155,10 +165,15 @@ pub fn delete_tag_everywhere(conn: &Connection, tag: &str) -> rusqlite::Result<u
     if target.is_empty() {
         return Ok(0);
     }
-    let mut stmt = conn.prepare("SELECT id, tags FROM saved_scripts")?;
-    let rows: Vec<(String, String)> = stmt
-        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
+    // See `rename_tag_everywhere` for the transaction rationale.
+    let tx = conn.unchecked_transaction()?;
+    let rows: Vec<(String, String)> = {
+        let mut stmt = tx.prepare("SELECT id, tags FROM saved_scripts")?;
+        let collected = stmt
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        collected
+    };
     let mut affected = 0usize;
     for (id, raw) in rows {
         let parsed = parse_tags(&raw);
@@ -169,13 +184,14 @@ pub fn delete_tag_everywhere(conn: &Connection, tag: &str) -> rusqlite::Result<u
             .collect();
         if kept.len() != parsed.len() {
             let canonical = serialize_tags(&kept);
-            conn.execute(
+            tx.execute(
                 "UPDATE saved_scripts SET tags = ?2 WHERE id = ?1",
                 params![id, canonical],
             )?;
             affected += 1;
         }
     }
+    tx.commit()?;
     Ok(affected)
 }
 
@@ -272,6 +288,79 @@ mod tests {
         assert_eq!(
             get(&c, "1").unwrap().unwrap().tags,
             vec!["production".to_string()]
+        );
+    }
+
+    /// Install a BEFORE UPDATE trigger that aborts when the row with the given
+    /// id is updated. Used to force a mid-loop failure and verify rollback.
+    fn install_abort_trigger(c: &Connection, poison_id: &str) {
+        c.execute(
+            &format!(
+                "CREATE TRIGGER abort_on_poison BEFORE UPDATE ON saved_scripts \
+                 WHEN NEW.id = '{}' BEGIN SELECT RAISE(ABORT, 'poison'); END;",
+                poison_id
+            ),
+            [],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn rename_tag_everywhere_rolls_back_on_partial_failure() {
+        let c = open_in_memory().unwrap();
+        let mut r1 = sample("1", "a");
+        r1.tags = vec!["prod".into()];
+        let mut r2 = sample("2", "b");
+        r2.tags = vec!["prod".into()];
+        let mut r3 = sample("3", "c");
+        r3.tags = vec!["prod".into()];
+        insert(&c, &r1).unwrap();
+        insert(&c, &r2).unwrap();
+        insert(&c, &r3).unwrap();
+        // Trigger aborts the update for id = "2", so the loop fails after
+        // updating id = "1". Without a transaction, row 1 would be left with
+        // "production" while rows 2 and 3 would still have "prod".
+        install_abort_trigger(&c, "2");
+
+        let err = rename_tag_everywhere(&c, "prod", "production");
+        assert!(err.is_err(), "expected the abort trigger to surface as an error");
+
+        // All three rows must still hold the original tag — proving the
+        // earlier successful UPDATE on row 1 was rolled back.
+        assert_eq!(get(&c, "1").unwrap().unwrap().tags, vec!["prod".to_string()]);
+        assert_eq!(get(&c, "2").unwrap().unwrap().tags, vec!["prod".to_string()]);
+        assert_eq!(get(&c, "3").unwrap().unwrap().tags, vec!["prod".to_string()]);
+    }
+
+    #[test]
+    fn delete_tag_everywhere_rolls_back_on_partial_failure() {
+        let c = open_in_memory().unwrap();
+        let mut r1 = sample("1", "a");
+        r1.tags = vec!["prod".into(), "auth".into()];
+        let mut r2 = sample("2", "b");
+        r2.tags = vec!["prod".into(), "auth".into()];
+        let mut r3 = sample("3", "c");
+        r3.tags = vec!["prod".into(), "auth".into()];
+        insert(&c, &r1).unwrap();
+        insert(&c, &r2).unwrap();
+        insert(&c, &r3).unwrap();
+        install_abort_trigger(&c, "2");
+
+        let err = delete_tag_everywhere(&c, "prod");
+        assert!(err.is_err(), "expected the abort trigger to surface as an error");
+
+        // All three rows retain the original "prod" tag.
+        assert_eq!(
+            get(&c, "1").unwrap().unwrap().tags,
+            vec!["prod".to_string(), "auth".to_string()]
+        );
+        assert_eq!(
+            get(&c, "2").unwrap().unwrap().tags,
+            vec!["prod".to_string(), "auth".to_string()]
+        );
+        assert_eq!(
+            get(&c, "3").unwrap().unwrap().tags,
+            vec!["prod".to_string(), "auth".to_string()]
         );
     }
 
