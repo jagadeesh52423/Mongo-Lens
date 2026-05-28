@@ -23,5 +23,10 @@ pub mod store;
 #[allow(dead_code)]
 pub mod secrets;
 
+// SshTunnel → ssh::TunnelHandle bridge. Consumed by the builder (Task 10)
+// and IPC commands (Task 12); allow(dead_code) until those land.
+#[allow(dead_code)]
+pub mod tunnel;
+
 #[cfg(test)]
 mod model_contract_tests;

@@ -55,6 +55,16 @@ impl AuthMethod for KeyFileAuth {
 }
 
 impl KeyFileAuth {
+    /// Direct constructor for callers that resolve key path + passphrase outside the
+    /// legacy `ConnectionRecord` flow (e.g. the new `connection::tunnel` bridge).
+    /// The legacy registry continues to construct this via `KeyFileAuthFactory::build`.
+    pub fn new(key_path: PathBuf, passphrase: Option<String>) -> Self {
+        Self {
+            key_path,
+            passphrase: passphrase.map(Zeroizing::new),
+        }
+    }
+
     fn load_key(&self) -> Result<PrivateKey, SshError> {
         if !self.key_path.exists() {
             return Err(SshError::KeyFileNotFound(self.key_path.clone()));
