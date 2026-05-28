@@ -12,14 +12,37 @@ button {
   font: inherit; color: inherit; background: transparent;
   border: 1px solid var(--border); padding: var(--space-1) var(--space-3);
   border-radius: var(--radius-sm); cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-standard),
+              border-color var(--dur-fast) var(--ease-standard);
 }
 button:hover { background: var(--bg-hover); }
+button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 input, select, textarea {
   font: inherit; color: inherit;
-  background: var(--bg); border: 1px solid var(--border);
+  background: var(--bg-elev-2); border: 1px solid var(--border);
   padding: var(--space-1) var(--space-2); border-radius: var(--radius-sm);
+  transition: border-color var(--dur-fast) var(--ease-standard),
+              box-shadow var(--dur-fast) var(--ease-standard);
 }
-input:focus, select:focus, textarea:focus { outline: 1px solid var(--accent); }
+input:focus, select:focus, textarea:focus {
+  outline: none; border-color: var(--accent); box-shadow: var(--focus-ring);
+}
 input::placeholder, textarea::placeholder { color: var(--fg-dim); opacity: 1; }
+
+/* thin, unobtrusive scrollbars */
+* { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-thumb {
+  background: var(--border-strong); border-radius: var(--radius-pill);
+  border: 2px solid transparent; background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover { background: var(--fg-dim); background-clip: content-box; }
+*::-webkit-scrollbar-track { background: transparent; }
+
 .tab-scroll { scrollbar-width: none; -ms-overflow-style: none; }
 .tab-scroll::-webkit-scrollbar { display: none; height: 0; width: 0; }
+
+/* honor OS reduced-motion globally */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
