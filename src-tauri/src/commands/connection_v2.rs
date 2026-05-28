@@ -496,7 +496,7 @@ pub struct SshSessionLostPayloadV2 {
 }
 
 /// Watch a tunnel's liveness channel; on session-loss, drain state for the
-/// connection (client + tunnel) and emit `ssh_session_lost_v2` so the UI
+/// connection (client + tunnel) and emit `ssh_session_lost` so the UI
 /// can flip to disconnected.
 ///
 /// Symmetric with the legacy `handle_session_loss` in `commands::connection`,
