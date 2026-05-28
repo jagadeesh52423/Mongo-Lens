@@ -5,10 +5,11 @@ import { FormField } from '../../../ui/FormField';
 import { ColorPicker } from './tabs/shared/ColorPicker';
 import { TABS } from './tabs/registry';
 import { dialogReducer, initialDialogState } from './useDialogState';
+import { useConnectionsV2 } from '../useConnectionsV2';
 import { validateConnection } from '../../../../connection/validation';
 import type { Connection } from '../../../../connection/model';
 import type { GlobalPrefs } from '../../../../connection/overrides';
-import type { SaveInput, SecretInput, SecretSlot } from '../../../../connection/ipc';
+import type { BuildStage, SaveInput, SecretInput, SecretSlot } from '../../../../connection/ipc';
 import styles from './ConnectionDialogV2.module.css';
 
 interface Props {
@@ -16,6 +17,27 @@ interface Props {
   globals: GlobalPrefs;
   onSave: (input: SaveInput) => Promise<Connection>;
   onCancel: () => void;
+}
+
+/**
+ * Maps a `BuildStage` discriminator to a human-readable failure heading.
+ * Defined inline in PR 4 / Task 15; hoisted to `src/connection/staged-error.ts`
+ * in Task 16 so `ConnectionErrorDialog` can share the same mapping.
+ */
+function stageHeading(stage: BuildStage): string {
+  switch (stage) {
+    case 'ssh': return 'SSH tunnel failed';
+    case 'tls': return 'TLS handshake failed';
+    case 'auth': return 'Authentication failed';
+    case 'ping': return 'Server ping failed';
+  }
+}
+
+/** Collects the `state.secrets` map into the wire-format `SecretInput[]`. */
+function collectSecrets(secrets: Partial<Record<SecretSlot, string>>): SecretInput[] {
+  return Object.entries(secrets)
+    .filter(([, value]) => value !== undefined)
+    .map(([slot, value]) => ({ slot: slot as SecretSlot, value: value as string }));
 }
 
 export function ConnectionDialogV2({ initial, globals, onSave, onCancel }: Props) {
@@ -26,12 +48,16 @@ export function ConnectionDialogV2({ initial, globals, onSave, onCancel }: Props
   const activeTab = TABS.find((t) => t.id === activeTabId) ?? TABS[0];
   const transportTabs = TABS.filter((t) => t.group === 'transport');
   const prefsTabs = TABS.filter((t) => t.group === 'prefs');
+  const test = useConnectionsV2((store) => store.test);
 
   function handleSave() {
-    const secrets: SecretInput[] = Object.entries(state.secrets)
-      .filter(([, v]) => v !== undefined)
-      .map(([slot, value]) => ({ slot: slot as SecretSlot, value: value as string }));
-    onSave({ connection: state.draft, secrets });
+    onSave({ connection: state.draft, secrets: collectSecrets(state.secrets) });
+  }
+
+  async function handleTest() {
+    dispatch({ type: 'test-start' });
+    const result = await test({ connection: state.draft, secrets: collectSecrets(state.secrets) });
+    dispatch({ type: 'test-result', result });
   }
 
   const ActiveForm = activeTab.Form;
@@ -51,6 +77,7 @@ export function ConnectionDialogV2({ initial, globals, onSave, onCancel }: Props
           value={state.draft.color}
           onChange={(c) => dispatch({ type: 'set-field', path: 'color', value: c })}
         />
+        <Button onClick={handleTest} disabled={issues.length > 0}>Test</Button>
       </div>
 
       <div className={styles.body}>
@@ -99,6 +126,17 @@ export function ConnectionDialogV2({ initial, globals, onSave, onCancel }: Props
             <span>
               ⚠ {issues.length === 1 ? '1 issue' : `${issues.length} issues`} across tabs
             </span>
+          )}
+          {issues.length === 0 && state.testResult?.kind === 'pending' && (
+            <span>Testing…</span>
+          )}
+          {issues.length === 0 && state.testResult?.kind === 'ok' && (
+            <span className={styles.testOk}>✓ Connection OK</span>
+          )}
+          {issues.length === 0 && state.testResult?.kind === 'fail' && (
+            <div className={styles.testFail}>
+              <strong>{stageHeading(state.testResult.stage)}</strong>: {state.testResult.error}
+            </div>
           )}
         </div>
         <div className={styles.actions}>

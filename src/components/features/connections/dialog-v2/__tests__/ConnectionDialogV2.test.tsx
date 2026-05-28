@@ -1,5 +1,9 @@
-import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+
+vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
+
+import { invoke } from '@tauri-apps/api/core';
 import { ConnectionDialogV2 } from '../ConnectionDialogV2';
 import { DEFAULT_GLOBAL_PREFS } from '../../../../../connection/overrides';
 import type { Connection } from '../../../../../connection/model';
@@ -12,6 +16,10 @@ const sample: Connection = {
 };
 
 describe('ConnectionDialogV2', () => {
+  beforeEach(() => {
+    vi.mocked(invoke).mockReset();
+  });
+
   it('renders name + color picker + Server tab content for existing connection', () => {
     render(<ConnectionDialogV2 initial={sample} globals={DEFAULT_GLOBAL_PREFS} onSave={vi.fn()} onCancel={vi.fn()} />);
     expect(screen.getByLabelText(/connection name/i)).toHaveValue('My Cluster');
@@ -38,5 +46,41 @@ describe('ConnectionDialogV2', () => {
     render(<ConnectionDialogV2 initial={blank} globals={DEFAULT_GLOBAL_PREFS} onSave={vi.fn()} onCancel={vi.fn()} />);
     expect(screen.getByRole('button', { name: /save/i })).toBeDisabled();
     expect(screen.getByText(/issue/i)).toBeInTheDocument();
+  });
+
+  it('Test button calls connections_v2_test with current draft + secrets', async () => {
+    vi.mocked(invoke).mockResolvedValueOnce({ ok: true, serverInfo: {} });
+    render(<ConnectionDialogV2 initial={sample} globals={DEFAULT_GLOBAL_PREFS} onSave={vi.fn()} onCancel={vi.fn()} />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /^test$/i }));
+    });
+    expect(invoke).toHaveBeenCalledWith('connections_v2_test', {
+      input: { connection: sample, secrets: [] },
+    });
+  });
+
+  it('renders "SSH tunnel failed" heading when test result stage is ssh', async () => {
+    vi.mocked(invoke).mockResolvedValueOnce({ ok: false, stage: 'ssh', error: 'no route to host' });
+    render(<ConnectionDialogV2 initial={sample} globals={DEFAULT_GLOBAL_PREFS} onSave={vi.fn()} onCancel={vi.fn()} />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /^test$/i }));
+    });
+    await waitFor(() => expect(screen.getByText(/SSH tunnel failed/i)).toBeInTheDocument());
+    expect(screen.getByText(/no route to host/i)).toBeInTheDocument();
+  });
+
+  it('renders "✓ Connection OK" when test result is ok', async () => {
+    vi.mocked(invoke).mockResolvedValueOnce({ ok: true, serverInfo: { version: '7.0' } });
+    render(<ConnectionDialogV2 initial={sample} globals={DEFAULT_GLOBAL_PREFS} onSave={vi.fn()} onCancel={vi.fn()} />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /^test$/i }));
+    });
+    await waitFor(() => expect(screen.getByText(/Connection OK/i)).toBeInTheDocument());
+  });
+
+  it('Test button is disabled while there are validation issues', () => {
+    const blank: Connection = { ...sample, target: { kind: 'direct', host: '', port: 27017 } };
+    render(<ConnectionDialogV2 initial={blank} globals={DEFAULT_GLOBAL_PREFS} onSave={vi.fn()} onCancel={vi.fn()} />);
+    expect(screen.getByRole('button', { name: /^test$/i })).toBeDisabled();
   });
 });

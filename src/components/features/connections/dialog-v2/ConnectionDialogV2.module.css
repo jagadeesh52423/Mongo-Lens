@@ -9,4 +9,6 @@
 .panel { flex: 1; padding: 16px; }
 .footer { display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; border-top: 1px solid var(--border); }
 .issues { color: #ef4444; font-size: 12px; }
+.testOk { color: #10b981; }
+.testFail { color: #ef4444; }
 .actions { display: flex; gap: 8px; }
