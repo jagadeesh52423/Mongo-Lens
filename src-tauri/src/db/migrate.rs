@@ -1,5 +1,7 @@
 use rusqlite::Connection;
 
+use crate::connection::store as connection_store;
+
 pub fn run_migrations(conn: &Connection) -> rusqlite::Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS connections (
@@ -26,6 +28,10 @@ pub fn run_migrations(conn: &Connection) -> rusqlite::Result<()> {
             created_at TEXT NOT NULL
         );",
     )?;
+    // v2 connection store — schema owned by src/connection/schema_v2.sql.
+    // Old `connections` table above is untouched; dual-table sync lands in
+    // Task 11.
+    connection_store::apply_schema(conn)?;
     Ok(())
 }
 
@@ -39,12 +45,12 @@ mod tests {
         run_migrations(&conn).unwrap();
         let count: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('connections','saved_scripts')",
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('connections','saved_scripts','connections_v2')",
                 [],
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(count, 2);
+        assert_eq!(count, 3);
     }
 
     #[test]

@@ -5,11 +5,17 @@
 // fixture under tests/fixtures/connection/ exercising it. The contract tests
 // in model_contract_tests.rs enforce wire-format parity.
 
-// Types here are consumed by later PRs (connections_v2 store, builder, IPC
-// commands). Until those land, the producer/consumer surface is just the
-// contract tests — silence the per-variant dead-code warnings module-wide.
+// Types here are consumed by later PRs (builder, IPC commands). Until
+// those land, the producer/consumer surface is the store + contract
+// tests — silence the per-variant dead-code warnings module-wide.
 #[allow(dead_code)]
 pub mod model;
+
+// connections_v2 table + payload-JSON store. Consumed by the migration
+// runner (Task 11) and IPC commands (Task 12); allow(dead_code) until
+// those wire it up.
+#[allow(dead_code)]
+pub mod store;
 
 #[cfg(test)]
 mod model_contract_tests;
