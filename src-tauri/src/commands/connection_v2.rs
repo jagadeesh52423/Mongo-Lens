@@ -483,13 +483,12 @@ pub enum ConnectResultV2 {
 }
 
 /// Payload for the `ssh_session_lost` Tauri event emitted when an SSH
-/// tunnel drops out from under a live v2 connection. The frontend uses
-/// this to flip the connection's tree-row state to disconnected.
+/// tunnel drops out from under a live connection. The frontend uses this
+/// to flip the connection's tree-row state to disconnected.
 ///
-/// Distinct from the legacy event (`commands::connection`) on purpose —
-/// the v2 dialog may want to render a different toast, and decoupling the
-/// payload from the legacy struct prevents accidental field drift during
-/// the dual-table window.
+/// Previously suffixed `V2` to coexist with the legacy emitter during
+/// PR 4's dual-table phase; the legacy emitter is gone in PR 5 so this
+/// is the only owner of the `ssh_session_lost` event.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SshSessionLostPayloadV2 {
@@ -547,7 +546,7 @@ async fn handle_session_loss_v2(
     }
 
     let _ = app_handle.emit(
-        "ssh_session_lost_v2",
+        "ssh_session_lost",
         SshSessionLostPayloadV2 { connection_id },
     );
 }

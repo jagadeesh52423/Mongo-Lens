@@ -1,50 +1,16 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import type {
-  Connection,
-  ConnectionInput,
   SavedScript,
   CollectionNode,
   IndexInfo,
 } from './types';
 
-export async function listConnections(): Promise<Connection[]> {
-  return invoke('list_connections');
-}
-
-export async function createConnection(input: ConnectionInput): Promise<Connection> {
-  return invoke('create_connection', { input });
-}
-
-export async function updateConnection(id: string, input: ConnectionInput): Promise<Connection> {
-  return invoke('update_connection', { id, input });
-}
-
-export async function deleteConnection(id: string): Promise<void> {
-  return invoke('delete_connection', { id });
-}
-
-export async function testConnection(id: string): Promise<{ ok: boolean; error?: string }> {
-  return invoke('test_connection', { id });
-}
-
-// Discriminated union returned by connect_connection.
-export type ConnectResult =
-  | { type: 'connected' }
-  | { type: 'passphraseRequired'; connectionId: string }
-  | { type: 'hostKeyUnknown'; connectionId: string; fingerprint: string; algorithm: string; host: string; port: number };
-
-export async function connectConnection(
-  id: string,
-  passphrase?: string,
-  acceptHostKey?: boolean,
-): Promise<ConnectResult> {
-  return invoke('connect_connection', { id, passphrase, acceptHostKey });
-}
-
-export async function disconnectConnection(id: string): Promise<void> {
-  return invoke('disconnect_connection', { id });
-}
+// The 7 legacy connection CRUD/connect wrappers (listConnections,
+// createConnection, updateConnection, deleteConnection, testConnection,
+// connectConnection, disconnectConnection) were deleted in PR 5.
+// V2 wrappers live in `src/connection/ipc.ts` (listV2, saveV2, deleteV2,
+// testV2, connectV2, disconnectV2) and the frontend has fully migrated.
 
 export async function listDatabases(connectionId: string): Promise<string[]> {
   return invoke('list_databases', { connectionId });

@@ -1,5 +1,4 @@
-use crate::db::connections::ConnectionRecord;
-use crate::ssh::auth::{AuthMethod, AuthMethodFactory, AuthSecrets};
+use crate::ssh::auth::AuthMethod;
 use crate::ssh::errors::SshError;
 use crate::ssh::host_key::HostKeyVerifier;
 use russh::client::AuthResult;
@@ -113,66 +112,9 @@ impl KeyFileAuth {
     }
 }
 
-/// Factory for `KeyFileAuth`. Returns `Some` when `ssh_key_path` is set on the record.
-pub struct KeyFileAuthFactory;
-
-impl AuthMethodFactory for KeyFileAuthFactory {
-    fn build(
-        &self,
-        rec: &ConnectionRecord,
-        secrets: &AuthSecrets,
-    ) -> Option<Box<dyn AuthMethod>> {
-        rec.ssh_key_path.as_ref().filter(|p| !p.is_empty()).map(|p| {
-            Box::new(KeyFileAuth {
-                key_path: PathBuf::from(p),
-                passphrase: secrets.passphrase.clone(),
-            }) as Box<dyn AuthMethod>
-        })
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::connections::ConnectionRecord;
-
-    fn rec_with_key(path: &str) -> ConnectionRecord {
-        ConnectionRecord {
-            id: "1".into(),
-            name: "t".into(),
-            host: Some("localhost".into()),
-            port: Some(27017),
-            auth_db: Some("admin".into()),
-            username: Some("u".into()),
-            conn_string: None,
-            ssh_host: Some("bastion.example.com".into()),
-            ssh_port: Some(22),
-            ssh_user: Some("ubuntu".into()),
-            ssh_key_path: Some(path.into()),
-            created_at: "2026-05-14".into(),
-        }
-    }
-
-    fn rec_no_key() -> ConnectionRecord {
-        let mut r = rec_with_key("");
-        r.ssh_key_path = None;
-        r
-    }
-
-    #[test]
-    fn factory_returns_some_when_key_path_set() {
-        assert!(KeyFileAuthFactory.build(&rec_with_key("/tmp/id_ed25519"), &AuthSecrets::new(None)).is_some());
-    }
-
-    #[test]
-    fn factory_returns_none_when_no_key_path() {
-        assert!(KeyFileAuthFactory.build(&rec_no_key(), &AuthSecrets::new(None)).is_none());
-    }
-
-    #[test]
-    fn factory_returns_none_when_empty_key_path() {
-        assert!(KeyFileAuthFactory.build(&rec_with_key(""), &AuthSecrets::new(None)).is_none());
-    }
 
     #[test]
     fn load_key_returns_not_found_for_missing_path() {
