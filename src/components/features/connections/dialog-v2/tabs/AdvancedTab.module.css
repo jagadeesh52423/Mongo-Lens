@@ -1,0 +1,21 @@
+.compressorRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 4px 0;
+}
+
+.compressorLabel {
+  flex: 1;
+}
+
+.checkGroup {
+  display: flex;
+  gap: 12px;
+}
+
+.hint {
+  color: var(--fg-dim);
+  font-size: var(--fs-sm);
+  margin: 2px 0 6px;
+}

@@ -3,6 +3,9 @@ import { AuthTab } from './AuthTab';
 import { TlsTab } from './TlsTab';
 import { SshTab } from './SshTab';
 import { ProxyTab } from './ProxyTab';
+import { IntelliShellTab, hasIntelliShellOverrides } from './IntelliShellTab';
+import { ToolsTab, hasToolsOverrides } from './ToolsTab';
+import { AdvancedTab, hasAdvancedOverrides } from './AdvancedTab';
 import { validateTarget, validateAuth, validateTls, validateSsh, validateProxy } from '../../../../../connection/validation';
 import type { TabSpec } from './types';
 
@@ -47,5 +50,29 @@ export const TABS: TabSpec[] = [
     group: 'transport',
     Form: ProxyTab,
     validate: (c) => validateProxy(c.proxy),
+  },
+  {
+    id: 'intelliShell',
+    label: 'IntelliShell',
+    group: 'prefs',
+    Form: IntelliShellTab,
+    validate: () => [],
+    hasOverrides: hasIntelliShellOverrides,
+  },
+  {
+    id: 'tools',
+    label: 'Tools',
+    group: 'prefs',
+    Form: ToolsTab,
+    validate: () => [],
+    hasOverrides: hasToolsOverrides,
+  },
+  {
+    id: 'advanced',
+    label: 'Advanced',
+    group: 'prefs',
+    Form: AdvancedTab,
+    validate: () => [],
+    hasOverrides: hasAdvancedOverrides,
   },
 ];
