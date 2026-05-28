@@ -17,7 +17,9 @@ const sample: Connection = {
 };
 
 describe('useConnectionsV2', () => {
-  beforeEach(() => vi.mocked(invoke).mockReset());
+  // Wrapped in braces so the arrow returns `void` — `mockReset()` returns the
+  // mock itself, which Vitest's `beforeEach` mis-types as a cleanup callback.
+  beforeEach(() => { vi.mocked(invoke).mockReset(); });
 
   it('refresh calls connections_v2_list and stores result', async () => {
     vi.mocked(invoke).mockResolvedValueOnce([sample]);

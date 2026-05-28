@@ -11,14 +11,9 @@ import type { Connection } from '../../../connection/model';
 
 /**
  * The connections store — single source of truth for the v2 connection list
- * AND the cross-cutting runtime state previously owned by the legacy
- * `useConnectionsStore` in `src/store/connections.ts` (`activeConnectionId`,
- * `activeDatabase`, `connectedIds`, `markConnected`, `markDisconnected`,
- * `setActive`).
- *
- * The legacy store was deleted in PR 5 / Task 18; this store absorbs its
- * runtime-state surface verbatim (same field names, same semantics) so the
- * 16 consumer sites needed only an import rewrite, not a logic change.
+ * AND the cross-cutting runtime state (`activeConnectionId`, `activeDatabase`,
+ * `connectedIds`, `markConnected`, `markDisconnected`, `setActive`) that the
+ * editor / context / AI subsystems read.
  */
 export interface ConnectionsV2Store {
   // ────────── connection list (IPC-backed) ──────────

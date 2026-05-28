@@ -44,8 +44,7 @@ export function ConnectionPanel() {
   }
 
   useEffect(() => {
-    // The v2 store is the sole source of truth for the connection list now —
-    // legacy `list_connections` + `useConnectionsStore` were retired in PR 5.
+    // The v2 store is the sole source of truth for the connection list.
     refreshV2().catch((e) => console.error('refreshV2 failed:', e));
     // Wrapped in Promise.resolve so an undefined IPC response (test mocks
     // that don't enumerate every call) doesn't throw on `.then`.
