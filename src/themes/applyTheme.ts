@@ -19,17 +19,43 @@ export function applyTheme(themeId: string): void {
   });
 }
 
+/** Strip a leading '#' so Monaco's `foreground` (which wants bare hex) is happy. */
+function bareHex(v: string): string {
+  return v.trim().replace(/^#/, '');
+}
+
+/**
+ * Build Monaco token color rules from a CSS-var reader. Extracted as a pure
+ * function so it is unit-testable without the Monaco loader.
+ * To add a token mapping: add a row here referencing a --syntax-* var.
+ */
+export function buildMonacoSyntaxRules(
+  read: (name: string) => string,
+): { token: string; foreground: string }[] {
+  return [
+    { token: 'keyword', foreground: bareHex(read('--syntax-key')) },
+    { token: 'string', foreground: bareHex(read('--syntax-string')) },
+    { token: 'number', foreground: bareHex(read('--syntax-number')) },
+    { token: 'identifier', foreground: bareHex(read('--syntax-func')) },
+    { token: 'type.identifier', foreground: bareHex(read('--syntax-func')) },
+    { token: 'delimiter', foreground: bareHex(read('--syntax-punct')) },
+    { token: 'delimiter.bracket', foreground: bareHex(read('--syntax-punct')) },
+  ];
+}
+
 export function applyMonacoTheme(themeId: string): void {
   const merged = mergedVariables(themeId);
   if (!merged) return;
-  const panel = merged['--bg-panel'] ?? merged['--bg'] ?? '#001e2b';
+  const panel = merged['--bg-elev-1'] ?? merged['--bg-panel'] ?? merged['--bg'] ?? '#0a0b0d';
   const base = isLightColor(panel) ? 'vs' : 'vs-dark';
+  const read = (name: string) => merged[name] ?? '';
+  const rules = buildMonacoSyntaxRules(read).filter((r) => r.foreground.length === 6);
 
   loader.init().then((monaco) => {
     monaco.editor.defineTheme(MONACO_THEME_ID, {
       base,
       inherit: true,
-      rules: [],
+      rules,
       colors: {
         'editor.background': panel,
         'editor.lineHighlightBackground': panel,
