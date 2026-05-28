@@ -1,5 +1,6 @@
 .container {
   font-family: var(--font-mono);
+  line-height: 1.6;
   padding: 10px;
   overflow: auto;
 }
@@ -9,4 +10,7 @@
   white-space: pre-wrap;
   border-bottom: 1px solid var(--border);
   padding-bottom: 8px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
 }

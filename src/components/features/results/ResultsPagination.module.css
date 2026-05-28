@@ -6,11 +6,29 @@
   border-top: 1px solid var(--border);
   background: var(--bg-panel);
   font-size: var(--fs-sm);
+  color: var(--fg-muted);
 }
+
 .pageInput {
   width: 48px;
   text-align: center;
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-sm);
 }
+
+.pageInput:focus-visible {
+  box-shadow: var(--focus-ring);
+  outline: none;
+}
+
 .sizeSelect {
   margin-left: auto;
+  color: var(--fg-muted);
+  font-size: var(--fs-sm);
+}
+
+.pageLabel {
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
 }

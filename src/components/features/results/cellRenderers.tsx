@@ -1,5 +1,4 @@
 import type { ReactNode } from 'react';
-import styles from './cellRenderers.module.css';
 
 export interface CellRenderer {
   matches(value: unknown): boolean;
@@ -28,19 +27,43 @@ export function makeCellRenderer<T>(def: {
 
 export const undefinedRenderer = makeCellRenderer({
   matches: (v): v is undefined => v === undefined,
-  render: () => '—',
+  // textContent: '—' (unchanged)
+  render: () => <span style={{ color: 'var(--fg-dim)' }}>—</span>,
   toEditString: () => '',
 });
 
 export const nullRenderer = makeCellRenderer({
   matches: (v): v is null => v === null,
-  render: () => <span className={styles.dim}>null</span>,
+  // textContent: 'null' (unchanged)
+  render: () => <span style={{ color: 'var(--fg-dim)' }}>null</span>,
   toEditString: () => 'null',
 });
 
 export const booleanRenderer = makeCellRenderer({
   matches: (v): v is boolean => typeof v === 'boolean',
-  render: (v) => <span className={styles.dim}>{String(v)}</span>,
+  // textContent: 'true'/'false' (unchanged)
+  render: (v) => <span style={{ color: 'var(--accent)' }}>{String(v)}</span>,
+  toEditString: (v) => String(v),
+});
+
+export const stringRenderer = makeCellRenderer({
+  matches: (v): v is string => typeof v === 'string',
+  // textContent: the string value itself (unchanged)
+  render: (v) => <span style={{ color: 'var(--syntax-string)' }}>{v}</span>,
+  toEditString: (v) => v,
+});
+
+export const numberRenderer = makeCellRenderer({
+  matches: (v): v is number => typeof v === 'number',
+  // textContent: String(number) (unchanged)
+  render: (v) => <span style={{ color: 'var(--syntax-number)' }}>{String(v)}</span>,
+  toEditString: (v) => String(v),
+});
+
+export const bigintRenderer = makeCellRenderer({
+  matches: (v): v is bigint => typeof v === 'bigint',
+  // textContent: String(bigint) (unchanged)
+  render: (v) => <span style={{ color: 'var(--syntax-number)' }}>{String(v)}</span>,
   toEditString: (v) => String(v),
 });
 
@@ -66,6 +89,9 @@ export const DEFAULT_CELL_RENDERERS: CellRenderer[] = [
   undefinedRenderer,
   nullRenderer,
   booleanRenderer,
+  stringRenderer,
+  numberRenderer,
+  bigintRenderer,
   arrayRenderer,
   objectRenderer,
 ];
