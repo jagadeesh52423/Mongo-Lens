@@ -66,7 +66,7 @@ use crate::connection::tunnel::{open as open_tunnel_bridge, ResolvedSshSecrets};
 use crate::logctx;
 use crate::logger::Logger;
 use crate::prefs::model::EffectivePrefs;
-use crate::ssh::TunnelStartResult;
+use crate::ssh::{TunnelHandle, TunnelStartResult};
 
 // ──────────────────────────────────────────────────────────────────────────
 // Public types
@@ -178,25 +178,22 @@ impl<'a> ResolvedConnection<'a> {
 ///      *_timeout_ms).
 ///   7. Validate + apply proxy (SOCKS5 only).
 ///
-/// Caller is expected to keep the returned [`crate::ssh::TunnelHandle`]
-/// alive for the lifetime of the resulting `Client`. The builder cannot
-/// hand back the handle alongside `ClientOptions` in a single tuple
-/// without changing the public signature mandated by the plan, so the
-/// IPC layer (Task 12) opens the tunnel itself when it needs the handle
-/// for shutdown. **In the current version of this builder, opening the
-/// SSH tunnel here is therefore opportunistic — the tunnel is leaked at
-/// the end of the function.** A follow-up will tighten this; see the
-/// inline note in step 1.
+/// Returns `(ClientOptions, Option<TunnelHandle>)`. The caller OWNS the
+/// returned tunnel handle and is responsible for closing it when the
+/// resulting `Client` shuts down (drop alone is not enough — call
+/// [`TunnelHandle::close`] for a clean teardown). When the connection
+/// has no SSH config the second element is `None`.
 pub async fn build_client_options(
     resolved: &ResolvedConnection<'_>,
     effective: &EffectivePrefs,
     log: Arc<dyn Logger>,
-) -> Result<ClientOptions, BuildError> {
+) -> Result<(ClientOptions, Option<TunnelHandle>), BuildError> {
     let conn = resolved.conn;
 
     // ── Step 1: SSH tunnel ────────────────────────────────────────────
-    let tunnel_local = open_ssh_if_configured(conn.ssh.as_ref(), resolved, &conn.target, log.clone())
+    let tunnel = open_ssh_if_configured(conn.ssh.as_ref(), resolved, &conn.target, log.clone())
         .await?;
+    let tunnel_local = tunnel.as_ref().map(|t| t.local_addr);
 
     // ── Step 2: Base URI (+ rewrite if tunnel established) ────────────
     let uri = build_base_uri(&conn.target, tunnel_local.as_ref())?;
@@ -225,25 +222,24 @@ pub async fn build_client_options(
     // Direct target shape, applied during URI synthesis (step 2). For URI
     // targets they ride in the connection string itself.
 
-    Ok(opts)
+    Ok((opts, tunnel))
 }
 
 // ──────────────────────────────────────────────────────────────────────────
 // Step 1: SSH
 // ──────────────────────────────────────────────────────────────────────────
 
-/// Open the SSH tunnel if the connection has one. Returns the local bind
-/// address the URI must be rewritten to point at.
-///
-/// Phase 1 limitation: the resulting `TunnelHandle` is leaked when this
-/// function returns Ok — see the doc comment on [`build_client_options`].
-/// Task 12 will replace this with an outer wiring that owns the handle.
+/// Open the SSH tunnel if the connection has one. Returns the live
+/// [`TunnelHandle`] (whose `.local_addr` the URI is rewritten against in
+/// the caller). Ownership transfers to the caller — `build_client_options`
+/// hands it back in the returned tuple so the IPC layer can `.close()` it
+/// on disconnect / test teardown / drop. No leaks.
 async fn open_ssh_if_configured(
     ssh: Option<&SshTunnel>,
     resolved: &ResolvedConnection<'_>,
     target: &ConnectionTarget,
     log: Arc<dyn Logger>,
-) -> Result<Option<std::net::SocketAddr>, BuildError> {
+) -> Result<Option<TunnelHandle>, BuildError> {
     let Some(ssh) = ssh else { return Ok(None) };
 
     let secrets = build_ssh_secrets(ssh, resolved)?;
@@ -264,15 +260,7 @@ async fn open_ssh_if_configured(
         .map_err(|e| BuildError::ssh(e.to_string()))?;
 
     match result {
-        TunnelStartResult::Ready(handle) => {
-            let addr = handle.local_addr;
-            // PHASE-1 LEAK: keep the handle alive for the lifetime of the
-            // returned ClientOptions by forgetting it here. The follow-up
-            // (Task 12) will hand the handle to the caller alongside the
-            // options so it can be dropped when the client shuts down.
-            std::mem::forget(handle);
-            Ok(Some(addr))
-        }
+        TunnelStartResult::Ready(handle) => Ok(Some(handle)),
         TunnelStartResult::HostKeyUnknown { host, fingerprint, .. } => {
             Err(BuildError::ssh(format!(
                 "Host key for {host} is not in any known_hosts store. \
@@ -945,7 +933,7 @@ mod tests {
             AuthMode::None,
         );
         let resolved = ResolvedConnection::bare(&conn);
-        let opts = build_client_options(&resolved, &effective_defaults(), null_log())
+        let (opts, _tunnel) = build_client_options(&resolved, &effective_defaults(), null_log())
             .await
             .expect("build_client_options");
         // appName from EffectivePrefs wins over whatever the URI carried —
@@ -969,7 +957,7 @@ mod tests {
         let mut resolved = ResolvedConnection::bare(&conn);
         resolved.auth_password = Some("pw".into());
 
-        let opts = build_client_options(&resolved, &effective_defaults(), null_log())
+        let (opts, _tunnel) = build_client_options(&resolved, &effective_defaults(), null_log())
             .await
             .unwrap();
         let cred = opts.credential.expect("credential");
@@ -990,7 +978,7 @@ mod tests {
             },
         );
         let resolved = ResolvedConnection::bare(&conn);
-        let opts = build_client_options(&resolved, &effective_defaults(), null_log())
+        let (opts, _tunnel) = build_client_options(&resolved, &effective_defaults(), null_log())
             .await
             .unwrap();
         assert!(opts.credential.unwrap().mechanism.is_none());
@@ -1006,7 +994,7 @@ mod tests {
         );
         let mut resolved = ResolvedConnection::bare(&conn);
         resolved.auth_password = Some("pw".into());
-        let opts = build_client_options(&resolved, &effective_defaults(), null_log())
+        let (opts, _tunnel) = build_client_options(&resolved, &effective_defaults(), null_log())
             .await
             .unwrap();
         let cred = opts.credential.unwrap();
@@ -1025,7 +1013,7 @@ mod tests {
             },
         );
         let resolved = ResolvedConnection::bare(&conn);
-        let opts = build_client_options(&resolved, &effective_defaults(), null_log())
+        let (opts, _tunnel) = build_client_options(&resolved, &effective_defaults(), null_log())
             .await
             .unwrap();
         let cred = opts.credential.unwrap();
@@ -1044,7 +1032,7 @@ mod tests {
             },
         );
         let resolved = ResolvedConnection::bare(&conn);
-        let opts = build_client_options(&resolved, &effective_defaults(), null_log())
+        let (opts, _tunnel) = build_client_options(&resolved, &effective_defaults(), null_log())
             .await
             .unwrap();
         let cred = opts.credential.unwrap();
@@ -1058,7 +1046,7 @@ mod tests {
     async fn none_auth_mode_produces_no_credential() {
         let conn = base_conn(direct_target(), AuthMode::None);
         let resolved = ResolvedConnection::bare(&conn);
-        let opts = build_client_options(&resolved, &effective_defaults(), null_log())
+        let (opts, _tunnel) = build_client_options(&resolved, &effective_defaults(), null_log())
             .await
             .unwrap();
         assert!(opts.credential.is_none());
@@ -1075,7 +1063,7 @@ mod tests {
         );
         let mut resolved = ResolvedConnection::bare(&conn);
         resolved.auth_password = Some("pw".into());
-        let opts = build_client_options(&resolved, &effective_defaults(), null_log())
+        let (opts, _tunnel) = build_client_options(&resolved, &effective_defaults(), null_log())
             .await
             .unwrap();
         assert!(matches!(
@@ -1100,7 +1088,7 @@ mod tests {
             },
         );
         let resolved = ResolvedConnection::bare(&conn);
-        let opts = build_client_options(&resolved, &effective_defaults(), null_log())
+        let (opts, _tunnel) = build_client_options(&resolved, &effective_defaults(), null_log())
             .await
             .unwrap();
         let cred = opts.credential.unwrap();
@@ -1143,7 +1131,7 @@ mod tests {
         );
         let mut resolved = ResolvedConnection::bare(&conn);
         resolved.aws_secret_key = Some("SECRET".into());
-        let opts = build_client_options(&resolved, &effective_defaults(), null_log())
+        let (opts, _tunnel) = build_client_options(&resolved, &effective_defaults(), null_log())
             .await
             .unwrap();
         let cred = opts.credential.unwrap();
@@ -1186,7 +1174,7 @@ mod tests {
             client_cert_file: None,
         });
         let resolved = ResolvedConnection::bare(&conn);
-        let opts = build_client_options(&resolved, &effective_defaults(), null_log())
+        let (opts, _tunnel) = build_client_options(&resolved, &effective_defaults(), null_log())
             .await
             .unwrap();
         assert!(matches!(opts.tls, Some(Tls::Disabled)));
@@ -1203,7 +1191,7 @@ mod tests {
             client_cert_file: Some("/etc/ssl/client.pem".into()),
         });
         let resolved = ResolvedConnection::bare(&conn);
-        let opts = build_client_options(&resolved, &effective_defaults(), null_log())
+        let (opts, _tunnel) = build_client_options(&resolved, &effective_defaults(), null_log())
             .await
             .unwrap();
         match opts.tls {
@@ -1267,7 +1255,7 @@ mod tests {
         };
         let effective = crate::prefs::resolve_effective(&global, Some(&overrides));
 
-        let opts = build_client_options(&resolved, &effective, null_log())
+        let (opts, _tunnel) = build_client_options(&resolved, &effective, null_log())
             .await
             .unwrap();
         assert_eq!(opts.app_name.as_deref(), Some("custom-app"));
@@ -1311,7 +1299,7 @@ mod tests {
             }),
         };
         let effective = crate::prefs::resolve_effective(&global, Some(&overrides));
-        let opts = build_client_options(&resolved, &effective, null_log())
+        let (opts, _tunnel) = build_client_options(&resolved, &effective, null_log())
             .await
             .unwrap();
         // The `compressors` field on ClientOptions itself is feature-gated.
@@ -1390,7 +1378,7 @@ mod tests {
         });
         let mut resolved = ResolvedConnection::bare(&conn);
         resolved.proxy_password = Some("proxy-pw".into());
-        let opts = build_client_options(&resolved, &effective_defaults(), null_log())
+        let (opts, _tunnel) = build_client_options(&resolved, &effective_defaults(), null_log())
             .await
             .unwrap();
         let sp = opts.socks5_proxy.expect("socks5_proxy");

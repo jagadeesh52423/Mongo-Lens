@@ -29,7 +29,14 @@ use crate::connection::model::{Proxy, ProxyKind};
 ///
 /// `password` is `None` when the proxy is unauthenticated or when the
 /// model carries no `auth` block.
+// `ResolvedProxy` is the proxy-side counterpart to `ResolvedConnection`
+// and the intended carrier for proxy + secret pairs. The builder
+// currently consumes `(Proxy, Option<&str>)` directly because that's
+// what its internal `apply_proxy` signature takes; tests construct
+// `ResolvedProxy` to validate the carrier shape. Kept public so a
+// future builder refactor can switch to it without a new type.
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct ResolvedProxy<'a> {
     pub spec: &'a Proxy,
     pub password: Option<&'a str>,

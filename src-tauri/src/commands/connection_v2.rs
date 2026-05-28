@@ -273,11 +273,11 @@ pub fn connections_v2_delete(state: State<'_, AppState>, id: String) -> Result<(
 /// the provided secrets and running a single `hello` round-trip. Never
 /// touches the Keychain or `connections_v2` — purely a probe.
 ///
-/// Phase 1 limitation: when the connection uses an SSH tunnel,
-/// `build_client_options` opens it and currently leaks the handle (see
-/// the doc comment on [`build_client_options`]). The tunnel will be
-/// reclaimed at app exit. A follow-up will tighten this; until then a
-/// successful `test` may leave a short-lived tunnel running.
+/// Tunnel ownership: when the connection has an SSH tunnel the builder
+/// returns its [`TunnelHandle`] in the tuple. This command owns that
+/// handle for the lifetime of the probe and closes it on every exit path
+/// — success, hello-failure, and client-init failure — before returning.
+/// No handle is leaked.
 #[tauri::command]
 pub async fn connections_v2_test(
     state: State<'_, AppState>,
@@ -308,9 +308,12 @@ pub async fn connections_v2_test(
     // 2. Project the flat secret list onto the typed `ResolvedConnection`.
     let resolved = build_resolved(&input.connection, &input.secrets);
 
-    // 3. Build ClientOptions. Builder errors map straight onto Fail.
-    let opts = match build_client_options(&resolved, &effective, log.clone()).await {
-        Ok(opts) => opts,
+    // 3. Build ClientOptions + tunnel handle. Builder errors map straight
+    //    onto Fail. If the builder failed mid-way through SSH the handle
+    //    is dropped by the builder before returning Err — nothing to
+    //    close here.
+    let (opts, tunnel) = match build_client_options(&resolved, &effective, log.clone()).await {
+        Ok(pair) => pair,
         Err(BuildError { stage, error }) => {
             log.info(
                 "connections_v2_test: build failed",
@@ -330,6 +333,11 @@ pub async fn connections_v2_test(
                 "connections_v2_test: client init failed",
                 logctx! { "err" => e.to_string() },
             );
+            // Tunnel was opened (Build OK) but we never bound a client to
+            // it — close it before returning.
+            if let Some(tunnel) = tunnel {
+                tunnel.close().await;
+            }
             return Ok(TestResultV2::failure(
                 BuildStage::Tls,
                 format!("client init failed: {e}"),
@@ -345,7 +353,11 @@ pub async fn connections_v2_test(
         .run_command(doc! { "hello": 1 })
         .await;
 
-    match hello {
+    // Tear-down runs on every exit path: shut down the MongoDB client,
+    // then close the tunnel (in that order — pool first so no in-flight
+    // queries hit a dead tunnel, matching the on-window-close policy in
+    // main.rs).
+    let result = match hello {
         Ok(server_doc) => {
             // bson::Document → serde_json::Value via bson's Serialize impl.
             // Extended-JSON shapes (numeric subtypes, dates) are preserved
@@ -358,22 +370,24 @@ pub async fn connections_v2_test(
                 );
                 serde_json::Value::Null
             });
-            // Tear down the client. Tunnel cleanup is the leaked-handle
-            // case noted in the doc comment above.
-            client.shutdown().await;
             log.info("connections_v2_test ok", logctx! {});
-            Ok(TestResultV2::success(server_info))
+            TestResultV2::success(server_info)
         }
         Err(e) => {
             let err_str = e.to_string();
-            client.shutdown().await;
             log.warn(
                 "connections_v2_test: hello failed",
                 logctx! { "err" => err_str.clone() },
             );
-            Ok(TestResultV2::failure(BuildStage::Ping, err_str))
+            TestResultV2::failure(BuildStage::Ping, err_str)
         }
+    };
+
+    client.shutdown().await;
+    if let Some(tunnel) = tunnel {
+        tunnel.close().await;
     }
+    Ok(result)
 }
 
 // ──────────────────────────────────────────────────────────────────────────

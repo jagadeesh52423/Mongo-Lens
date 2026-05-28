@@ -5,44 +5,27 @@
 // fixture under tests/fixtures/connection/ exercising it. The contract tests
 // in model_contract_tests.rs enforce wire-format parity.
 
-// Types here are consumed by later PRs (builder, IPC commands). Until
-// those land, the producer/consumer surface is the store + contract
-// tests — silence the per-variant dead-code warnings module-wide.
-#[allow(dead_code)]
 pub mod model;
 
-// connections_v2 table + payload-JSON store. Consumed by the migration
-// runner (Task 11) and IPC commands (Task 12); allow(dead_code) until
-// those wire it up.
-#[allow(dead_code)]
+// connections_v2 table + payload-JSON store.
 pub mod store;
 
-// Slotted secret storage (KeychainStore + MemStore). Consumed by Task 7
-// (SSH auth flows) and the builder/migration in Tasks 10-11; allow
-// dead_code until those land.
-#[allow(dead_code)]
+// Slotted secret storage (KeychainStore + MemStore).
 pub mod secrets;
 
-// SshTunnel → ssh::TunnelHandle bridge. Consumed by the builder (Task 10)
-// and IPC commands (Task 12); allow(dead_code) until those land.
-#[allow(dead_code)]
+// SshTunnel → ssh::TunnelHandle bridge.
 pub mod tunnel;
 
-// SOCKS5 proxy validation (HTTP/SOCKS4 deferred). Consumed by the builder
-// (Task 10); allow(dead_code) until that lands.
-#[allow(dead_code)]
+// SOCKS5 proxy validation (HTTP/SOCKS4 deferred).
 pub mod proxy;
 
 // Legacy→v2 migration: pure migrate() + side-effectful sync_row_to_v2 +
-// boot-time migrate_all sweep. Consumed by main.rs (gated on CONN_V2)
-// and commands/connection.rs (dual-table sync on every save).
-#[allow(dead_code)]
+// boot-time migrate_all sweep.
 pub mod migration;
 
 // Connection → mongodb::options::ClientOptions builder with staged
-// errors (Ssh|Tls|Auth|Ping). Consumed by IPC commands (Task 12) and
-// the connections_v2_test command.
-#[allow(dead_code)]
+// errors (Ssh|Tls|Auth|Ping). Returns an owned tunnel handle alongside
+// the options so callers can close it on teardown — no leaks.
 pub mod builder;
 
 #[cfg(test)]

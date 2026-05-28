@@ -136,6 +136,9 @@ impl SecretSlot {
 
 /// Logical key for a stored secret: `conn:<id>:<slot>`. Used in logs and
 /// (after light translation to a filesystem-safe form) in on-disk paths.
+/// Currently consumed only by `MemStore` (test mock) and unit tests; the
+/// `FileEncryptedStore` path derives its filesystem key internally.
+#[allow(dead_code)]
 pub fn wire_key(connection_id: &str, slot: SecretSlot) -> String {
     format!("conn:{connection_id}:{}", slot.as_wire())
 }
@@ -180,9 +183,16 @@ pub trait SecretStore: Send + Sync {
 
     /// Fetch the secret stored at (`connection_id`, `slot`). `Ok(None)`
     /// if no value has ever been set (distinct from a real failure).
+    /// Phase 1 IPC commands don't read individual slots back (the dialog
+    /// holds form values in memory until save) — this stays in the trait
+    /// as a contract for future read-side code and tests.
+    #[allow(dead_code)]
     fn get(&self, connection_id: &str, slot: SecretSlot) -> Result<Option<String>>;
 
     /// Delete one (`connection_id`, `slot`) pair. Missing pair is a no-op.
+    /// Not yet called by IPC — Phase 1 uses `delete_all_for` on full
+    /// connection delete. Kept in the trait for completeness and tests.
+    #[allow(dead_code)]
     fn delete(&self, connection_id: &str, slot: SecretSlot) -> Result<()>;
 
     /// Delete every slot belonging to `connection_id`. Returns the number
@@ -197,15 +207,20 @@ pub trait SecretStore: Send + Sync {
 // ──────────────────────────────────────────────────────────────────────────
 
 /// In-memory [`SecretStore`] backed by a `HashMap`. Primarily used as a
-/// test mock; safe to use as a runtime cache if ever needed.
+/// test mock; safe to use as a runtime cache if ever needed. The bin
+/// target never instantiates this — runtime uses `FileEncryptedStore`
+/// via `open_default_keychain_store` — so it carries `#[allow(dead_code)]`
+/// on the constructor/internal helpers.
 ///
 /// `Mutex` (not `RwLock`) because the access pattern is balanced
 /// reads + writes and the critical sections are tiny.
 #[derive(Default, Debug)]
+#[allow(dead_code)]
 pub struct MemStore {
     inner: Mutex<HashMap<String, String>>,
 }
 
+#[allow(dead_code)]
 impl MemStore {
     pub fn new() -> Self {
         Self::default()
@@ -266,6 +281,9 @@ const MASTER_KEY_SIZE: usize = 32;
 /// Bytes of an AES-GCM nonce (96 bits, the standard).
 const NONCE_SIZE: usize = 12;
 /// Bytes of the AES-GCM auth tag appended after the ciphertext.
+/// Only `aead_open` (read path) and tests reference this — neither is
+/// reachable from the bin entry yet (IPC `save` flow is write-only).
+#[allow(dead_code)]
 const TAG_SIZE: usize = 16;
 
 /// macOS Keychain service / account for the v2 secret store's master key.
@@ -519,6 +537,10 @@ fn aead_seal(plaintext: &[u8], master_key: &[u8]) -> Result<Vec<u8>> {
     Ok(out)
 }
 
+// `aead_open` is only reachable via `FileEncryptedStore::get`, which is
+// part of the read-side surface that Phase 1 IPC doesn't yet exercise.
+// Retained as a counterpart to `aead_seal`; tests cover it.
+#[allow(dead_code)]
 fn aead_open(encrypted: &[u8], master_key: &[u8]) -> Result<Vec<u8>> {
     if encrypted.len() < NONCE_SIZE + TAG_SIZE {
         return Err(SecretError::Crypto(format!(
