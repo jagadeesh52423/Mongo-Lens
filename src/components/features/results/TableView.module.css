@@ -44,3 +44,10 @@
   background: var(--bg-active);
   outline: none;
 }
+
+/* Selected cell must keep its highlight while the row is hovered — this rule
+ * matches the hover rule's specificity and comes after it, so the selected
+ * state wins over the generic hover background. */
+.table tbody tr:hover .tdSelected {
+  background: var(--bg-active);
+}
