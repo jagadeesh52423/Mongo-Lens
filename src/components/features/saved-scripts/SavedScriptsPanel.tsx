@@ -5,6 +5,7 @@ import { IconButton, ListRow, Panel } from '../../ui';
 import type { SavedScript, EditorTab } from '../../../types';
 import { TagList } from './TagList';
 import { EditTagsPopover } from './EditTagsPopover';
+import { ManageTagsDialog } from './ManageTagsDialog';
 import styles from './SavedScriptsPanel.module.css';
 
 function nextDuplicateName(existingNames: string[], base: string): string {
@@ -17,17 +18,13 @@ function nextDuplicateName(existingNames: string[], base: string): string {
   }
 }
 
-interface PanelProps {
-  /** Optional: when set, the "Manage tags" button is rendered in the header. */
-  onOpenManageTags?: () => void;
-}
-
-export function SavedScriptsPanel({ onOpenManageTags }: PanelProps = {}) {
+export function SavedScriptsPanel() {
   const [scripts, setScripts] = useState<SavedScript[]>([]);
   const [query, setQuery] = useState('');
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [activeFilter, setActiveFilter] = useState<string | null>(null);
   const [editingTagsId, setEditingTagsId] = useState<string | null>(null);
+  const [manageTagsOpen, setManageTagsOpen] = useState(false);
   const { openTab, savedScriptsVersion } = useEditorStore();
 
   async function reload() {
@@ -98,9 +95,9 @@ export function SavedScriptsPanel({ onOpenManageTags }: PanelProps = {}) {
       <Panel.Header
         title="Saved Scripts"
         right={
-          onOpenManageTags ? (
-            <button type="button" onClick={onOpenManageTags}>Manage tags</button>
-          ) : undefined
+          <button type="button" onClick={() => setManageTagsOpen(true)}>
+            Manage tags
+          </button>
         }
       />
       <Panel.Body>
@@ -190,6 +187,13 @@ export function SavedScriptsPanel({ onOpenManageTags }: PanelProps = {}) {
           ))}
         </ul>
       </Panel.Body>
+      {manageTagsOpen && (
+        <ManageTagsDialog
+          scripts={scripts}
+          onClose={() => setManageTagsOpen(false)}
+          onMutated={reload}
+        />
+      )}
     </Panel>
   );
 }

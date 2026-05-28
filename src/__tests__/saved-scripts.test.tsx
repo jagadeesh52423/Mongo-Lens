@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { invoke } from '@tauri-apps/api/core';
 import { SavedScriptsPanel } from '../components/features/saved-scripts/SavedScriptsPanel';
@@ -97,6 +97,73 @@ describe('SavedScriptsPanel', () => {
 
     expect(screen.getByText('rowA')).toBeInTheDocument();
     expect(screen.getByText('rowB')).toBeInTheDocument();
+  });
+
+  it('Manage tags dialog lists tags with counts and renames a tag', async () => {
+    invokeMock.mockResolvedValueOnce([
+      { id: '1', name: 'A', content: '', tags: ['prod', 'auth'], createdAt: 't' },
+      { id: '2', name: 'B', content: '', tags: ['prod'], createdAt: 't' },
+    ]);
+    // rename_tag returns count
+    invokeMock.mockResolvedValueOnce(2);
+    // reload
+    invokeMock.mockResolvedValueOnce([
+      { id: '1', name: 'A', content: '', tags: ['production', 'auth'], createdAt: 't' },
+      { id: '2', name: 'B', content: '', tags: ['production'], createdAt: 't' },
+    ]);
+    const user = userEvent.setup();
+    render(<SavedScriptsPanel />);
+    await waitFor(() => expect(screen.getByText('A')).toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: /Manage tags/i }));
+    const dialog = await screen.findByRole('dialog', { name: /Manage tags/i });
+    const inDialog = within(dialog);
+
+    // Two distinct tags shown: prod (2), auth (1)
+    expect(inDialog.getByText('prod')).toBeInTheDocument();
+    expect(inDialog.getByText('auth')).toBeInTheDocument();
+
+    await user.click(inDialog.getByLabelText('Rename tag prod'));
+    const renameInput = inDialog.getByDisplayValue('prod');
+    await user.clear(renameInput);
+    await user.type(renameInput, 'production');
+    await user.click(inDialog.getByRole('button', { name: /^Save$/i }));
+
+    await waitFor(() => {
+      const call = invokeMock.mock.calls.find((c) => c[0] === 'rename_tag');
+      expect(call).toBeTruthy();
+      expect(call![1]).toEqual({ old: 'prod', new: 'production' });
+    });
+  });
+
+  it('Manage tags dialog deletes a tag with inline confirmation', async () => {
+    invokeMock.mockResolvedValueOnce([
+      { id: '1', name: 'A', content: '', tags: ['auth'], createdAt: 't' },
+    ]);
+    // delete_tag returns count
+    invokeMock.mockResolvedValueOnce(1);
+    // reload after delete
+    invokeMock.mockResolvedValueOnce([
+      { id: '1', name: 'A', content: '', tags: [], createdAt: 't' },
+    ]);
+    const user = userEvent.setup();
+    render(<SavedScriptsPanel />);
+    await waitFor(() => expect(screen.getByText('A')).toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: /Manage tags/i }));
+    const dialog = await screen.findByRole('dialog', { name: /Manage tags/i });
+    const inDialog = within(dialog);
+
+    await user.click(inDialog.getByLabelText('Delete tag auth'));
+    // Inline confirm appears with a second "Delete" button (the confirm action).
+    const deleteButtons = inDialog.getAllByRole('button', { name: /^Delete$/i });
+    await user.click(deleteButtons[deleteButtons.length - 1]);
+
+    await waitFor(() => {
+      const call = invokeMock.mock.calls.find((c) => c[0] === 'delete_tag');
+      expect(call).toBeTruthy();
+      expect(call![1]).toEqual({ tag: 'auth' });
+    });
   });
 
   it('"Edit tags" action opens popover; saving updates tags via updateScript', async () => {
