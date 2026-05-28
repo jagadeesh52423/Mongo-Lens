@@ -84,7 +84,7 @@ export function ConnectionPanel() {
           />
         }
       />
-      <Panel.Body>
+      <Panel.Body className={styles.body}>
         <ul className={styles.list}>
           {connections.map((c) => {
             const connected = connectedIds.has(c.id);

@@ -12,6 +12,15 @@
   padding: 6px;
 }
 
+/* DB row sticks just below the connection row. The offset matches
+   --conn-row-h (declared on .row in ConnectionPanel.module.css). */
+.dbRow {
+  position: sticky;
+  top: var(--conn-row-h, 30px);
+  z-index: 1;
+  background: var(--bg-panel);
+}
+
 .caret {
   display: inline-flex;
   align-items: center;

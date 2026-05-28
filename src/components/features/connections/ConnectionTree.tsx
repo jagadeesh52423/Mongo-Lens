@@ -141,6 +141,7 @@ export function ConnectionTree({ connectionId, onOpenCollection }: Props) {
             <ListRow
               icon={<span className={styles.caret}>{expanded[db] ? '▼' : '▶'}</span>}
               indent={0}
+              className={styles.dbRow}
               onClick={() => toggle(db)}
             >
               {db}
