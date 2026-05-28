@@ -7,44 +7,46 @@ interface Props {
 
 export function SplitHandle({ direction }: Props) {
   const [hover, setHover] = useState(false);
+  const [dragging, setDragging] = useState(false);
   const isHorizontal = direction === 'horizontal';
+  const isActive = hover || dragging;
 
   const containerStyle: React.CSSProperties = isHorizontal
     ? {
         width: 4,
         cursor: 'col-resize',
-        background: hover ? 'var(--accent)' : 'var(--border)',
+        background: isActive ? 'var(--accent)' : 'transparent',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        transition: 'background 120ms ease',
+        transition: 'background var(--dur-fast) var(--ease-standard)',
       }
     : {
         height: 4,
         cursor: 'row-resize',
-        background: hover ? 'var(--accent)' : 'var(--border)',
+        background: isActive ? 'var(--accent)' : 'transparent',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        transition: 'background 120ms ease',
+        transition: 'background var(--dur-fast) var(--ease-standard)',
       };
 
   const gripStyle: React.CSSProperties = isHorizontal
     ? {
         width: 2,
         height: 24,
-        background: hover ? 'var(--bg)' : 'var(--fg-dim)',
+        background: isActive ? 'var(--bg)' : 'var(--fg-dim)',
         borderRadius: 1,
       }
     : {
         width: 24,
         height: 2,
-        background: hover ? 'var(--bg)' : 'var(--fg-dim)',
+        background: isActive ? 'var(--bg)' : 'var(--fg-dim)',
         borderRadius: 1,
       };
 
   return (
-    <PanelResizeHandle>
+    <PanelResizeHandle onDragging={setDragging}>
       <div
         style={containerStyle}
         onMouseEnter={() => setHover(true)}

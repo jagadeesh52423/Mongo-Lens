@@ -1,6 +1,6 @@
 .toolbar {
   display: flex; align-items: center; justify-content: space-between;
-  padding: var(--space-1) var(--space-2); border-bottom: 1px solid var(--border);
+  padding: var(--space-1) var(--space-2); background: var(--bg-elev-1); border-bottom: 1px solid var(--border);
   gap: var(--space-2); min-height: 32px;
 }
 .section { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
