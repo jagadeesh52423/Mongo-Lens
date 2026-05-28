@@ -52,14 +52,15 @@ export function ConnectionDialogV2({ initial, globals, onSave, onCancel }: Props
   return (
     <Dialog open onClose={onCancel} ariaLabel="Connection editor" width={720}>
       <div className={styles.header}>
-        <FormField>
-          <FormField.Label htmlFor="conn-name">Connection name</FormField.Label>
+        <div className={styles.nameField}>
+          <label htmlFor="conn-name" className={styles.nameLabel}>Connection name</label>
           <FormField.Input
             id="conn-name"
+            className={styles.nameInput}
             value={state.draft.name}
             onChange={(e) => dispatch({ type: 'set-field', path: 'name', value: e.target.value })}
           />
-        </FormField>
+        </div>
         <ColorPicker
           value={state.draft.color}
           onChange={(c) => dispatch({ type: 'set-field', path: 'color', value: c })}
