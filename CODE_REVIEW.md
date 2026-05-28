@@ -108,3 +108,26 @@ No rule violations spotted in the diff. Logging uses the established `state.logg
 ## Verdict: **APPROVED with minor follow-ups**
 
 Stage 1 is fully clean. Stage 2 surfaced 4 real-but-small issues (transaction safety, chip keyboard a11y, popover save-drops-input, stale dialog error) — none block merge, all are isolated and easy follow-ups. Recommend filing them as small post-merge tasks (or addressing #1 and #2 inline before merge if there's appetite, since they're 3-line fixes each).
+
+---
+
+## Addendum — Approved with fixes verified
+
+Two follow-up commits address every Stage-2 finding:
+
+- `147abf7 fix(scripts): wrap rename/delete tag operations in a transaction` — finding #1.
+- `523bc7e fix(saved-scripts): post-review polish` — findings #2, #3, #4, plus the `.rowWrap` `position: relative` nit.
+
+**Verification:**
+
+1. **Transactional rename/delete (#1).** Both ops now obtain `conn.unchecked_transaction()`, route the inner `SELECT` and per-row `UPDATE`s through `tx`, and `tx.commit()` on the happy path. `?` propagation drops `tx` on error → rollback. Two new tests (`rename_tag_everywhere_rolls_back_on_partial_failure`, `delete_tag_everywhere_rolls_back_on_partial_failure`) install a `BEFORE UPDATE` trigger keyed to id `"2"`, force a mid-loop abort after row 1 has been updated, assert the call errors, and assert all three rows still hold their original tags — i.e. row 1's earlier successful UPDATE was rolled back. Genuine atomicity proof, not happy-path. `cargo test scripts` is now 9/9.
+
+2. **TagList keyboard activation (#2).** `onKeyDown` is attached only when `interactive` (which requires `onClick`); non-interactive chips get `undefined`. Handler triggers on Enter and Space, calls `e.preventDefault()` (Space no longer scrolls), `e.stopPropagation()`, then invokes `onClick(tag)`. New test `does not bind key handler when chip is non-interactive` asserts `role` and `tabindex` are absent on plain chips — no regression for the filter-strip / display-only usage.
+
+3. **EditTagsPopover Save flushes pending input (#3).** `save()` now reads `input.trim()` and, if non-empty AND not already in `tags` (case-insensitive), appends it before calling `onSave`. **No double-add when Enter was pressed first**: `add()` calls `setInput('')` on commit, so `pending = ''.trim() = ''` is falsy and `final = tags` — the early Enter-committed value is not re-added. New test `Edit-tags popover flushes pending input on Save without requiring Enter` covers the typed-but-not-Enter path.
+
+4. **ManageTagsDialog clears stale `err` (#4).** `setErr(null)` is at the top of both `commitRename` (after the no-op early returns, before `await renameTag`) and `commitDelete` (before `await deleteTag`). Both, not just one.
+
+**Tests after fixes:** Rust scripts 9/9; touched JS suites (`tag-list.test.tsx` 7/7, `saved-scripts.test.tsx` 10/10).
+
+No regressions observed. **APPROVED.**
