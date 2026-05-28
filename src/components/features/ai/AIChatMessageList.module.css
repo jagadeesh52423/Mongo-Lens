@@ -44,7 +44,7 @@
   align-self: flex-start;
   padding: 6px 10px;
   border-radius: var(--radius-md);
-  background: var(--bg-elevated, var(--bg-panel));
+  background: var(--bg-elev-2);
   color: var(--fg-dim);
   border: 1px solid var(--border);
 }

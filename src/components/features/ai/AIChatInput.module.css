@@ -45,7 +45,7 @@
 }
 
 .sendButton:disabled {
-  background: var(--bg-panel);
+  background: var(--bg-elev-1);
   color: var(--fg-dim);
   border: 1px solid var(--border);
   cursor: not-allowed;

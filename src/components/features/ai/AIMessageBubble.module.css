@@ -14,7 +14,7 @@
   max-width: 85%;
   padding: 8px 12px;
   border-radius: 8px;
-  background: var(--bg-elevated, var(--bg-panel));
+  background: var(--bg-elev-2);
   color: var(--fg);
   border: 1px solid transparent;
   font-size: 13px;
@@ -24,8 +24,8 @@
 }
 
 .bubbleUser {
-  background: var(--accent);
-  color: var(--bg);
+  background: var(--accent-soft);
+  color: var(--fg);
 }
 
 .bubbleError {
