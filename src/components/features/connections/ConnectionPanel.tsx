@@ -4,7 +4,10 @@ import { useConnectionsStore } from '../../../store/connections';
 import { useConnectionsV2 } from './useConnectionsV2';
 import { useEditorStore } from '../../../store/editor';
 import { ConnectionDialog } from './ConnectionDialog';
+import { ConnectionDialogV2 } from './dialog-v2/ConnectionDialogV2';
 import { ConnectionTree } from './ConnectionTree';
+import { prefsGet } from '../../../connection/ipc';
+import { DEFAULT_GLOBAL_PREFS, type GlobalPrefs } from '../../../connection/overrides';
 import { ContextMenu } from '../../ui/ContextMenu';
 import { PassphraseDialog } from './PassphraseDialog';
 import { HostKeyDialog } from './HostKeyDialog';
@@ -20,11 +23,20 @@ export function ConnectionPanel() {
   const { connections, connectedIds, setConnections, markDisconnected } = useConnectionsStore();
   const v2Connections = useConnectionsV2((s) => s.connections);
   const refreshV2 = useConnectionsV2((s) => s.refresh);
+  const saveV2Store = useConnectionsV2((s) => s.save);
   const actions = useConnectionActions();
   const [editing, setEditing] = useState<Connection | null>(null);
   const [creating, setCreating] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; connection: Connection } | null>(null);
+  const [globals, setGlobals] = useState<GlobalPrefs>(DEFAULT_GLOBAL_PREFS);
   const openTab = useEditorStore((s) => s.openTab);
+
+  // Dev escape hatch: enable the new tabbed dialog via either
+  // VITE_DIALOG_V2=1 at build time, or `?dialog=v2` in the URL at runtime.
+  const dialogV2Enabled =
+    import.meta.env.VITE_DIALOG_V2 === '1' ||
+    (typeof window !== 'undefined' &&
+      new URLSearchParams(window.location.search).get('dialog') === 'v2');
 
   function openCollectionScriptTab(db: string, col: string, cId: string) {
     openTab({
@@ -45,6 +57,11 @@ export function ConnectionPanel() {
     // dialog have access to the v2 shape. Failures are non-fatal — the legacy
     // store still drives the rest of the UI.
     refreshV2().catch((e) => console.error('refreshV2 failed:', e));
+    // Wrapped in Promise.resolve so an undefined IPC response (test mocks
+    // that don't enumerate every call) doesn't throw on `.then`.
+    Promise.resolve(prefsGet())
+      .then((p) => p && setGlobals(p))
+      .catch((e) => console.error('prefsGet failed:', e));
   }, [setConnections, refreshV2]);
 
   // Listen for SSH session-loss events from the Rust backend and flip the
@@ -128,11 +145,29 @@ export function ConnectionPanel() {
         </ul>
       </Panel.Body>
       {(creating || editing) && (
-        <ConnectionDialog
-          initial={editing ?? undefined}
-          onSave={handleSave}
-          onCancel={() => { setEditing(null); setCreating(false); }}
-        />
+        dialogV2Enabled ? (
+          <ConnectionDialogV2
+            initial={
+              editing
+                ? (v2Connections.find((v) => v.id === editing.id) ?? null)
+                : null
+            }
+            globals={globals}
+            onSave={async (input) => {
+              const saved = await saveV2Store(input);
+              setEditing(null);
+              setCreating(false);
+              return saved;
+            }}
+            onCancel={() => { setEditing(null); setCreating(false); }}
+          />
+        ) : (
+          <ConnectionDialog
+            initial={editing ?? undefined}
+            onSave={handleSave}
+            onCancel={() => { setEditing(null); setCreating(false); }}
+          />
+        )
       )}
       {contextMenu && (
         <ContextMenu
