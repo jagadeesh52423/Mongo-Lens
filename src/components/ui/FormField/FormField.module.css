@@ -1,9 +1,9 @@
 .field { display: flex; flex-direction: column; gap: var(--space-1); margin-bottom: var(--space-3); }
-.label { font-size: var(--fs-xs); color: var(--fg-dim); }
+.label { font-size: var(--fs-sm); color: var(--fg-muted); }
 .input {
   font: inherit; color: var(--fg); background: var(--bg);
   border: 1px solid var(--border); border-radius: var(--radius-sm);
   padding: var(--space-1) var(--space-2);
 }
-.input:focus { outline: 1px solid var(--accent); }
+.input:focus { outline: none; box-shadow: var(--focus-ring); border-color: var(--accent); }
 .error { font-size: var(--fs-xs); color: var(--accent-red); }

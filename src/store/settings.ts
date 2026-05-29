@@ -9,8 +9,29 @@ import {
 
 const STORE_FILE = 'settings.json';
 const SETTINGS_KEY = 'settings';
-const DEFAULT_THEME_ID = 'mongodb-dark';
+const DEFAULT_THEME_ID = 'precision-dark';
 const DEFAULT_ACTIVE_SECTION = 'shortcuts';
+
+/**
+ * Remaps a persisted theme id when a built-in theme has been renamed/retired
+ * (v1 mongodb-dark/light, retired orangy/midnight). Unknown ids — e.g. user-
+ * installed external themes — pass through unchanged so a valid selection is
+ * never destroyed. A missing/non-string persisted id is defaulted to the
+ * flagship at the call site in loadSettings().
+ * To retire/rename a theme later: add an entry here. No caller changes needed.
+ */
+const THEME_ID_MIGRATION: Record<string, string> = {
+  'mongodb-dark': 'precision-dark',
+  light: 'precision-light',
+  orangy: 'precision-dark',
+  midnight: 'precision-dark',
+  'precision-dark': 'precision-dark',
+  'precision-light': 'precision-light',
+};
+
+export function migrateThemeId(id: string): string {
+  return THEME_ID_MIGRATION[id] ?? id;
+}
 
 export interface AIConfig {
   baseUrl: string;
@@ -160,7 +181,7 @@ export async function loadSettings(): Promise<void> {
           : {},
       );
       useSettingsStore.setState({
-        themeId: typeof loaded.themeId === 'string' ? loaded.themeId : DEFAULT_THEME_ID,
+        themeId: migrateThemeId(typeof loaded.themeId === 'string' ? loaded.themeId : DEFAULT_THEME_ID),
         shortcutOverrides:
           loaded.shortcutOverrides && typeof loaded.shortcutOverrides === 'object'
             ? loaded.shortcutOverrides

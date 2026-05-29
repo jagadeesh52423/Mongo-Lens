@@ -44,10 +44,8 @@ export function EditorTabBar({
           onClick={() => onSelect(tab.id)}
           className={`${styles.tab} ${tab.id === activeTabId ? styles.tabActive : ''}`}
         >
-          <span>
-            {tab.title}
-            {tab.isDirty && ' •'}
-          </span>
+          <span>{tab.title}</span>
+          {tab.isDirty && <span className={styles.dirty} aria-label="unsaved changes" />}
           <span onClick={(e) => handleClose(e, tab.id)} className={styles.close}>
             ✕
           </span>

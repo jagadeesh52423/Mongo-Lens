@@ -1,4 +1,4 @@
-import { Button, Text } from '../../ui';
+import { Button } from '../../ui';
 import { viewModeRegistry } from './viewModes';
 import styles from './ResultsToolbar.module.css';
 
@@ -13,7 +13,7 @@ interface Props {
 
 /**
  * Top toolbar: view-mode selector (driven entirely by viewModeRegistry.list())
- * + export buttons + right-aligned status text.
+ * as a segmented control + export buttons + right-aligned status text.
  */
 export function ResultsToolbar({
   view,
@@ -26,21 +26,21 @@ export function ResultsToolbar({
   const modes = viewModeRegistry.list();
   return (
     <div className={styles.toolbar}>
-      {modes.map((mode) => (
-        <Button
-          key={mode.id}
-          size="sm"
-          onClick={() => onChangeView(mode.id)}
-          disabled={view === mode.id}
-        >
-          {mode.label}
-        </Button>
-      ))}
+      <div className={styles.segmented} role="group" aria-label="View mode">
+        {modes.map((mode) => (
+          <button
+            key={mode.id}
+            onClick={() => onChangeView(mode.id)}
+            aria-pressed={view === mode.id}
+            className={`${styles.segment} ${view === mode.id ? styles.segmentActive : ''}`}
+          >
+            {mode.label}
+          </button>
+        ))}
+      </div>
       <Button size="sm" onClick={onExportCsv} disabled={exportDisabled}>Export CSV</Button>
       <Button size="sm" onClick={onExportJson} disabled={exportDisabled}>Export JSON</Button>
-      <span className={styles.status}>
-        <Text variant="dim">{statusText}</Text>
-      </span>
+      <span className={styles.status}>{statusText}</span>
     </div>
   );
 }

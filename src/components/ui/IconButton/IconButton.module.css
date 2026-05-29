@@ -1,10 +1,12 @@
 .btn {
   display: inline-flex; align-items: center; justify-content: center;
   background: transparent; border: 1px solid transparent;
-  border-radius: var(--radius-sm); cursor: pointer; color: var(--fg);
+  border-radius: var(--radius-md); cursor: pointer; color: var(--fg-muted);
+  transition: background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard);
 }
-.btn:hover:not(:disabled) { background: var(--bg-hover); }
+.btn:hover:not(:disabled) { background: var(--bg-hover); color: var(--fg); }
+.btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .sm { width: 24px; height: 24px; }
 .md { width: 28px; height: 28px; }
-.pressed { background: var(--bg-hover); border-color: var(--border); }
+.pressed { color: var(--accent); background: var(--bg-active); border-color: var(--border); }

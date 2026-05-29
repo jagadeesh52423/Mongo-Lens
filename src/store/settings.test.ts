@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi, type MockedFunction } from 'vitest';
 import { hydrateOverrides, setVariable, getAllOverrides } from '../themes/overrides';
+import { migrateThemeId } from './settings';
 
 // Mocked store instance returned by Store.load()
 const mockStoreGet = vi.fn();
@@ -22,7 +23,7 @@ vi.mock('@tauri-apps/plugin-store', () => ({
 // the subscription is registered against the real overrides module.
 const { loadSettings, useSettingsStore } = await import('./settings');
 
-const DEFAULT_THEME_ID = 'mongodb-dark';
+const DEFAULT_THEME_ID = 'precision-dark';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -89,6 +90,20 @@ describe('loadSettings', () => {
     // hydrateOverrides must NOT notify subscribers, so no persist write should occur
     expect(mockStoreSet).not.toHaveBeenCalled();
   });
+
+  it('applies migrateThemeId to the persisted themeId (legacy id -> precision)', async () => {
+    const persisted = {
+      themeId: 'mongodb-dark',
+      shortcutOverrides: {},
+      themeOverrides: {},
+      aiConfig: { baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o', streaming: true },
+    };
+    mockStoreGet.mockResolvedValue(persisted);
+
+    await loadSettings();
+
+    expect(useSettingsStore.getState().themeId).toBe('precision-dark');
+  });
 });
 
 describe('toPersisted includes themeOverrides', () => {
@@ -118,5 +133,21 @@ describe('overrides subscription → persist', () => {
     expect(mockStoreSet).toHaveBeenCalled();
     const [[_key, payload]] = (mockStoreSet as MockedFunction<typeof mockStoreSet>).mock.calls;
     expect(payload.themeOverrides).toEqual({ 'mongodb-dark': { '--bg-primary': '#111' } });
+  });
+});
+
+describe('migrateThemeId', () => {
+  it('maps legacy + retired ids to precision themes', () => {
+    expect(migrateThemeId('mongodb-dark')).toBe('precision-dark');
+    expect(migrateThemeId('light')).toBe('precision-light');
+    expect(migrateThemeId('orangy')).toBe('precision-dark');
+    expect(migrateThemeId('midnight')).toBe('precision-dark');
+  });
+  it('passes through current ids unchanged', () => {
+    expect(migrateThemeId('precision-dark')).toBe('precision-dark');
+    expect(migrateThemeId('precision-light')).toBe('precision-light');
+  });
+  it('passes unknown / installed-theme ids through unchanged', () => {
+    expect(migrateThemeId('some-installed-theme')).toBe('some-installed-theme');
   });
 });

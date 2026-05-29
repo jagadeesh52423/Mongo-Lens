@@ -1,9 +1,9 @@
 .wrapper {
   margin: 6px 0;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   overflow: hidden;
-  background: var(--bg);
+  background: var(--bg-elev-2);
 }
 
 .header {

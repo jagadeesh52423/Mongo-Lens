@@ -9,11 +9,15 @@ interface Props {
 export function StatusBar({ connectionName, database, nodeStatus }: Props) {
   return (
     <div className={styles.bar}>
-      <span>
-        <span className={connectionName ? styles.dotConnected : styles.dot}>●</span>{' '}
+      <span className={styles.connSegment}>
+        <span
+          className={connectionName ? styles.dotConnected : styles.dot}
+          role="img"
+          aria-label={connectionName ? 'Connected' : 'Disconnected'}
+        />
         {connectionName ?? 'No connection'}
       </span>
-      {database && <span>{database}</span>}
+      {database && <span className={styles.dbSegment}>{database}</span>}
       <span className={styles.spacer}>{nodeStatus ?? ''}</span>
     </div>
   );

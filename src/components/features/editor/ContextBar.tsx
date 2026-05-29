@@ -97,37 +97,42 @@ export function ContextBar({
     <span className={styles.empty}>No connections — connect in sidebar</span>
   ) : (
     <>
-      <label className={styles.label}>Connection</label>
-      <select
-        value={connectionId ?? ''}
-        onChange={(e) => onConnectionChange(e.target.value)}
-        className={styles.picker}
-      >
-        <option value="" disabled>Select connection…</option>
-        {connectedList.map((c) => (
-          <option key={c.id} value={c.id}>{c.name}</option>
-        ))}
-      </select>
-      <label className={`${styles.label} ${styles.labelOffset}`}>Database</label>
-      <select
-        value={database ?? ''}
-        onChange={(e) => onDatabaseChange(e.target.value)}
-        disabled={!connectionId || dbsLoading || !!dbsError}
-        className={styles.picker}
-      >
-        <option value="" disabled>
-          {!connectionId
-            ? 'Pick a connection first'
-            : dbsLoading
-            ? 'Loading…'
-            : dbsError
-            ? 'Failed to load'
-            : 'Pick a database…'}
-        </option>
-        {dbs.map((d) => (
-          <option key={d} value={d}>{d}</option>
-        ))}
-      </select>
+      <div className={styles.pill}>
+        <span className={styles.connDot} aria-hidden="true" />
+        <label className={styles.label}>Connection</label>
+        <select
+          value={connectionId ?? ''}
+          onChange={(e) => onConnectionChange(e.target.value)}
+          className={styles.picker}
+        >
+          <option value="" disabled>Select connection…</option>
+          {connectedList.map((c) => (
+            <option key={c.id} value={c.id}>{c.name}</option>
+          ))}
+        </select>
+      </div>
+      <div className={styles.pill}>
+        <label className={styles.label}>Database</label>
+        <select
+          value={database ?? ''}
+          onChange={(e) => onDatabaseChange(e.target.value)}
+          disabled={!connectionId || dbsLoading || !!dbsError}
+          className={styles.picker}
+        >
+          <option value="" disabled>
+            {!connectionId
+              ? 'Pick a connection first'
+              : dbsLoading
+              ? 'Loading…'
+              : dbsError
+              ? 'Failed to load'
+              : 'Pick a database…'}
+          </option>
+          {dbs.map((d) => (
+            <option key={d} value={d}>{d}</option>
+          ))}
+        </select>
+      </div>
       {dbsError && (
         <span className={styles.errIcon} title={dbsError}>⚠</span>
       )}

@@ -8,21 +8,49 @@
 }
 
 .label {
-  color: var(--fg-dim);
-  font-size: 12px;
+  color: var(--fg-muted);
+  font-size: var(--fs-sm);
 }
 
 .labelOffset {
-  margin-left: 4px;
+  margin-left: var(--space-1);
+}
+
+/* pill wraps a label + the adjacent select so the pair reads as a unit */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  padding: 2px var(--space-2);
+  font-size: var(--fs-xs);
+}
+
+/* status dot inside the connection pill */
+.connDot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
 }
 
 .picker {
-  min-width: 160px;
+  min-width: 120px;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--fg);
+  font-size: var(--fs-xs);
+  cursor: pointer;
 }
 
 .errIcon {
   color: var(--accent-red);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .modeBtn {

@@ -7,17 +7,21 @@
 .table {
   border-collapse: collapse;
   width: 100%;
-  font-size: 12px;
 }
 
 .th {
+  position: sticky;
+  top: 0;
+  background: var(--bg-elev-1);
   border-bottom: 1px solid var(--border);
   padding: 4px 8px;
   text-align: left;
   cursor: pointer;
-  background: var(--bg-panel);
-  position: sticky;
-  top: 0;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  font-size: var(--fs-xs);
+  color: var(--fg-dim);
+  font-weight: 600;
 }
 
 .td {
@@ -26,9 +30,24 @@
   cursor: pointer;
   user-select: none;
   outline-offset: -2px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  color: var(--fg);
+  transition: background var(--dur-fast) var(--ease-standard);
+}
+
+.table tbody tr:hover .td {
+  background: var(--bg-hover);
 }
 
 .tdSelected {
-  outline: 2px solid var(--accent-blue, #3b82f6);
-  background: var(--bg-selected, rgba(59, 130, 246, 0.08));
+  background: var(--bg-active);
+  outline: none;
+}
+
+/* Selected cell must keep its highlight while the row is hovered — this rule
+ * matches the hover rule's specificity and comes after it, so the selected
+ * state wins over the generic hover background. */
+.table tbody tr:hover .tdSelected {
+  background: var(--bg-active);
 }

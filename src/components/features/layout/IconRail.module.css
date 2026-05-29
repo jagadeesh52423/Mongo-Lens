@@ -22,20 +22,45 @@
 
 /*
  * Override IconButton's default 28px square so the rail buttons fill the
- * 44px cell and pick up the left-edge accent stripe via the .active rule.
+ * 44px cell and pick up the left-edge accent stripe via the ::before indicator.
+ * position: relative is required for the ::before pseudo-element.
  */
 .railBtn {
+  position: relative;
   width: 44px;
   height: 44px;
-  border-radius: 0;
-  border-left: 2px solid transparent;
+  border-radius: var(--radius-md);
   color: var(--fg-dim);
   font-size: 18px;
+  transition:
+    background var(--dur-fast) var(--ease-standard),
+    color var(--dur-fast) var(--ease-standard);
+}
+
+.railBtn:hover:not(.active) {
+  background: var(--bg-hover);
+  color: var(--fg-muted);
 }
 
 .railBtn.active {
-  border-left-color: var(--accent);
-  color: var(--fg);
+  color: var(--accent);
+  background: var(--bg-active);
+}
+
+/*
+ * Left-edge indicator bar: vertically inset 8px top/bottom within the 44px
+ * cell so it reads as a proportional accent stripe, not a full-height line.
+ * implement this interface to add a new active-indicator variant
+ */
+.railBtn.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--accent);
 }
 
 .iconImg {
