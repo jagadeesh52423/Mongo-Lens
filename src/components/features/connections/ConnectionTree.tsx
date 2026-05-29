@@ -1,10 +1,37 @@
 import { useEffect, useRef, useState } from 'react';
 import { listDatabases, listCollections } from '../../../ipc';
-import { ListRow } from '../../ui';
 import type { CollectionNode } from '../../../types';
+import { treeGuides, type GuideSegment } from './treeGuides';
 import styles from './ConnectionTree.module.css';
 
 const TYPE_TO_SEARCH_RESET_MS = 600;
+
+// Maps a guide segment to its module class. 'empty' renders a blank full-height
+// gutter cell (no line), so it has no extra class. To add a new segment type,
+// add it here and define its pseudo-element rule in ConnectionTree.module.css.
+const SEGMENT_CLASS: Record<GuideSegment, string | undefined> = {
+  line: styles.line,
+  tee: styles.tee,
+  elbow: styles.elbow,
+  empty: undefined,
+};
+
+function GuideStrip({ segments }: { segments: GuideSegment[] }) {
+  return (
+    <span className={styles.guides} aria-hidden="true">
+      {segments.map((segment, i) => {
+        const segmentClass = SEGMENT_CLASS[segment];
+        return (
+          <span
+            // Index key is stable: a row's segment list is positional and fixed-length.
+            key={i}
+            className={segmentClass ? `${styles.guide} ${segmentClass}` : styles.guide}
+          />
+        );
+      })}
+    </span>
+  );
+}
 
 function DbIcon() {
   return (
@@ -134,49 +161,53 @@ export function ConnectionTree({ connectionId, onOpenCollection }: Props) {
       onKeyDown={handleKeyDown}
     >
       {err && <div className={styles.error}>{err}</div>}
-      {dbs.map((db) => {
+      {dbs.map((db, dbIdx) => {
         const cols = collections[db];
+        const isLastDb = dbIdx === dbs.length - 1;
+        const dbIsNotLast = !isLastDb;
         return (
           <div key={db}>
-            <ListRow
-              icon={<span className={styles.caret}>{expanded[db] ? '▼' : '▶'}</span>}
-              indent={0}
-              className={styles.dbRow}
+            <div
+              className={`${styles.treeRow} ${styles.dbRow}`}
               onClick={() => toggle(db)}
             >
-              {db}
-            </ListRow>
-            {expanded[db] && cols && (
-              <div className={styles.children}>
-                {cols.map((c) => {
-                  const isSelected = selected?.db === db && selected?.col === c.name;
-                  return (
-                    <div
-                      key={c.name}
-                      ref={(el) => {
-                        rowRefs.current.set(`${db}::${c.name}`, el);
-                      }}
-                    >
-                      <ListRow
-                        icon={<span className={styles.colIcon}><DbIcon /></span>}
-                        indent={2}
-                        selected={isSelected}
-                        className={isSelected ? 'list-row-focused' : undefined}
-                        onClick={() => {
-                          setActiveDb(db);
-                          setSelected({ db, col: c.name });
-                          bufferRef.current = '';
-                          wrapperRef.current?.focus();
-                        }}
-                        onDoubleClick={() => onOpenCollection(db, c.name)}
-                      >
-                        {c.name}
-                      </ListRow>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+              <GuideStrip segments={treeGuides([], isLastDb)} />
+              <span className={styles.content}>
+                <span className={styles.caret}>{expanded[db] ? '▾' : '▸'}</span>
+                <span className={styles.label}>{db}</span>
+              </span>
+            </div>
+            {expanded[db] && cols && cols.map((c, colIdx) => {
+              const isSelected = selected?.db === db && selected?.col === c.name;
+              const isLastCol = colIdx === cols.length - 1;
+              const rowClass = [
+                styles.treeRow,
+                isSelected && styles.selected,
+                isSelected && 'list-row-focused',
+              ].filter(Boolean).join(' ');
+              return (
+                <div
+                  key={c.name}
+                  ref={(el) => {
+                    rowRefs.current.set(`${db}::${c.name}`, el);
+                  }}
+                  className={rowClass}
+                  onClick={() => {
+                    setActiveDb(db);
+                    setSelected({ db, col: c.name });
+                    bufferRef.current = '';
+                    wrapperRef.current?.focus();
+                  }}
+                  onDoubleClick={() => onOpenCollection(db, c.name)}
+                >
+                  <GuideStrip segments={treeGuides([dbIsNotLast], isLastCol)} />
+                  <span className={styles.content}>
+                    <span className={styles.colIcon}><DbIcon /></span>
+                    <span className={styles.label}>{c.name}</span>
+                  </span>
+                </div>
+              );
+            })}
           </div>
         );
       })}
