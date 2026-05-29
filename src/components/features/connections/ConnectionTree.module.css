@@ -16,7 +16,8 @@
    --conn-row-h (declared on .row in ConnectionPanel.module.css). */
 .dbRow {
   position: sticky;
-  top: var(--conn-row-h, 30px);
+  /* Stack under the sticky Connect launcher + the connection header row. */
+  top: calc(var(--connect-btn-h, 56px) + var(--conn-row-h, 30px));
   z-index: 1;
   background: var(--bg-panel);
 }
