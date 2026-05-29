@@ -176,7 +176,8 @@ export function ConnectionPanel() {
       )}
       {actions.connectError && (
         <ConnectionErrorDialog
-          message={actions.connectError}
+          connectionName={actions.connectError.name}
+          message={actions.connectError.message}
           onClose={actions.clearConnectError}
         />
       )}

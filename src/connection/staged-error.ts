@@ -30,3 +30,27 @@ export function stageHeading(stage: BuildStage): string {
 export type StagedErrorMessage =
   | string
   | { stage: BuildStage; error: string };
+
+// Leading "<stage>: " prefix emitted by the backend connect path. The stage
+// keyword must be one of the known BuildStage values and be followed by a
+// colon + whitespace, so arbitrary messages that merely contain a colon
+// (e.g. "database error: refused") are never misparsed as staged.
+const STAGED_PREFIX = /^(ssh|tls|auth|ping):\s/i;
+
+/**
+ * Parse a raw connect-error string into a `StagedErrorMessage`.
+ *
+ * The backend emits staged failures as `"<stage>: <detail>"` (lowercase
+ * stage, e.g. `"tls: self-signed certificate"`); this strips the prefix and
+ * returns `{ stage, error }`. A legacy capitalized form (`"Ssh: ..."`) is
+ * tolerated for safety. Anything without a recognized stage prefix is
+ * returned unchanged as the legacy plain-string payload.
+ */
+export function parseStagedError(raw: string): StagedErrorMessage {
+  const match = STAGED_PREFIX.exec(raw);
+  if (!match) return raw;
+  return {
+    stage: match[1].toLowerCase() as BuildStage,
+    error: raw.slice(match[0].length),
+  };
+}

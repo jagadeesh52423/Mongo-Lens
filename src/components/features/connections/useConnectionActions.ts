@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react';
 import { connectV2, disconnectV2, type SaveInput } from '../../../connection/ipc';
 import { useConnectionsV2 } from './useConnectionsV2';
 import { nextDuplicateName } from './nameUtils';
+import { parseStagedError, type StagedErrorMessage } from '../../../connection/staged-error';
 import type { Connection } from '../../../connection/model';
 
 /** Pending host-key confirmation while waiting on the user. */
@@ -30,8 +31,9 @@ interface UseConnectionActions {
   pendingHostKey: PendingHostKey | null;
   setPendingHostKey: (p: PendingHostKey | null) => void;
   acceptHostKey: () => void;
-  // Error surface
-  connectError: string | null;
+  // Error surface — carries which connection failed alongside the (possibly
+  // staged) failure message so the dialog can name it.
+  connectError: { name: string; message: StagedErrorMessage } | null;
   clearConnectError: () => void;
   // Expansion state for connected entries (so the tree opens automatically).
   expandedConns: Set<string>;
@@ -59,7 +61,7 @@ export function useConnectionActions(): UseConnectionActions {
 
   const [passphraseFor, setPassphraseFor] = useState<Connection | null>(null);
   const [pendingHostKey, setPendingHostKey] = useState<PendingHostKey | null>(null);
-  const [connectError, setConnectError] = useState<string | null>(null);
+  const [connectError, setConnectError] = useState<{ name: string; message: StagedErrorMessage } | null>(null);
   const [expandedConns, setExpandedConns] = useState<Set<string>>(new Set());
 
   const toggleExpanded = useCallback((id: string) => {
@@ -93,7 +95,7 @@ export function useConnectionActions(): UseConnectionActions {
         });
       }
     } catch (e) {
-      setConnectError((e as Error).message ?? String(e));
+      setConnectError({ name: c.name, message: parseStagedError((e as Error).message ?? String(e)) });
     }
   }, [markConnected, setActive]);
 

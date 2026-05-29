@@ -78,6 +78,13 @@
   box-shadow: 0 0 7px var(--accent);
 }
 
+.errorSubtitle {
+  margin: 0 0 var(--space-3);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+
 .errorBody {
   margin: 0;
   padding: 10px;

@@ -3,6 +3,8 @@ import { stageHeading, type StagedErrorMessage } from '../../../connection/stage
 import styles from './ConnectionPanel.module.css';
 
 interface Props {
+  /** Name of the connection that failed, shown as a subtitle. */
+  connectionName: string;
   /**
    * Either a legacy plain error string (old IPC path) or a staged
    * `{ stage, error }` payload from `connections_v2_*`. Keeping the legacy
@@ -21,12 +23,13 @@ interface Props {
  *   - string → plain text body (legacy)
  *   - { stage, error } → bold stage heading + error detail body
  */
-export function ConnectionErrorDialog({ message, onClose }: Props) {
+export function ConnectionErrorDialog({ connectionName, message, onClose }: Props) {
   const isStaged = typeof message !== 'string';
   return (
     <Dialog open onClose={onClose} ariaLabel="Connection error">
       <Dialog.Header title="Connection error" onClose={onClose} />
       <Dialog.Body>
+        <p className={styles.errorSubtitle}>Failed to connect to “{connectionName}”</p>
         {isStaged ? (
           <>
             <strong>{stageHeading(message.stage)}</strong>

@@ -715,8 +715,11 @@ pub async fn connections_v2_connect(
                 );
                 // Wire contract: connect returns String error on the IPC
                 // boundary (matches legacy). The typed staged-error
-                // envelope is the test command's job.
-                return Err(format!("{stage:?}: {error}"));
+                // envelope is the test command's job. Emit the lowercase
+                // wire stage (not `{stage:?}` Debug, which is capitalized) so
+                // the frontend's `ssh|tls|auth|ping` parser sees a uniform
+                // `"<stage>: <detail>"` shape across every connect failure.
+                return Err(format!("{}: {error}", stage.as_wire()));
             }
         };
 
@@ -733,9 +736,40 @@ pub async fn connections_v2_connect(
             if let Some(t) = tunnel {
                 t.close().await;
             }
-            return Err(format!("client init failed: {e}"));
+            // Closest stage is Tls (transport setup) — same classification
+            // `connections_v2_test` uses for a client-init failure — so the
+            // error keeps the uniform lowercase `"<stage>: <detail>"` shape.
+            return Err(format!("{}: client init failed: {e}", BuildStage::Tls.as_wire()));
         }
     };
+
+    // 5b. Verify liveness with a `hello` round-trip BEFORE persisting any
+    //     secret or inserting into state. The MongoDB Rust driver connects
+    //     LAZILY — `Client::with_options` never contacts the server — so an
+    //     unreachable host, dead server, or bad credentials would otherwise
+    //     report "Connected" until the first real query. Mirrors the
+    //     liveness check in `connections_v2_test`. This await runs before any
+    //     `state.*.lock()` is taken, so no mutex guard is held across it.
+    if let Err(e) = client
+        .database("admin")
+        .run_command(doc! { "hello": 1 })
+        .await
+    {
+        let err_str = e.to_string();
+        log.warn(
+            "connections_v2_connect: hello failed",
+            logctx! { "err" => err_str.clone() },
+        );
+        // Real connection failure. Tear down WITHOUT mutating state — this
+        // client was never inserted. Pool first, then tunnel (matches the
+        // disconnect / on-window-close ordering so no in-flight query hits a
+        // dead tunnel).
+        client.shutdown().await;
+        if let Some(t) = tunnel {
+            t.close().await;
+        }
+        return Err(format!("{}: {err_str}", BuildStage::Ping.as_wire()));
+    }
 
     // 6. Persist the passphrase the user just typed (if any) so the next
     //    connect doesn't re-prompt. Best-effort: a write failure here is

@@ -90,6 +90,28 @@ pub enum BuildStage {
     Ping,
 }
 
+impl BuildStage {
+    /// Lowercase wire spelling, identical to the serde `rename_all =
+    /// "lowercase"` representation. Use this when emitting the stage into a
+    /// plain `String` error (e.g. the `connections_v2_connect` IPC boundary,
+    /// which returns `Result<_, String>` rather than the typed
+    /// `TestResultV2` envelope) so every staged error shares the exact
+    /// spelling the frontend's `ssh|tls|auth|ping` union parses. Prefer this
+    /// over `format!("{stage:?}")`, whose `Debug` output is capitalized.
+    //
+    // To add a new stage: add the variant above and one arm here. The
+    // `build_stage_as_wire_matches_serde` test guarantees the two never
+    // drift.
+    pub fn as_wire(self) -> &'static str {
+        match self {
+            BuildStage::Ssh => "ssh",
+            BuildStage::Tls => "tls",
+            BuildStage::Auth => "auth",
+            BuildStage::Ping => "ping",
+        }
+    }
+}
+
 /// Tagged error emitted by [`build_client_options`].
 ///
 /// `error` is a plain `String` (not a typed enum) because the underlying
@@ -1605,5 +1627,25 @@ mod tests {
         // round-trip it.
         let stage = BuildStage::Ping;
         assert_eq!(serde_json::to_value(stage).unwrap(), serde_json::Value::String("ping".into()));
+    }
+
+    #[test]
+    fn build_stage_as_wire_matches_serde() {
+        // `as_wire()` is the string-error accessor; it MUST stay identical to
+        // the serde wire form so a typed `TestResultV2` failure and a plain
+        // connect `String` error spell the same stage the same way.
+        for stage in [
+            BuildStage::Ssh,
+            BuildStage::Tls,
+            BuildStage::Auth,
+            BuildStage::Ping,
+        ] {
+            let serde_wire = serde_json::to_value(stage).unwrap();
+            assert_eq!(
+                serde_json::Value::String(stage.as_wire().into()),
+                serde_wire,
+                "as_wire() drifted from serde for {stage:?}"
+            );
+        }
     }
 }
