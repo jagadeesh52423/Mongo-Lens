@@ -4,9 +4,10 @@ import { useConnectionsV2 } from './useConnectionsV2';
 import { useEditorStore } from '../../../store/editor';
 import { ConnectionDialogV2 } from './dialog-v2/ConnectionDialogV2';
 import { ConnectionTree } from './ConnectionTree';
+import { ConnectLauncher } from './ConnectLauncher';
 import { prefsGet } from '../../../connection/ipc';
 import { DEFAULT_GLOBAL_PREFS, type GlobalPrefs } from '../../../connection/overrides';
-import { ContextMenu } from '../../ui/ContextMenu';
+import { ContextMenu, type ContextMenuItem } from '../../ui/ContextMenu';
 import { PassphraseDialog } from './PassphraseDialog';
 import { HostKeyDialog } from './HostKeyDialog';
 import { ConnectionErrorDialog } from './ConnectionErrorDialog';
@@ -30,6 +31,10 @@ export function ConnectionPanel() {
   const [globals, setGlobals] = useState<GlobalPrefs>(DEFAULT_GLOBAL_PREFS);
   const openTab = useEditorStore((s) => s.openTab);
 
+  // The launcher offers connections that aren't live; the body shows the live ones.
+  const connected = connections.filter((c) => connectedIds.has(c.id));
+  const available = connections.filter((c) => !connectedIds.has(c.id));
+
   function openCollectionScriptTab(db: string, col: string, cId: string) {
     openTab({
       id: `script:${cId}:${db}:${col}:${Date.now()}`,
@@ -46,15 +51,12 @@ export function ConnectionPanel() {
   useEffect(() => {
     // The v2 store is the sole source of truth for the connection list.
     refreshV2().catch((e) => console.error('refreshV2 failed:', e));
-    // Wrapped in Promise.resolve so an undefined IPC response (test mocks
-    // that don't enumerate every call) doesn't throw on `.then`.
     Promise.resolve(prefsGet())
       .then((p) => p && setGlobals(p))
       .catch((e) => console.error('prefsGet failed:', e));
   }, [refreshV2]);
 
-  // Listen for SSH session-loss events from the Rust backend and flip the
-  // connection state to disconnected so the UI reflects the drop immediately.
+  // Reflect backend SSH session-loss by flipping the connection to disconnected.
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     onSshSessionLost(({ connectionId }) => {
@@ -64,11 +66,19 @@ export function ConnectionPanel() {
       .then((fn) => { unlisten = fn; })
       .catch((e) => console.error('ssh_session_lost listener error:', e));
     return () => { unlisten?.(); };
-    // actions.expandedConns intentionally omitted — the listener body reads
-    // the latest value via closure capture, but recreating the listener on
-    // every expansion change would thrash the IPC subscription.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [markDisconnected]);
+
+  // Context-menu items depend on whether the target is currently live.
+  function menuItems(c: Connection): ContextMenuItem[] {
+    const live = connectedIds.has(c.id);
+    return [
+      ...(live ? [{ label: 'Disconnect', action: () => actions.disconnect(c) }] : []),
+      { label: 'Edit', action: () => setEditing(c) },
+      { label: 'Duplicate', action: () => actions.duplicate(c) },
+      { label: 'Delete', action: () => actions.remove(c) },
+    ];
+  }
 
   return (
     <Panel>
@@ -85,47 +95,56 @@ export function ConnectionPanel() {
         }
       />
       <Panel.Body className={styles.body}>
-        <ul className={styles.list}>
-          {connections.map((c) => {
-            const connected = connectedIds.has(c.id);
-            const envColor = c.color;
-            return (
-              <li
-                key={c.id}
-                className={styles.item}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  setContextMenu({ x: e.clientX, y: e.clientY, connection: c });
-                }}
-              >
-                <div
-                  className={styles.row}
-                  data-testid={`conn-row-${c.id}`}
-                  style={envColor ? { borderLeftColor: envColor } : undefined}
-                >
-                  <span className={connected ? styles.statusDotConnected : styles.statusDot}>●</span>
-                  <span
-                    onClick={() => connected && actions.toggleExpanded(c.id)}
-                    className={`${styles.name} ${connected ? styles.nameClickable : ''}`}
+        <ConnectLauncher
+          available={available}
+          hasAnySaved={connections.length > 0}
+          onConnect={actions.connect}
+          onNewConnection={() => setCreating(true)}
+          onItemContextMenu={(c, x, y) => setContextMenu({ x, y, connection: c })}
+        />
+        {connected.length > 0 && (
+          <>
+            <div className={styles.groupLabel}>Active</div>
+            <ul className={styles.list}>
+              {connected.map((c) => {
+                const envColor = c.color;
+                const isExpanded = actions.expandedConns.has(c.id);
+                return (
+                  <li
+                    key={c.id}
+                    className={styles.item}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      setContextMenu({ x: e.clientX, y: e.clientY, connection: c });
+                    }}
                   >
-                    {c.name}
-                  </span>
-                  {connected ? (
-                    <button onClick={() => actions.disconnect(c)}>Disconnect</button>
-                  ) : (
-                    <button onClick={() => actions.connect(c)}>Connect</button>
-                  )}
-                </div>
-                {connected && actions.expandedConns.has(c.id) && (
-                  <ConnectionTree
-                    connectionId={c.id}
-                    onOpenCollection={(db, col) => openCollectionScriptTab(db, col, c.id)}
-                  />
-                )}
-              </li>
-            );
-          })}
-        </ul>
+                    <div
+                      className={styles.row}
+                      data-testid={`conn-row-${c.id}`}
+                      onClick={() => actions.toggleExpanded(c.id)}
+                    >
+                      <span className={styles.caret} aria-hidden="true">{isExpanded ? '▾' : '▸'}</span>
+                      <span
+                        className={styles.env}
+                        data-testid={`conn-env-${c.id}`}
+                        style={envColor ? { background: envColor } : undefined}
+                        aria-hidden="true"
+                      />
+                      <span className={styles.name}>{c.name}</span>
+                      <span className={styles.live} aria-label="Connected" />
+                    </div>
+                    {isExpanded && (
+                      <ConnectionTree
+                        connectionId={c.id}
+                        onOpenCollection={(db, col) => openCollectionScriptTab(db, col, c.id)}
+                      />
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </>
+        )}
       </Panel.Body>
       {(creating || editing) && (
         <ConnectionDialogV2
@@ -144,11 +163,7 @@ export function ConnectionPanel() {
         <ContextMenu
           x={contextMenu.x}
           y={contextMenu.y}
-          items={[
-            { label: 'Edit', action: () => setEditing(contextMenu.connection) },
-            { label: 'Duplicate', action: () => actions.duplicate(contextMenu.connection) },
-            { label: 'Delete', action: () => actions.remove(contextMenu.connection) },
-          ]}
+          items={menuItems(contextMenu.connection)}
           onClose={() => setContextMenu(null)}
         />
       )}

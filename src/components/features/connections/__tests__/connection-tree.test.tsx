@@ -13,10 +13,9 @@ beforeEach(() => {
   });
 });
 
-describe('ConnectionPanel color stripe (read from useConnectionsV2)', () => {
-  it('renders the env color stripe when v2 connection has a color', async () => {
-    // ConnectionPanel calls only the v2 list IPC + prefs_get now — the legacy
-    // list_connections call was removed when the legacy store was deleted.
+describe('ConnectionPanel env color dot (read from useConnectionsV2)', () => {
+  it('shows the env color dot for a connected connection that has a color', async () => {
+    useConnectionsV2.setState({ connectedIds: new Set(['1']) });
     invokeMock
       .mockResolvedValueOnce([{
         id: '1', name: 'prod-db', color: '#ef4444',
@@ -28,13 +27,12 @@ describe('ConnectionPanel color stripe (read from useConnectionsV2)', () => {
 
     render(<ConnectionPanel />);
     await waitFor(() => expect(screen.getByText('prod-db')).toBeInTheDocument());
-    await waitFor(() => {
-      const row = screen.getByTestId('conn-row-1');
-      expect(row.style.borderLeftColor).toMatch(/#ef4444|rgb\(239, ?68, ?68\)/);
-    });
+    const dot = screen.getByTestId('conn-env-1');
+    expect(dot.style.background).toMatch(/#ef4444|rgb\(239, ?68, ?68\)/);
   });
 
-  it('omits the inline color when v2 connection has no color', async () => {
+  it('omits the inline color (falls back) when a connected connection has none', async () => {
+    useConnectionsV2.setState({ connectedIds: new Set(['2']) });
     invokeMock
       .mockResolvedValueOnce([{
         id: '2', name: 'no-tag',
@@ -46,8 +44,7 @@ describe('ConnectionPanel color stripe (read from useConnectionsV2)', () => {
 
     render(<ConnectionPanel />);
     await waitFor(() => expect(screen.getByText('no-tag')).toBeInTheDocument());
-    const row = screen.getByTestId('conn-row-2');
-    // No inline borderLeftColor → falls back to CSS transparent
-    expect(row.style.borderLeftColor).toBe('');
+    const dot = screen.getByTestId('conn-env-2');
+    expect(dot.style.background).toBe('');
   });
 });
