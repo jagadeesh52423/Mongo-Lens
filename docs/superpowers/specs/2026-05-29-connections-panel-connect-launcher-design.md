@@ -88,6 +88,7 @@ the `●` dot and thin left border are the only visual signal.
 - **Empty inventory** (`connections.length === 0`): menu shows a muted "No saved connections yet" line above "New connection…".
 - **All connected** (filter yields none): menu shows a muted "All connections are active" line above "New connection…".
 - **Pick an item** → call `actions.connect(c)` and close the menu. The existing `connect` flow auto-marks connected, expands the tree, and sets active; SSH passphrase / host-key / error dialogs fire unchanged.
+- **Right-click an item** → the launcher closes and bubbles the request up via `onItemContextMenu(connection, x, y)`; the panel renders its existing `ContextMenu` with **Edit / Duplicate / Delete** (no Disconnect — the connection isn't live). This preserves CRUD for not-yet-connected connections, which previously lived on the inline row.
 - **Dismissal:** Escape, outside-click (mousedown outside), or selecting an item. Reuse the dismissal effect pattern from `ContextMenu.tsx`.
 - **Keyboard:** `↑`/`↓` move highlight, `Enter` activates, `Esc` closes, focus returns to the trigger on close.
 
@@ -119,6 +120,8 @@ interface ConnectLauncherProps {
   hasAnySaved: boolean;          // distinguishes "no saved" vs "all connected" empty copy
   onConnect: (c: Connection) => void;
   onNewConnection: () => void;
+  // right-click on an item → panel renders its ContextMenu (Edit/Duplicate/Delete)
+  onItemContextMenu: (c: Connection, x: number, y: number) => void;
 }
 ```
 
@@ -162,7 +165,8 @@ a matching formatter — enforcing the extension contract at build time.
 
 ### 4.3 Changed: `ConnectionPanel.tsx`
 
-- Render `<ConnectLauncher>` as the first element of `Panel.Body`, fed `available = connections.filter(c => !connectedIds.has(c.id))`, `hasAnySaved = connections.length > 0`, `onConnect = actions.connect`, `onNewConnection = () => setCreating(true)`.
+- Render `<ConnectLauncher>` as the first element of `Panel.Body`, fed `available = connections.filter(c => !connectedIds.has(c.id))`, `hasAnySaved = connections.length > 0`, `onConnect = actions.connect`, `onNewConnection = () => setCreating(true)`, and `onItemContextMenu = (c, x, y) => setContextMenu({ x, y, connection: c })` (reuses the existing `contextMenu` state and `ContextMenu` render).
+- The `ContextMenu` items become a function of whether the target is connected: connected → `[Disconnect, Edit, Duplicate, Delete]`; not connected → `[Edit, Duplicate, Delete]`.
 - Body list maps **only connected** connections; wrap in an "Active" group label that renders only when ≥1 is connected.
 - Delete the inline raw `<button>` Connect/Disconnect block.
 - Context menu: add a leading `Disconnect` item (→ `actions.disconnect`).
@@ -232,6 +236,7 @@ All sticky elements need an opaque `background: var(--bg-panel)` so scrolled con
 - Closed by default; click opens; `aria-expanded` toggles.
 - Lists exactly the `available` connections with name + subtitle (+ SSH badge when tunneled).
 - Picking an item calls `onConnect` with that connection and closes.
+- Right-clicking an item calls `onItemContextMenu` with the connection + coords and closes.
 - "New connection…" calls `onNewConnection`.
 - Escape and outside-click close; focus returns to trigger.
 - Empty-inventory and all-connected copy variants render.
