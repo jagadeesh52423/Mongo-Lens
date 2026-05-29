@@ -34,6 +34,7 @@
   box-shadow: var(--shadow-3);
   padding: var(--space-1);
 }
+.menu:focus { outline: none; }
 
 .groupLabel {
   font-size: var(--fs-xs); color: var(--fg-dim);

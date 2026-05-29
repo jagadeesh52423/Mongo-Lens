@@ -29,6 +29,7 @@ export function ConnectLauncher({
   const [active, setActive] = useState(0); // keyboard-highlighted item index
   const wrapRef = useRef<HTMLDivElement>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   // Close on Escape / outside mousedown; return focus to the trigger on Escape.
   useEffect(() => {
@@ -48,7 +49,12 @@ export function ConnectLauncher({
   }, [open]);
 
   // Reset the highlight each time the menu opens.
-  useEffect(() => { if (open) setActive(0); }, [open]);
+  useEffect(() => {
+    if (open) {
+      setActive(0);
+      menuRef.current?.focus(); // route Arrow/Enter keydown into the menu
+    }
+  }, [open]);
 
   function choose(c: Connection) { setOpen(false); onConnect(c); }
 
@@ -76,11 +82,19 @@ export function ConnectLauncher({
       </button>
 
       {open && (
-        <div className={styles.menu} role="menu" onKeyDown={onMenuKeyDown}>
+        <div
+          className={styles.menu}
+          role="menu"
+          ref={menuRef}
+          tabIndex={-1}
+          aria-activedescendant={available[active] ? `cl-item-${available[active].id}` : undefined}
+          onKeyDown={onMenuKeyDown}
+        >
           {available.length > 0 && <div className={styles.groupLabel}>Connect to</div>}
           {available.map((c, i) => (
             <div
               key={c.id}
+              id={`cl-item-${c.id}`}
               role="menuitem"
               tabIndex={-1}
               className={`${styles.item} ${i === active ? styles.itemActive : ''}`}

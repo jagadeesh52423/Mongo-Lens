@@ -81,6 +81,14 @@ describe('ConnectLauncher', () => {
     expect(onNewConnection).toHaveBeenCalledTimes(1);
   });
 
+  it('navigates items with arrow keys and activates with Enter', async () => {
+    const user = userEvent.setup();
+    const { onConnect } = setup({ available: [conn('1', 'alpha'), conn('2', 'beta')] });
+    await user.click(screen.getByRole('button', { name: 'Connect' }));
+    await user.keyboard('{ArrowDown}{Enter}'); // active 0→1, Enter selects 'beta'
+    expect(onConnect).toHaveBeenCalledWith(expect.objectContaining({ id: '2' }));
+  });
+
   it('closes on Escape', async () => {
     const user = userEvent.setup();
     setup();
