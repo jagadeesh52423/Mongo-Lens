@@ -50,7 +50,7 @@ describe('ConnectLauncher', () => {
 
   it('shows an SSH badge when the connection is tunneled', async () => {
     const user = userEvent.setup();
-    setup({ available: [conn('1', 'tunneled', { ssh: { host: 'bastion', port: 22, user: 'me', auth: { kind: 'agent' }, knownHostsPolicy: 'strict' } })] });
+    setup({ available: [conn('1', 'tunneled', { ssh: { enabled: true, host: 'bastion', port: 22, user: 'me', auth: { kind: 'agent' }, knownHostsPolicy: 'strict' } })] });
     await user.click(screen.getByRole('button', { name: 'Connect' }));
     expect(screen.getByText('SSH')).toBeInTheDocument();
   });
