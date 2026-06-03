@@ -1,11 +1,24 @@
+import { useRef } from 'react';
 import type { TabFormProps } from './types';
 import type { ConnectionTarget } from '../../../../../connection/model';
 import { FormField } from '../../../../ui/FormField';
 import { SegmentedControl } from '../../../../ui';
 import styles from './ServerTab.module.css';
 
+type DirectTarget = Extract<ConnectionTarget, { kind: 'direct' }>;
+type UriTarget = Extract<ConnectionTarget, { kind: 'uri' }>;
+
+const DEFAULT_DIRECT: DirectTarget = { kind: 'direct', host: '', port: 27017 };
+const DEFAULT_URI: UriTarget = { kind: 'uri', uri: '' };
+
 export function ServerTab({ value, onChange }: TabFormProps) {
   const target = value.target;
+  // Remember the inactive mode's values so switching Direct↔URI doesn't lose
+  // what the user typed; switching back restores it (within this dialog session).
+  const stash = useRef<{ direct: DirectTarget; uri: UriTarget }>({
+    direct: DEFAULT_DIRECT,
+    uri: DEFAULT_URI,
+  });
 
   function setTarget(t: ConnectionTarget) {
     onChange({ ...value, target: t });
@@ -13,18 +26,11 @@ export function ServerTab({ value, onChange }: TabFormProps) {
 
   function switchKind(nextKind: 'direct' | 'uri') {
     if (nextKind === target.kind) return;
-    // Warn if there's existing data we'd discard
-    const hasData =
-      (target.kind === 'direct' && (target.host || target.port !== 27017)) ||
-      (target.kind === 'uri' && target.uri);
-    if (hasData && !window.confirm('Switching will discard the current Server tab values. Continue?')) {
-      return;
-    }
-    setTarget(
-      nextKind === 'direct'
-        ? { kind: 'direct', host: '', port: 27017 }
-        : { kind: 'uri', uri: '' },
-    );
+    // Stash the current mode before leaving it, then restore the other mode's
+    // last values (no data loss → no discard prompt needed).
+    if (target.kind === 'direct') stash.current.direct = target;
+    else stash.current.uri = target;
+    setTarget(nextKind === 'direct' ? stash.current.direct : stash.current.uri);
   }
 
   return (
