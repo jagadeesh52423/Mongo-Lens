@@ -28,21 +28,31 @@ function renderSsh(value: Connection, onChange = vi.fn(), secrets: Record<string
 }
 
 describe('SshTab', () => {
-  it('hides tunnel fields when SSH is disabled', () => {
+  it('shows SSH host field even when disabled', () => {
     renderSsh(base);
-    expect(screen.queryByLabelText(/ssh host/i)).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/ssh host/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/enable ssh tunnel/i)).not.toBeChecked();
   });
 
-  it('toggling on writes a default tunnel', () => {
+  it('typing a host materializes a disabled tunnel (enabled stays false)', () => {
     const { onChange } = renderSsh(base);
+    fireEvent.change(screen.getByLabelText(/ssh host/i), { target: { value: 'jump' } });
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ssh: expect.objectContaining({ enabled: false, host: 'jump' }),
+      }),
+    );
+  });
+
+  it('toggling enable preserves typed host', () => {
+    const { onChange } = renderSsh({
+      ...base,
+      ssh: { enabled: false, host: 'jump', port: 22, user: 'me', auth: { kind: 'password' }, knownHostsPolicy: 'strict' },
+    });
     fireEvent.click(screen.getByLabelText(/enable ssh tunnel/i));
     expect(onChange).toHaveBeenCalledWith(
       expect.objectContaining({
-        ssh: {
-          host: '', port: 22, user: '',
-          auth: { kind: 'password' },
-          knownHostsPolicy: 'strict',
-        },
+        ssh: expect.objectContaining({ enabled: true, host: 'jump' }),
       }),
     );
   });
@@ -50,7 +60,7 @@ describe('SshTab', () => {
   it('reveals the passphrase field only when key + hasPassphrase are set', () => {
     renderSsh({
       ...base,
-      ssh: { host: 'h', port: 22, user: 'u', auth: { kind: 'key', keyPath: '/k', hasPassphrase: true }, knownHostsPolicy: 'strict' },
+      ssh: { enabled: true, host: 'h', port: 22, user: 'u', auth: { kind: 'key', keyPath: '/k', hasPassphrase: true }, knownHostsPolicy: 'strict' },
     });
     expect(screen.getByLabelText(/^passphrase$/i)).toBeInTheDocument();
   });
@@ -58,9 +68,9 @@ describe('SshTab', () => {
   it('switching auth method to "agent" zeros incompatible fields', () => {
     const { onChange } = renderSsh({
       ...base,
-      ssh: { host: 'h', port: 22, user: 'u', auth: { kind: 'password' }, knownHostsPolicy: 'strict' },
+      ssh: { enabled: true, host: 'h', port: 22, user: 'u', auth: { kind: 'password' }, knownHostsPolicy: 'strict' },
     });
-    fireEvent.click(screen.getByLabelText(/ssh agent/i));
+    fireEvent.click(screen.getByRole('radio', { name: /ssh agent/i }));
     expect(onChange).toHaveBeenCalledWith(
       expect.objectContaining({
         ssh: expect.objectContaining({ auth: { kind: 'agent' } }),
@@ -71,7 +81,7 @@ describe('SshTab', () => {
   it('known-hosts policy dropdown switches policy', () => {
     const { onChange } = renderSsh({
       ...base,
-      ssh: { host: 'h', port: 22, user: 'u', auth: { kind: 'password' }, knownHostsPolicy: 'strict' },
+      ssh: { enabled: true, host: 'h', port: 22, user: 'u', auth: { kind: 'password' }, knownHostsPolicy: 'strict' },
     });
     fireEvent.change(screen.getByLabelText(/host key policy/i), { target: { value: 'add-and-trust' } });
     expect(onChange).toHaveBeenCalledWith(
