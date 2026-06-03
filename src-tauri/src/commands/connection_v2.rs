@@ -130,35 +130,15 @@ fn secret_store(state: &AppState) -> Result<Arc<dyn SecretStore>, String> {
         .ok_or_else(|| "CONN_V2 not enabled: v2 secret store is not installed".to_string())
 }
 
-/// Project a flat `Vec<SecretInput>` into the typed slots
-/// [`ResolvedConnection`] needs. Unknown slot strings are silently
-/// ignored — `connections_v2_test` is a best-effort form check, not a
-/// strict validator.
-fn build_resolved<'a>(
-    conn: &'a Connection,
-    secrets: &[SecretInput],
-) -> ResolvedConnection<'a> {
-    let mut resolved = ResolvedConnection::bare(conn);
-    for entry in secrets {
-        match SecretSlot::from_wire(&entry.slot) {
-            Some(SecretSlot::AuthPassword) => resolved.auth_password = Some(entry.value.clone()),
-            Some(SecretSlot::SshPassword) => resolved.ssh_password = Some(entry.value.clone()),
-            Some(SecretSlot::SshKeyPassphrase) => {
-                resolved.ssh_key_passphrase = Some(entry.value.clone())
-            }
-            Some(SecretSlot::ProxyPassword) => resolved.proxy_password = Some(entry.value.clone()),
-            Some(SecretSlot::AwsSecretKey) => resolved.aws_secret_key = Some(entry.value.clone()),
-            // OIDC refresh tokens aren't a builder input; ignore on test.
-            Some(SecretSlot::OidcRefreshToken) => {}
-            None => {
-                // Unknown slot string — defensively ignored. `save`
-                // surfaces unknown slots as an error; here on `test`
-                // we treat them as no-op so a typo in one slot doesn't
-                // block the rest of the validation.
-            }
-        }
-    }
-    resolved
+/// Project a flat `SecretInput[]` onto a `ResolvedConnection`, starting from an
+/// empty bag. Test-only: the runtime `test`/`connect` paths resolve from the
+/// keychain first (see [`overlay_input_secrets`]). Kept to document and pin the
+/// slot→field mapping under test.
+#[cfg(test)]
+fn build_resolved<'a>(conn: &'a Connection, secrets: &[SecretInput]) -> ResolvedConnection<'a> {
+    let mut bag = SecretBag::default();
+    overlay_input_secrets(&mut bag, secrets);
+    bag.apply(conn)
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -307,8 +287,32 @@ pub async fn connections_v2_test(
     };
     let effective = prefs::resolve_effective(&global, input.connection.overrides.as_ref());
 
-    // 2. Project the flat secret list onto the typed `ResolvedConnection`.
-    let resolved = build_resolved(&input.connection, &input.secrets);
+    // 2. Resolve secrets. For an existing connection, start from the keychain
+    //    (so "Edit → Test" works without re-typing the stored password), then
+    //    overlay any dialog-supplied secret so a *changed* password is tested.
+    //    A new connection (empty id) has no keychain entry — use only what the
+    //    dialog provided. This mirrors `connections_v2_connect`'s resolution.
+    let mut bag = if input.connection.id.is_empty() {
+        SecretBag::default()
+    } else {
+        match secret_store(&state) {
+            Ok(store) => resolve_secrets_for_connect(
+                store.as_ref(),
+                &input.connection.id,
+                None,
+                log.as_ref(),
+            ),
+            Err(e) => {
+                log.warn(
+                    "connections_v2_test: secret store unavailable; using dialog secrets only",
+                    logctx! { "err" => e.clone() },
+                );
+                SecretBag::default()
+            }
+        }
+    };
+    overlay_input_secrets(&mut bag, &input.secrets);
+    let resolved = bag.apply(&input.connection);
 
     // 3. Build ClientOptions + tunnel handle. Three success-shaped outcomes:
     //    Ready (proceed), PassphraseRequired (no retry loop here — fold
@@ -592,12 +596,33 @@ fn resolve_secrets_for_connect(
 /// Owned secret values resolved from the [`SecretStore`] for a connect
 /// attempt. Splitting `read` from `apply` keeps `connect` short and makes
 /// the precedence rule (dialog override > keychain) visible at one site.
+#[derive(Default)]
 struct SecretBag {
     auth_password: Option<String>,
     ssh_password: Option<String>,
     ssh_key_passphrase: Option<String>,
     proxy_password: Option<String>,
     aws_secret_key: Option<String>,
+}
+
+/// Overlay dialog-supplied secrets onto a bag (e.g. one already populated from
+/// the keychain). A provided slot wins over the stored value — this lets the
+/// user test a *changed* password while leaving untouched fields resolved from
+/// the keychain. Unknown/OIDC slots are no-ops, matching [`build_resolved`].
+fn overlay_input_secrets(bag: &mut SecretBag, secrets: &[SecretInput]) {
+    for entry in secrets {
+        match SecretSlot::from_wire(&entry.slot) {
+            Some(SecretSlot::AuthPassword) => bag.auth_password = Some(entry.value.clone()),
+            Some(SecretSlot::SshPassword) => bag.ssh_password = Some(entry.value.clone()),
+            Some(SecretSlot::SshKeyPassphrase) => {
+                bag.ssh_key_passphrase = Some(entry.value.clone())
+            }
+            Some(SecretSlot::ProxyPassword) => bag.proxy_password = Some(entry.value.clone()),
+            Some(SecretSlot::AwsSecretKey) => bag.aws_secret_key = Some(entry.value.clone()),
+            Some(SecretSlot::OidcRefreshToken) => {}
+            None => {}
+        }
+    }
 }
 
 impl SecretBag {
@@ -990,6 +1015,36 @@ mod tests {
         assert_eq!(resolved.ssh_key_passphrase.as_deref(), Some("skp"));
         assert_eq!(resolved.proxy_password.as_deref(), Some("pp"));
         assert_eq!(resolved.aws_secret_key.as_deref(), Some("ask"));
+    }
+
+    #[test]
+    fn overlay_input_secrets_overrides_stored_value() {
+        // Keychain supplied a stored password; the dialog typed a new one —
+        // the typed value must win (testing a changed password).
+        let mut bag = SecretBag {
+            auth_password: Some("stored".to_string()),
+            ..SecretBag::default()
+        };
+        overlay_input_secrets(
+            &mut bag,
+            &[SecretInput {
+                slot: "auth-password".to_string(),
+                value: "typed".to_string(),
+            }],
+        );
+        assert_eq!(bag.auth_password.as_deref(), Some("typed"));
+    }
+
+    #[test]
+    fn overlay_input_secrets_keeps_stored_when_slot_absent() {
+        // The bug scenario: editing an existing connection and clicking Test
+        // without re-typing the password must keep the keychain value.
+        let mut bag = SecretBag {
+            auth_password: Some("stored".to_string()),
+            ..SecretBag::default()
+        };
+        overlay_input_secrets(&mut bag, &[]);
+        assert_eq!(bag.auth_password.as_deref(), Some("stored"));
     }
 
     #[test]
