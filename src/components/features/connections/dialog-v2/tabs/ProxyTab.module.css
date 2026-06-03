@@ -3,12 +3,6 @@
   margin-top: 8px;
 }
 
-.radioGroup {
-  display: flex;
-  gap: 16px;
-  margin-bottom: 12px;
-}
-
 .checkRow {
   display: flex;
   align-items: center;
@@ -18,5 +12,19 @@
 
 .fieldRow {
   display: flex;
-  gap: 12px;
+  gap: var(--space-3);
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+}
+
+.fields {
+  display: block;
+}
+
+.fieldsDim {
+  display: block;
+  opacity: 0.55;
 }

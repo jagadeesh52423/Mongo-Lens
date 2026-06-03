@@ -25,31 +25,34 @@ function renderProxy(value: Connection, onChange = vi.fn(), secrets: Record<stri
 }
 
 describe('ProxyTab', () => {
-  it('hides proxy fields when disabled', () => {
+  it('shows proxy host field even when disabled, toggle off', () => {
     renderProxy(base);
-    expect(screen.queryByLabelText(/^host$/i)).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/^host$/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/enable proxy/i)).not.toBeChecked();
   });
 
-  it('toggling on writes a SOCKS5 default', () => {
-    const { onChange } = renderProxy(base);
+  it('toggling enable preserves typed host', () => {
+    const { onChange } = renderProxy({ ...base, proxy: { enabled: false, kind: 'socks5', host: '10.0.0.1', port: 1080 } });
     fireEvent.click(screen.getByLabelText(/enable proxy/i));
     expect(onChange).toHaveBeenCalledWith(
-      expect.objectContaining({ proxy: { kind: 'socks5', host: '', port: 1080 } }),
+      expect.objectContaining({
+        proxy: expect.objectContaining({ enabled: true, host: '10.0.0.1' }),
+      }),
     );
   });
 
   it('selecting HTTP shows the SOCKS5-only warning', () => {
-    renderProxy({ ...base, proxy: { kind: 'http', host: 'p', port: 8080 } });
+    renderProxy({ ...base, proxy: { enabled: true, kind: 'http', host: 'p', port: 8080 } });
     expect(screen.getByRole('alert')).toHaveTextContent(/only socks5 is supported/i);
   });
 
   it('selecting SOCKS5 hides the warning', () => {
-    renderProxy({ ...base, proxy: { kind: 'socks5', host: 'p', port: 1080 } });
+    renderProxy({ ...base, proxy: { enabled: true, kind: 'socks5', host: 'p', port: 1080 } });
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('typing a username reveals the password field', () => {
-    renderProxy({ ...base, proxy: { kind: 'socks5', host: 'p', port: 1080, auth: { username: 'u' } } });
+    renderProxy({ ...base, proxy: { enabled: true, kind: 'socks5', host: 'p', port: 1080, auth: { username: 'u' } } });
     expect(screen.getByLabelText(/^password$/i)).toBeInTheDocument();
   });
 });
