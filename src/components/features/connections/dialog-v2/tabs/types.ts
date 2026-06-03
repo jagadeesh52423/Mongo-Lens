@@ -35,6 +35,9 @@ export interface TabSpec {
   label: string;
   group: TabGroup;
   Form: ComponentType<TabFormProps>;
+  /** Line-icon rendered in the tab rail. Implement a new tab by adding its
+   *  icon here + a TAB_ICONS entry — no other edits needed. */
+  icon: import('react').ReactNode;
   validate: (value: Connection) => ValidationIssue[];
   hasOverrides?: (value: Connection) => boolean;
 }
