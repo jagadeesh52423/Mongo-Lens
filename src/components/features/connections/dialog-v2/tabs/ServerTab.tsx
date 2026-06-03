@@ -1,6 +1,7 @@
 import type { TabFormProps } from './types';
 import type { ConnectionTarget } from '../../../../../connection/model';
 import { FormField } from '../../../../ui/FormField';
+import { SegmentedControl } from '../../../../ui';
 import styles from './ServerTab.module.css';
 
 export function ServerTab({ value, onChange }: TabFormProps) {
@@ -28,15 +29,13 @@ export function ServerTab({ value, onChange }: TabFormProps) {
 
   return (
     <div>
-      <div role="radiogroup" aria-label="Target type" className={styles.radioGroup}>
-        <label>
-          <input type="radio" name="target-kind" checked={target.kind === 'direct'} onChange={() => switchKind('direct')} />
-          Direct
-        </label>
-        <label>
-          <input type="radio" name="target-kind" checked={target.kind === 'uri'} onChange={() => switchKind('uri')} />
-          Connection URI
-        </label>
+      <div className={styles.segRow}>
+        <SegmentedControl
+          ariaLabel="Target type"
+          value={target.kind}
+          options={[{ value: 'direct', label: 'Direct' }, { value: 'uri', label: 'Connection URI' }]}
+          onChange={(k) => switchKind(k)}
+        />
       </div>
 
       {target.kind === 'direct' && (
@@ -45,6 +44,7 @@ export function ServerTab({ value, onChange }: TabFormProps) {
             <FormField.Label htmlFor="srv-host">Host</FormField.Label>
             <FormField.Input
               id="srv-host"
+              className={styles.mono}
               value={target.host}
               onChange={(e) => setTarget({ ...target, host: e.target.value })}
             />
@@ -54,6 +54,7 @@ export function ServerTab({ value, onChange }: TabFormProps) {
             <FormField.Input
               id="srv-port"
               type="number"
+              className={styles.mono}
               value={target.port}
               onChange={(e) => setTarget({ ...target, port: Number(e.target.value) })}
             />
@@ -66,6 +67,7 @@ export function ServerTab({ value, onChange }: TabFormProps) {
           <FormField.Label htmlFor="srv-uri">URI string</FormField.Label>
           <FormField.Input
             id="srv-uri"
+            className={styles.mono}
             value={target.uri}
             onChange={(e) => setTarget({ ...target, uri: e.target.value })}
             placeholder="mongodb+srv://…"

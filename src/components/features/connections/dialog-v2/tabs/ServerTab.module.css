@@ -1,10 +1,13 @@
-.radioGroup {
-  display: flex;
-  gap: 16px;
-  margin-bottom: 12px;
+.segRow {
+  margin-bottom: var(--space-4);
 }
 
 .fieldRow {
   display: flex;
-  gap: 12px;
+  gap: var(--space-3);
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
 }

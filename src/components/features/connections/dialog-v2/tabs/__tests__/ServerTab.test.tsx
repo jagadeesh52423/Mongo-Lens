@@ -28,11 +28,11 @@ describe('ServerTab', () => {
     });
   });
 
-  it('switching target kind to URI prompts before wiping fields', () => {
+  it('switches to URI mode via the segmented control (prompting before wiping fields)', () => {
     const onChange = vi.fn();
     window.confirm = vi.fn(() => true);
     render(<ServerTab value={direct} onChange={onChange} globals={DEFAULT_GLOBAL_PREFS} secrets={{}} onSecretChange={() => {}} />);
-    fireEvent.click(screen.getByLabelText(/connection uri/i));
+    fireEvent.click(screen.getByRole('radio', { name: /connection uri/i }));
     expect(window.confirm).toHaveBeenCalled();
     expect(onChange).toHaveBeenCalledWith({ ...direct, target: { kind: 'uri', uri: '' } });
   });
@@ -40,7 +40,7 @@ describe('ServerTab', () => {
   it('renders URI input for kind=uri', () => {
     const uri: Connection = { ...direct, target: { kind: 'uri', uri: 'mongodb://x' } };
     render(<ServerTab value={uri} onChange={() => {}} globals={DEFAULT_GLOBAL_PREFS} secrets={{}} onSecretChange={() => {}} />);
-    expect(screen.getByLabelText(/connection uri/i)).toBeChecked();
+    expect(screen.getByRole('radio', { name: /connection uri/i })).toHaveAttribute('aria-checked', 'true');
     expect(screen.getByDisplayValue('mongodb://x')).toBeInTheDocument();
   });
 });
