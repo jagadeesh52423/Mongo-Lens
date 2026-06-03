@@ -4,6 +4,7 @@ export * from './Panel';
 export * from './Toolbar';
 export * from './Dialog';
 export * from './FormField';
+export * from './SegmentedControl';
 export * from './ListRow';
 export * from './ResizableSplit';
 export * from './Stack';

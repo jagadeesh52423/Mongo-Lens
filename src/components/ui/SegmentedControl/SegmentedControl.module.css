@@ -1,0 +1,13 @@
+.group {
+  display: inline-flex; gap: 2px; padding: 2px;
+  background: var(--bg); border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+}
+.seg, .segOn {
+  font: inherit; font-size: var(--fs-sm); cursor: pointer;
+  border: none; background: transparent; color: var(--fg-muted);
+  padding: 5px 14px; border-radius: var(--radius-sm);
+}
+.seg:hover { color: var(--fg); }
+.segOn { background: var(--bg-elev-3); color: var(--fg); font-weight: 600; }
+.seg:focus-visible, .segOn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
