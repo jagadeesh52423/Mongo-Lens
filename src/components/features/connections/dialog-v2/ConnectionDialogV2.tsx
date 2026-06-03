@@ -43,6 +43,36 @@ function normalizeForSave(connection: Connection): Connection {
   return out;
 }
 
+/**
+ * Keychain slots owned by each optional transport feature. When a feature is
+ * dropped from the connection on save, its secrets would otherwise linger as
+ * orphan inert keychain entries — `pruneSecrets` removes them.
+ *
+ * Extension contract: a new feature that owns secrets adds one entry here
+ * (`present` predicate + its slots); `pruneSecrets` drops them automatically
+ * when the feature is absent. No other edits needed.
+ */
+const FEATURE_SECRET_SLOTS: ReadonlyArray<{
+  present: (connection: Connection) => boolean;
+  slots: ReadonlyArray<SecretSlot>;
+}> = [
+  { present: (connection) => !!connection.ssh, slots: ['ssh-password', 'ssh-key-passphrase'] },
+  { present: (connection) => !!connection.proxy, slots: ['proxy-password'] },
+];
+
+/**
+ * Drops secrets belonging to features that are absent from the (already
+ * normalized) connection, so save never carries orphan secrets for a feature
+ * the user left blank and disabled.
+ */
+export function pruneSecrets(secrets: SecretInput[], connection: Connection): SecretInput[] {
+  const dropped = new Set<SecretSlot>();
+  for (const feature of FEATURE_SECRET_SLOTS) {
+    if (!feature.present(connection)) feature.slots.forEach((slot) => dropped.add(slot));
+  }
+  return secrets.filter((secret) => !dropped.has(secret.slot));
+}
+
 /** Derives the header subtitle line from the dialog mode + target scheme. */
 function subtitleFor(initial: Connection | null, draft: Connection): string {
   if (!initial) return 'New connection';
@@ -64,7 +94,9 @@ export function ConnectionDialogV2({ initial, globals, onSave, onCancel }: Props
   const test = useConnectionsV2((store) => store.test);
 
   function handleSave() {
-    onSave({ connection: normalizeForSave(state.draft), secrets: collectSecrets(state.secrets) });
+    const connection = normalizeForSave(state.draft);
+    const secrets = pruneSecrets(collectSecrets(state.secrets), connection);
+    onSave({ connection, secrets });
   }
 
   async function handleTest() {

@@ -4,10 +4,11 @@ import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
 
 import { invoke } from '@tauri-apps/api/core';
-import { ConnectionDialogV2 } from '../ConnectionDialogV2';
+import { ConnectionDialogV2, pruneSecrets } from '../ConnectionDialogV2';
 import { DEFAULT_GLOBAL_PREFS } from '../../../../../connection/overrides';
 import { BLANK_SSH, BLANK_PROXY } from '../../../../../connection/feature-state';
 import type { Connection } from '../../../../../connection/model';
+import type { SecretInput } from '../../../../../connection/ipc';
 
 const sample: Connection = {
   id: 'a', name: 'My Cluster', color: '#10b981',
@@ -56,6 +57,35 @@ describe('ConnectionDialogV2', () => {
     expect(saved.tls).toBeUndefined();
     expect(saved.ssh).toBeUndefined();
     expect(saved.proxy).toBeUndefined();
+  });
+
+  it('prunes the ssh-password secret when SSH is dropped as blank-disabled on save', () => {
+    const onSave = vi.fn().mockResolvedValue(sample);
+    const draft: Connection = { ...sample, ssh: BLANK_SSH };
+    render(<ConnectionDialogV2 initial={draft} globals={DEFAULT_GLOBAL_PREFS} onSave={onSave} onCancel={vi.fn()} />);
+    fireEvent.click(screen.getByRole('tab', { name: /ssh/i }));
+    fireEvent.change(screen.getByLabelText(/ssh password/i), { target: { value: 'hunter2' } });
+    fireEvent.click(screen.getByRole('button', { name: /save/i }));
+    const input = onSave.mock.calls[0][0];
+    expect(input.connection.ssh).toBeUndefined();
+    expect(input.secrets.find((s: SecretInput) => s.slot === 'ssh-password')).toBeUndefined();
+  });
+
+  it('pruneSecrets drops a feature\'s secrets when that feature is absent, keeps the rest', () => {
+    const secrets: SecretInput[] = [
+      { slot: 'auth-password', value: 'a' },
+      { slot: 'ssh-password', value: 's' },
+      { slot: 'ssh-key-passphrase', value: 'k' },
+      { slot: 'proxy-password', value: 'p' },
+    ];
+    // No ssh, no proxy on the connection → both feature's secrets pruned.
+    const dropped = pruneSecrets(secrets, { ...sample });
+    expect(dropped.map((s) => s.slot)).toEqual(['auth-password']);
+
+    // Proxy present → proxy-password kept; ssh still absent → ssh slots pruned.
+    const withProxy: Connection = { ...sample, proxy: { ...BLANK_PROXY, enabled: true, host: '10.0.0.1' } };
+    const kept = pruneSecrets(secrets, withProxy);
+    expect(kept.map((s) => s.slot).sort()).toEqual(['auth-password', 'proxy-password']);
   });
 
   it('Save is disabled when host is empty (validation error)', () => {
