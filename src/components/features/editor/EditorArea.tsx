@@ -32,6 +32,22 @@ export function EditorArea() {
   const isRunning = useResultsStore((s) => (active ? !!s.byTab[active.id]?.isRunning : false));
   useTabActions();
 
+  // Adopt the active connection for a script tab that has none yet. A tab
+  // opened before any connection was active starts with connectionId
+  // undefined; openTab only seeds it from the active connection at open time.
+  // Without this, connecting afterward never binds the tab, leaving the
+  // connection/database selectors above the script empty. Adopt once (guarded
+  // by `!active.connectionId`) so the tab stays bound and does not silently
+  // switch when a different connection is later connected.
+  useEffect(() => {
+    if (active?.type === 'script' && !active.connectionId && activeConnectionId) {
+      updateTab(active.id, {
+        connectionId: activeConnectionId,
+        database: activeDatabase ?? undefined,
+      });
+    }
+  }, [active?.id, active?.type, active?.connectionId, activeConnectionId, activeDatabase, updateTab]);
+
   const actions = useEditorActions(active);
   const {
     activePageSize, cursorLines, handleExecute, handlePageChange, handleDocUpdated,

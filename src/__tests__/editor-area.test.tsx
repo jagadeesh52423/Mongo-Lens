@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, cleanup, waitFor, within } from '@testing-library/react';
+import { render, screen, cleanup, waitFor, within, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { EditorArea } from '../components/features/editor/EditorArea';
 import * as ipc from '../ipc';
@@ -71,6 +71,59 @@ describe('EditorArea', () => {
     await user.type(ta, 'x');
     expect(useEditorStore.getState().tabs[0].content).toBe('x');
     expect(useEditorStore.getState().tabs[0].isDirty).toBe(true);
+  });
+
+  it('adopts a connection that is established after the tab was opened', async () => {
+    // Open a script tab while NOTHING is connected → connectionId is undefined.
+    useEditorStore.getState().openTab({
+      id: 't1', title: 'a.js', content: '', isDirty: false, type: 'script',
+    });
+    expect(useEditorStore.getState().tabs[0].connectionId).toBeUndefined();
+
+    render(<EditorArea />);
+    // No connection bound yet → the tab's db selector must not query.
+    expect(ipc.listDatabases).not.toHaveBeenCalled();
+
+    // User connects conn1 after the tab is already open.
+    await act(async () => {
+      useConnectionsV2.setState({
+        connections: [mockConn],
+        activeConnectionId: 'conn1',
+        activeDatabase: null,
+        connectedIds: new Set(['conn1']),
+      });
+    });
+
+    // The tab adopts the now-active connection and the db selector loads.
+    await waitFor(() =>
+      expect(useEditorStore.getState().tabs[0].connectionId).toBe('conn1'),
+    );
+    await waitFor(() => expect(ipc.listDatabases).toHaveBeenCalledWith('conn1'));
+    expect(await screen.findByRole('option', { name: 'mydb' })).toBeInTheDocument();
+  });
+
+  it('does not overwrite a tab already bound to a different connection', async () => {
+    // Adoption is one-shot: a tab deliberately bound to conn2 must keep conn2
+    // even though conn1 is the active connection.
+    const conn2: Connection = { ...mockConn, id: 'conn2', name: 'Conn Two' };
+    useConnectionsV2.setState({
+      connections: [mockConn, conn2],
+      activeConnectionId: 'conn1',
+      activeDatabase: null,
+      connectedIds: new Set(['conn1', 'conn2']),
+    });
+    useEditorStore.getState().openTab({
+      id: 't1', title: 'a.js', content: '', isDirty: false, type: 'script',
+      connectionId: 'conn2',
+    });
+
+    // Isolate from db calls made by earlier tests (mocks persist across tests).
+    vi.mocked(ipc.listDatabases).mockClear();
+    render(<EditorArea />);
+
+    await waitFor(() => expect(ipc.listDatabases).toHaveBeenCalledWith('conn2'));
+    expect(useEditorStore.getState().tabs[0].connectionId).toBe('conn2');
+    expect(ipc.listDatabases).not.toHaveBeenCalledWith('conn1');
   });
 
   it('Run button is enabled when not running', () => {
