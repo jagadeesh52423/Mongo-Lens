@@ -14,6 +14,7 @@ export function SplitHandle({ direction }: Props) {
   const containerStyle: React.CSSProperties = isHorizontal
     ? {
         width: 4,
+        height: '100%',
         cursor: 'col-resize',
         background: isActive ? 'var(--accent)' : 'transparent',
         display: 'flex',
@@ -22,6 +23,7 @@ export function SplitHandle({ direction }: Props) {
         transition: 'background var(--dur-fast) var(--ease-standard)',
       }
     : {
+        width: '100%',
         height: 4,
         cursor: 'row-resize',
         background: isActive ? 'var(--accent)' : 'transparent',

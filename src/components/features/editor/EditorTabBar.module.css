@@ -11,6 +11,7 @@
   overflow-x: auto;
   overflow-y: hidden;
   flex: 1;
+  height: 100%;
 }
 
 .tab {
@@ -68,4 +69,8 @@
   padding: 0;
   min-height: 32px;
   height: 32px;
+  /* Stretch sections to full row height so .tab { height: 100% } fills the
+   * 32px row (Toolbar defaults to align-items: center, which would shrink the
+   * tab cells to text height and float the active-tab underline mid-row). */
+  align-items: stretch;
 }
