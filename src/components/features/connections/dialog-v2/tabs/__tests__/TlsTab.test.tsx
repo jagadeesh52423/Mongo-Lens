@@ -28,15 +28,23 @@ function renderTls(value: Connection, onChange = vi.fn()) {
 }
 
 describe('TlsTab', () => {
-  it('hides cert fields when TLS is disabled', () => {
+  it('shows cert fields even when TLS is disabled', () => {
     renderTls({ ...base, tls: { enabled: false } });
-    expect(screen.queryByLabelText(/ca certificate/i)).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/ca certificate/i)).toBeInTheDocument();
   });
 
-  it('reveals fields when TLS is toggled on', () => {
-    const { onChange } = renderTls({ ...base, tls: { enabled: false } });
+  it('defaults to disabled when no tls present (renders fields, toggle off)', () => {
+    renderTls({ ...base });
+    expect(screen.getByLabelText(/enable tls/i)).not.toBeChecked();
+    expect(screen.getByLabelText(/ca certificate/i)).toBeInTheDocument();
+  });
+
+  it('toggling enable preserves existing field data', () => {
+    const { onChange } = renderTls({ ...base, tls: { enabled: false, caFile: '/ca.pem' } as Connection['tls'] });
     fireEvent.click(screen.getByLabelText(/enable tls/i));
-    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ tls: { enabled: true } }));
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
+      tls: expect.objectContaining({ enabled: true, caFile: '/ca.pem' }),
+    }));
   });
 
   it('renders CA + client cert pickers when TLS is enabled', () => {

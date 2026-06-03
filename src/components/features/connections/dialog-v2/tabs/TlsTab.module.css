@@ -9,3 +9,12 @@
   gap: 6px;
   margin-top: 8px;
 }
+
+.fields {
+  display: block;
+}
+
+.fieldsDim {
+  display: block;
+  opacity: 0.55;
+}
