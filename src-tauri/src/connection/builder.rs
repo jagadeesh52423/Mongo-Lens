@@ -575,7 +575,21 @@ fn synthesize_direct_uri(
     if let Some(rp) = read_preference {
         params.push(format!("readPreference={}", read_pref_token(rp)));
     }
-    if let Some(direct) = direct_connection {
+    // A "Direct" target should connect directly to the host the user gave us,
+    // matching Studio3T / Compass, which default a single bare host to a
+    // direct connection (no replica-set discovery). The Rust driver defaults a bare
+    // single-host URI to replica-set discovery: it runs `hello`, learns the
+    // node's replica set, then chases the set's advertised internal member
+    // hostnames, which are unreachable when tunneling to a single node. So we
+    // default directConnection=true for a bare Direct target. Discovery stays
+    // available when the user names a replicaSet, and an explicit
+    // direct_connection override always wins.
+    let effective_direct = match (direct_connection, replica_set) {
+        (Some(d), _) => Some(d),    // explicit user choice wins
+        (None, Some(_)) => None,    // replicaSet named → discovery is intended
+        (None, None) => Some(true), // bare Direct → connect to this node only
+    };
+    if let Some(direct) = effective_direct {
         params.push(format!("directConnection={direct}"));
     }
     if params.is_empty() {
@@ -1132,14 +1146,35 @@ mod tests {
 
     #[test]
     fn synthesize_direct_uri_bare() {
+        // A bare Direct target defaults to directConnection=true so the driver
+        // talks only to this host instead of discovering the replica set and
+        // chasing unreachable internal member hostnames (Studio3T parity).
         let uri = synthesize_direct_uri("mongo.example.com", 27017, None, None, None);
-        assert_eq!(uri, "mongodb://mongo.example.com:27017/");
+        assert_eq!(uri, "mongodb://mongo.example.com:27017/?directConnection=true");
     }
 
     #[test]
     fn synthesize_direct_uri_with_replica_set() {
+        // Naming a replicaSet signals discovery is intended, so we must NOT
+        // force directConnection.
         let uri = synthesize_direct_uri("h", 27017, Some("rs0"), None, None);
         assert_eq!(uri, "mongodb://h:27017/?replicaSet=rs0");
+    }
+
+    #[test]
+    fn synthesize_direct_uri_explicit_false_overrides_default() {
+        // An explicit user override always wins over the directConnect default.
+        let uri = synthesize_direct_uri("h", 27017, None, None, Some(false));
+        assert_eq!(uri, "mongodb://h:27017/?directConnection=false");
+    }
+
+    #[test]
+    fn synthesize_direct_uri_replica_set_with_explicit_direct() {
+        // An explicit override wins even alongside a named replicaSet; both
+        // params are emitted (the explicit arm short-circuits the discovery
+        // default).
+        let uri = synthesize_direct_uri("h", 27017, Some("rs0"), None, Some(true));
+        assert_eq!(uri, "mongodb://h:27017/?replicaSet=rs0&directConnection=true");
     }
 
     #[test]
