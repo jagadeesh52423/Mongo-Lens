@@ -62,6 +62,7 @@ export type SshAuth =
   | { kind: 'agent' };
 
 export type SshTunnel = {
+  enabled: boolean;
   host: string;
   port: number;
   user: string;
@@ -70,6 +71,7 @@ export type SshTunnel = {
 };
 
 export type Proxy = {
+  enabled: boolean;
   kind: 'http' | 'socks4' | 'socks5';
   host: string;
   port: number;

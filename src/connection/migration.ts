@@ -64,6 +64,7 @@ export function migrateLegacy(legacy: LegacyConnection): Connection {
 
   const ssh: Connection['ssh'] = legacy.sshHost
     ? {
+        enabled: true,
         host: legacy.sshHost,
         port: legacy.sshPort ?? DEFAULT_SSH_PORT,
         user: legacy.sshUser ?? '',

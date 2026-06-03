@@ -140,6 +140,7 @@ describe('migrateLegacy', () => {
     };
     const result = migrateLegacy(legacy);
     expect(result.ssh).toEqual({
+      enabled: true,
       host: 'bastion',
       port: 22,
       user: '',

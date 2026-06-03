@@ -102,7 +102,7 @@ export function validateTls(tls: Tls | undefined): ValidationIssue[] {
 }
 
 export function validateSsh(ssh: SshTunnel | undefined): ValidationIssue[] {
-  if (!ssh) return [];
+  if (!ssh || !ssh.enabled) return [];
   const issues: ValidationIssue[] = [];
   if (!ssh.host.trim()) {
     issues.push({ tab: 'ssh', message: 'SSH host is required' });
@@ -120,7 +120,7 @@ export function validateSsh(ssh: SshTunnel | undefined): ValidationIssue[] {
 }
 
 export function validateProxy(proxy: Proxy | undefined): ValidationIssue[] {
-  if (!proxy) return [];
+  if (!proxy || !proxy.enabled) return [];
   const issues: ValidationIssue[] = [];
   if (!proxy.host.trim()) {
     issues.push({ tab: 'proxy', message: 'Proxy host is required' });

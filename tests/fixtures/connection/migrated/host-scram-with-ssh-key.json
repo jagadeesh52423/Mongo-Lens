@@ -9,6 +9,7 @@
     "mechanism": "auto"
   },
   "ssh": {
+    "enabled": true,
     "host": "bastion.example",
     "port": 2222,
     "user": "carol",

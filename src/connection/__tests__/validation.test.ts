@@ -132,9 +132,22 @@ describe('validateSsh', () => {
   it('skips when undefined', () => {
     expect(validateSsh(undefined)).toHaveLength(0);
   });
+  it('skips when disabled even with a blank host', () => {
+    expect(
+      validateSsh({
+        enabled: false,
+        host: '',
+        port: 22,
+        user: '',
+        auth: { kind: 'password' },
+        knownHostsPolicy: 'strict',
+      }),
+    ).toHaveLength(0);
+  });
   it('accepts valid password ssh', () => {
     expect(
       validateSsh({
+        enabled: true,
         host: 'h',
         port: 22,
         user: 'u',
@@ -146,6 +159,7 @@ describe('validateSsh', () => {
   it('key mode requires keyPath', () => {
     expect(
       validateSsh({
+        enabled: true,
         host: 'h',
         port: 22,
         user: 'u',
@@ -157,6 +171,7 @@ describe('validateSsh', () => {
   it('key mode with keyPath is valid', () => {
     expect(
       validateSsh({
+        enabled: true,
         host: 'h',
         port: 22,
         user: 'u',
@@ -168,6 +183,7 @@ describe('validateSsh', () => {
   it('agent mode does not need a keyPath', () => {
     expect(
       validateSsh({
+        enabled: true,
         host: 'h',
         port: 22,
         user: 'u',
@@ -176,9 +192,10 @@ describe('validateSsh', () => {
       }),
     ).toHaveLength(0);
   });
-  it('reports host, port, user errors together', () => {
+  it('reports host, port, user errors together when enabled', () => {
     expect(
       validateSsh({
+        enabled: true,
         host: '',
         port: 0,
         user: '',
@@ -193,19 +210,25 @@ describe('validateProxy', () => {
   it('skips when undefined', () => {
     expect(validateProxy(undefined)).toHaveLength(0);
   });
+  it('skips when disabled even with a blank host', () => {
+    expect(
+      validateProxy({ enabled: false, kind: 'socks5', host: '', port: 1080 }),
+    ).toHaveLength(0);
+  });
   it('requires host', () => {
     expect(
-      validateProxy({ kind: 'socks5', host: '', port: 1080 }),
+      validateProxy({ enabled: true, kind: 'socks5', host: '', port: 1080 }),
     ).toHaveLength(1);
   });
   it('requires valid port', () => {
     expect(
-      validateProxy({ kind: 'socks5', host: 'h', port: 99999 }),
+      validateProxy({ enabled: true, kind: 'socks5', host: 'h', port: 99999 }),
     ).toHaveLength(1);
   });
   it('accepts valid proxy', () => {
     expect(
       validateProxy({
+        enabled: true,
         kind: 'socks5',
         host: 'h',
         port: 1080,
@@ -244,13 +267,14 @@ describe('validateConnection', () => {
       auth: { kind: 'scram', username: '', authDb: '' },
       tls: { enabled: true },
       ssh: {
+        enabled: true,
         host: '',
         port: 0,
         user: '',
         auth: { kind: 'key', keyPath: '', hasPassphrase: false },
         knownHostsPolicy: 'strict',
       },
-      proxy: { kind: 'socks5', host: '', port: 0 },
+      proxy: { enabled: true, kind: 'socks5', host: '', port: 0 },
       createdAt: '2026-05-28T00:00:00Z',
     };
     const issues = validateConnection(connection);
