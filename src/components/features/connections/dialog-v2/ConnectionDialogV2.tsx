@@ -1,7 +1,6 @@
 import { useMemo, useReducer, useState } from 'react';
 import { Dialog } from '../../../ui/Dialog';
 import { Button } from '../../../ui/Button';
-import { FormField } from '../../../ui/FormField';
 import { ColorPicker } from './tabs/shared/ColorPicker';
 import { TABS } from './tabs/registry';
 import { dialogReducer, initialDialogState } from './useDialogState';
@@ -25,6 +24,16 @@ function collectSecrets(secrets: Partial<Record<SecretSlot, string>>): SecretInp
   return Object.entries(secrets)
     .filter(([, value]) => value !== undefined)
     .map(([slot, value]) => ({ slot: slot as SecretSlot, value: value as string }));
+}
+
+/** Derives the header subtitle line from the dialog mode + target scheme. */
+function subtitleFor(initial: Connection | null, draft: Connection): string {
+  if (!initial) return 'New connection';
+  const target = draft.target;
+  const scheme = target.kind === 'uri'
+    ? (target.uri.startsWith('mongodb+srv') ? 'mongodb+srv' : 'mongodb')
+    : 'direct';
+  return `Editing connection · ${scheme}`;
 }
 
 export function ConnectionDialogV2({ initial, globals, onSave, onCancel }: Props) {
@@ -52,24 +61,26 @@ export function ConnectionDialogV2({ initial, globals, onSave, onCancel }: Props
   return (
     <Dialog open onClose={onCancel} ariaLabel="Connection editor" width={720}>
       <div className={styles.header}>
-        <div className={styles.nameField}>
-          <label htmlFor="conn-name" className={styles.nameLabel}>Connection name</label>
-          <FormField.Input
-            id="conn-name"
-            className={styles.nameInput}
-            value={state.draft.name}
-            onChange={(e) => dispatch({ type: 'set-field', path: 'name', value: e.target.value })}
-          />
-        </div>
         <ColorPicker
           value={state.draft.color}
           onChange={(c) => dispatch({ type: 'set-field', path: 'color', value: c })}
         />
-        <Button onClick={handleTest} disabled={issues.length > 0}>Test</Button>
+        <div className={styles.titleBlock}>
+          <input
+            className={styles.titleInput}
+            aria-label="Connection name"
+            placeholder="Untitled connection"
+            value={state.draft.name}
+            onChange={(e) => dispatch({ type: 'set-field', path: 'name', value: e.target.value })}
+          />
+          <div className={styles.subtitle}>{subtitleFor(state.initial, state.draft)}</div>
+        </div>
+        <Button onClick={handleTest} disabled={issues.length > 0}>Test connection</Button>
       </div>
 
       <div className={styles.body}>
         <nav className={styles.sidebar} role="tablist" aria-label="Connection settings tabs">
+          <div className={styles.glabel}>CONNECTION</div>
           {transportTabs.map((t) => (
             <button
               key={t.id}
@@ -78,11 +89,12 @@ export function ConnectionDialogV2({ initial, globals, onSave, onCancel }: Props
               className={activeTabId === t.id ? styles.tabActive : styles.tab}
               onClick={() => setActiveTabId(t.id)}
             >
+              {t.icon}
               {t.label}
               {(issuesByTab.get(t.id) ?? []).length > 0 && <span className={styles.errBadge}> ●</span>}
             </button>
           ))}
-          {prefsTabs.length > 0 && <hr className={styles.divider} />}
+          {prefsTabs.length > 0 && <div className={styles.glabel}>PREFERENCES</div>}
           {prefsTabs.map((t) => (
             <button
               key={t.id}
@@ -91,6 +103,7 @@ export function ConnectionDialogV2({ initial, globals, onSave, onCancel }: Props
               className={activeTabId === t.id ? styles.tabActive : styles.tab}
               onClick={() => setActiveTabId(t.id)}
             >
+              {t.icon}
               {t.label}
               {t.hasOverrides?.(state.draft) && <span className={styles.overrideBadge}> ●</span>}
             </button>

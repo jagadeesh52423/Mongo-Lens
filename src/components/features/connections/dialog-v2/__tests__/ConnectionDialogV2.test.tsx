@@ -52,7 +52,7 @@ describe('ConnectionDialogV2', () => {
     vi.mocked(invoke).mockResolvedValueOnce({ ok: true, serverInfo: {} });
     render(<ConnectionDialogV2 initial={sample} globals={DEFAULT_GLOBAL_PREFS} onSave={vi.fn()} onCancel={vi.fn()} />);
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /^test$/i }));
+      fireEvent.click(screen.getByRole('button', { name: /test connection/i }));
     });
     expect(invoke).toHaveBeenCalledWith('connections_v2_test', {
       input: { connection: sample, secrets: [] },
@@ -63,7 +63,7 @@ describe('ConnectionDialogV2', () => {
     vi.mocked(invoke).mockResolvedValueOnce({ ok: false, stage: 'ssh', error: 'no route to host' });
     render(<ConnectionDialogV2 initial={sample} globals={DEFAULT_GLOBAL_PREFS} onSave={vi.fn()} onCancel={vi.fn()} />);
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /^test$/i }));
+      fireEvent.click(screen.getByRole('button', { name: /test connection/i }));
     });
     await waitFor(() => expect(screen.getByText(/SSH tunnel failed/i)).toBeInTheDocument());
     expect(screen.getByText(/no route to host/i)).toBeInTheDocument();
@@ -73,7 +73,7 @@ describe('ConnectionDialogV2', () => {
     vi.mocked(invoke).mockResolvedValueOnce({ ok: true, serverInfo: { version: '7.0' } });
     render(<ConnectionDialogV2 initial={sample} globals={DEFAULT_GLOBAL_PREFS} onSave={vi.fn()} onCancel={vi.fn()} />);
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /^test$/i }));
+      fireEvent.click(screen.getByRole('button', { name: /test connection/i }));
     });
     await waitFor(() => expect(screen.getByText(/Connection OK/i)).toBeInTheDocument());
   });
@@ -81,6 +81,6 @@ describe('ConnectionDialogV2', () => {
   it('Test button is disabled while there are validation issues', () => {
     const blank: Connection = { ...sample, target: { kind: 'direct', host: '', port: 27017 } };
     render(<ConnectionDialogV2 initial={blank} globals={DEFAULT_GLOBAL_PREFS} onSave={vi.fn()} onCancel={vi.fn()} />);
-    expect(screen.getByRole('button', { name: /^test$/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /test connection/i })).toBeDisabled();
   });
 });
