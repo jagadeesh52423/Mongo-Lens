@@ -4,6 +4,7 @@
   "target": { "kind": "direct", "host": "internal.example", "port": 27017 },
   "auth": { "kind": "none" },
   "proxy": {
+    "enabled": true,
     "kind": "socks5",
     "host": "proxy.example",
     "port": 1080,

@@ -487,6 +487,7 @@ pub fn add_ssh_password(
     user: &str,
 ) {
     conn.ssh = Some(SshTunnel {
+        enabled: true,
         host: host.into(),
         port,
         user: user.into(),
@@ -503,6 +504,7 @@ pub fn add_ssh_key(
     key_path: &Path,
 ) {
     conn.ssh = Some(SshTunnel {
+        enabled: true,
         host: host.into(),
         port,
         user: user.into(),
@@ -516,6 +518,7 @@ pub fn add_ssh_key(
 
 pub fn add_socks5(conn: &mut Connection, host: &str, port: u16) {
     conn.proxy = Some(Proxy {
+        enabled: true,
         kind: ProxyKind::Socks5,
         host: host.into(),
         port,
@@ -535,6 +538,7 @@ pub fn add_ssh_key_with_passphrase(
     policy: KnownHostsPolicy,
 ) {
     conn.ssh = Some(SshTunnel {
+        enabled: true,
         host: host.into(),
         port,
         user: user.into(),

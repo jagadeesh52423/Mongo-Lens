@@ -135,6 +135,7 @@ mod tests {
 
     fn tunnel_with(auth: SshAuth) -> SshTunnel {
         SshTunnel {
+            enabled: true,
             host: "bastion.example.com".into(),
             port: 22,
             user: "ubuntu".into(),

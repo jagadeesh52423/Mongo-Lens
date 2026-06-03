@@ -19,6 +19,15 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Serde default for the SSH/Proxy `enabled` flag. A stored connection written
+/// before this flag existed has no `enabled` key; such a row was an *active*
+/// tunnel/proxy, so it must deserialize as `enabled = true`. New disabled saves
+/// serialize `enabled: false` explicitly. Keep this in sync with the TS model
+/// where `enabled` is a required field on `SshTunnel` / `Proxy`.
+fn default_true() -> bool {
+    true
+}
+
 // ──────────────────────────────────────────────────────────────────────────
 // AuthMode
 // ──────────────────────────────────────────────────────────────────────────
@@ -187,6 +196,8 @@ pub enum KnownHostsPolicy {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SshTunnel {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
     pub host: String,
     pub port: u16,
     pub user: String,
@@ -215,6 +226,8 @@ pub struct ProxyAuth {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Proxy {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
     pub kind: ProxyKind,
     pub host: String,
     pub port: u16,
@@ -310,4 +323,46 @@ pub struct Connection {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub overrides: Option<Overrides>,
     pub created_at: String,
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Tests
+// ──────────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::{Proxy, SshTunnel};
+
+    // Upgrade-safety: a stored connection written before the `enabled` flag
+    // existed has no `enabled` key. It must deserialize as enabled (true) so we
+    // never silently disable a user's existing tunnel/proxy. An explicit
+    // `false` must be honoured as-is.
+
+    #[test]
+    fn ssh_enabled_defaults_true_when_absent() {
+        let json = r#"{"host":"h","port":22,"user":"u","auth":{"kind":"agent"},"knownHostsPolicy":"strict"}"#;
+        let ssh: SshTunnel = serde_json::from_str(json).unwrap();
+        assert!(ssh.enabled);
+    }
+
+    #[test]
+    fn ssh_enabled_false_is_honored() {
+        let json = r#"{"enabled":false,"host":"h","port":22,"user":"u","auth":{"kind":"agent"},"knownHostsPolicy":"strict"}"#;
+        let ssh: SshTunnel = serde_json::from_str(json).unwrap();
+        assert!(!ssh.enabled);
+    }
+
+    #[test]
+    fn proxy_enabled_defaults_true_when_absent() {
+        let json = r#"{"kind":"socks5","host":"h","port":1080}"#;
+        let proxy: Proxy = serde_json::from_str(json).unwrap();
+        assert!(proxy.enabled);
+    }
+
+    #[test]
+    fn proxy_enabled_false_is_honored() {
+        let json = r#"{"enabled":false,"kind":"socks5","host":"h","port":1080}"#;
+        let proxy: Proxy = serde_json::from_str(json).unwrap();
+        assert!(!proxy.enabled);
+    }
 }

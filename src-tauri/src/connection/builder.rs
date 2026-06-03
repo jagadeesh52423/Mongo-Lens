@@ -401,6 +401,12 @@ async fn open_ssh_if_configured(
         return Ok(SshStepOutcome::Open(None));
     };
 
+    // A connection may carry a fully-configured but disabled tunnel (saved for
+    // later). Treat disabled exactly like "no SSH": connect directly, no tunnel.
+    if !ssh.enabled {
+        return Ok(SshStepOutcome::Open(None));
+    }
+
     let secrets = build_ssh_secrets(ssh, resolved)?;
     let (target_host, target_port) = target_host_port_for_ssh(target)?;
 
@@ -980,6 +986,12 @@ fn apply_proxy(
 ) -> Result<(), BuildError> {
     let Some(proxy) = proxy else { return Ok(()) };
 
+    // A disabled proxy is persisted config the user toggled off — skip it
+    // entirely (no validation, no socks5 wiring) so direct connect proceeds.
+    if !proxy.enabled {
+        return Ok(());
+    }
+
     // validate_for_driver already produces a user-facing message; map any
     // failure to BuildStage::Tls (transport-layer setup).
     validate_proxy_for_driver(proxy).map_err(BuildError::tls)?;
@@ -1503,6 +1515,7 @@ mod tests {
     async fn http_proxy_returns_tls_stage_error() {
         let mut conn = base_conn(direct_target(), AuthMode::None);
         conn.proxy = Some(Proxy {
+            enabled: true,
             kind: ProxyKind::Http,
             host: "proxy.example.com".into(),
             port: 3128,
@@ -1518,6 +1531,7 @@ mod tests {
     async fn socks4_proxy_returns_tls_stage_error() {
         let mut conn = base_conn(direct_target(), AuthMode::None);
         conn.proxy = Some(Proxy {
+            enabled: true,
             kind: ProxyKind::Socks4,
             host: "proxy.example.com".into(),
             port: 1080,
@@ -1534,6 +1548,7 @@ mod tests {
     async fn socks5_without_feature_returns_tls_stage_error() {
         let mut conn = base_conn(direct_target(), AuthMode::None);
         conn.proxy = Some(Proxy {
+            enabled: true,
             kind: ProxyKind::Socks5,
             host: "proxy.example.com".into(),
             port: 1080,
@@ -1550,6 +1565,7 @@ mod tests {
     async fn socks5_with_feature_applies_proxy() {
         let mut conn = base_conn(direct_target(), AuthMode::None);
         conn.proxy = Some(Proxy {
+            enabled: true,
             kind: ProxyKind::Socks5,
             host: "proxy.example.com".into(),
             port: 1080,
@@ -1578,6 +1594,7 @@ mod tests {
         // dependent (DNS vs TCP vs handshake) — we only assert the stage.
         let mut conn = base_conn(direct_target(), AuthMode::None);
         conn.ssh = Some(crate::connection::model::SshTunnel {
+            enabled: true,
             host: "127.0.0.1".into(),
             port: 1, // port 1 — virtually always closed
             user: "nobody".into(),
@@ -1593,6 +1610,7 @@ mod tests {
     async fn ssh_missing_password_secret_fails_at_ssh_stage() {
         let mut conn = base_conn(direct_target(), AuthMode::None);
         conn.ssh = Some(crate::connection::model::SshTunnel {
+            enabled: true,
             host: "127.0.0.1".into(),
             port: 22,
             user: "u".into(),
@@ -1604,6 +1622,46 @@ mod tests {
         let err = build_err(&resolved, &effective_defaults()).await;
         assert_eq!(err.stage, BuildStage::Ssh);
         assert!(err.error.contains("SSH password"), "msg: {}", err.error);
+    }
+
+    // ── Disabled-feature gating (save-while-disabled) ──────────────
+
+    #[tokio::test]
+    async fn disabled_ssh_skips_tunnel_and_builds_ready() {
+        // Tunnel config is present but toggled off. The builder must NOT try to
+        // open it (the host:port below is unreachable — an attempt would fail at
+        // the Ssh stage). Instead it should connect directly with no tunnel.
+        let mut conn = base_conn(direct_target(), AuthMode::None);
+        conn.ssh = Some(crate::connection::model::SshTunnel {
+            enabled: false,
+            host: "127.0.0.1".into(),
+            port: 1, // would fail instantly if an attempt were made
+            user: "nobody".into(),
+            auth: crate::connection::model::SshAuth::Agent,
+            known_hosts_policy: KnownHostsPolicy::AcceptAny,
+        });
+        let resolved = ResolvedConnection::bare(&conn);
+        let (_opts, tunnel) = build_ok(&resolved, &effective_defaults()).await;
+        assert!(tunnel.is_none(), "disabled ssh must not open a tunnel");
+    }
+
+    #[tokio::test]
+    async fn disabled_proxy_is_skipped() {
+        // An HTTP proxy is normally rejected at the Tls stage (driver supports
+        // SOCKS5 only). Toggled off, it must be skipped entirely so the build
+        // succeeds — proving apply_proxy short-circuits before validation.
+        let mut conn = base_conn(direct_target(), AuthMode::None);
+        conn.proxy = Some(Proxy {
+            enabled: false,
+            kind: ProxyKind::Http,
+            host: "proxy.example.com".into(),
+            port: 3128,
+            auth: None,
+        });
+        let resolved = ResolvedConnection::bare(&conn);
+        // build_ok panics on any BuildError, so reaching Ready proves the
+        // disabled HTTP proxy was not validated/applied.
+        let (_opts, _tunnel) = build_ok(&resolved, &effective_defaults()).await;
     }
 
     // ── BuildError shape ───────────────────────────────────────────

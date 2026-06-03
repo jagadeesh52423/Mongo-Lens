@@ -69,6 +69,7 @@ mod tests {
 
     fn proxy(kind: ProxyKind) -> Proxy {
         Proxy {
+            enabled: true,
             kind,
             host: "proxy.example.com".into(),
             port: 1080,

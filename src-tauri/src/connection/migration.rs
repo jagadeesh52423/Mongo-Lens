@@ -138,6 +138,8 @@ fn build_auth(legacy: &ConnectionRecord) -> AuthMode {
 fn build_ssh(legacy: &ConnectionRecord) -> Option<SshTunnel> {
     let host = legacy.ssh_host.as_deref().filter(|s| !s.is_empty())?;
     Some(SshTunnel {
+        // Migrated tunnels were active in the legacy app — keep them enabled.
+        enabled: true,
         host: host.to_string(),
         port: to_u16_or(legacy.ssh_port, DEFAULT_SSH_PORT),
         user: legacy.ssh_user.clone().unwrap_or_default(),
