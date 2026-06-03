@@ -6,6 +6,7 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
 import { invoke } from '@tauri-apps/api/core';
 import { ConnectionDialogV2 } from '../ConnectionDialogV2';
 import { DEFAULT_GLOBAL_PREFS } from '../../../../../connection/overrides';
+import { BLANK_SSH, BLANK_PROXY } from '../../../../../connection/feature-state';
 import type { Connection } from '../../../../../connection/model';
 
 const sample: Connection = {
@@ -39,6 +40,22 @@ describe('ConnectionDialogV2', () => {
     render(<ConnectionDialogV2 initial={sample} globals={DEFAULT_GLOBAL_PREFS} onSave={onSave} onCancel={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: /save/i }));
     expect(onSave).toHaveBeenCalledWith({ connection: sample, secrets: [] });
+  });
+
+  it('drops blank disabled SSH/proxy/tls from the saved connection', () => {
+    const onSave = vi.fn().mockResolvedValue(sample);
+    const draft: Connection = {
+      ...sample,
+      tls: { enabled: false },
+      ssh: BLANK_SSH,
+      proxy: BLANK_PROXY,
+    };
+    render(<ConnectionDialogV2 initial={draft} globals={DEFAULT_GLOBAL_PREFS} onSave={onSave} onCancel={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: /save/i }));
+    const saved = onSave.mock.calls[0][0].connection as Connection;
+    expect(saved.tls).toBeUndefined();
+    expect(saved.ssh).toBeUndefined();
+    expect(saved.proxy).toBeUndefined();
   });
 
   it('Save is disabled when host is empty (validation error)', () => {

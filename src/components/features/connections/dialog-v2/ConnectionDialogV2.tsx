@@ -6,6 +6,7 @@ import { TABS } from './tabs/registry';
 import { dialogReducer, initialDialogState } from './useDialogState';
 import { useConnectionsV2 } from '../useConnectionsV2';
 import { validateConnection } from '../../../../connection/validation';
+import { isBlankSsh, isBlankProxy, isBlankTls } from '../../../../connection/feature-state';
 import { stageHeading } from '../../../../connection/staged-error';
 import type { Connection } from '../../../../connection/model';
 import type { GlobalPrefs } from '../../../../connection/overrides';
@@ -24,6 +25,22 @@ function collectSecrets(secrets: Partial<Record<SecretSlot, string>>): SecretInp
   return Object.entries(secrets)
     .filter(([, value]) => value !== undefined)
     .map(([slot, value]) => ({ slot: slot as SecretSlot, value: value as string }));
+}
+
+/**
+ * Strips disabled-and-blank transport features so they are not persisted.
+ * A feature that is toggled off and carries no user-entered data is dropped;
+ * anything the user typed (even while disabled) is preserved.
+ *
+ * Extension contract: a new toggleable feature self-registers via its
+ * `isBlank*` predicate in feature-state.ts — add one branch here keyed off it.
+ */
+function normalizeForSave(connection: Connection): Connection {
+  const out: Connection = { ...connection };
+  if (out.tls && isBlankTls(out.tls)) delete out.tls;
+  if (out.ssh && isBlankSsh(out.ssh)) delete out.ssh;
+  if (out.proxy && isBlankProxy(out.proxy)) delete out.proxy;
+  return out;
 }
 
 /** Derives the header subtitle line from the dialog mode + target scheme. */
@@ -47,7 +64,7 @@ export function ConnectionDialogV2({ initial, globals, onSave, onCancel }: Props
   const test = useConnectionsV2((store) => store.test);
 
   function handleSave() {
-    onSave({ connection: state.draft, secrets: collectSecrets(state.secrets) });
+    onSave({ connection: normalizeForSave(state.draft), secrets: collectSecrets(state.secrets) });
   }
 
   async function handleTest() {
