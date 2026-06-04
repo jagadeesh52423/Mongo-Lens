@@ -1,6 +1,7 @@
 use crate::connection::secrets::SecretStore;
 use crate::logger::tracing_impl::TracingLogger;
 use crate::logger::Logger;
+use crate::runner::RunnerCredential;
 use crate::ssh::TunnelHandle;
 use mongodb::Client;
 use std::collections::HashMap;
@@ -15,6 +16,14 @@ pub struct AppState {
     /// URI variant (with any fallback query params applied) that the cached client
     /// actually connected with. Keyed by connection id, mirrors `mongo_clients`.
     pub mongo_uris: Mutex<HashMap<String, String>>,
+    /// In-memory credential for the Node query runner, keyed by connection id.
+    /// Mirrors the `mongo_uris` lifecycle: inserted on connect, removed on
+    /// disconnect / SSH session loss. Holds the password in memory for the
+    /// connection's lifetime — same as the live driver `Client` — so the Node
+    /// child can authenticate without requiring secret-store access.
+    /// `None` entry means the connection uses no password-based auth (e.g.
+    /// X509, no-auth, or a URI target with inline creds).
+    pub mongo_runner_creds: Mutex<HashMap<String, RunnerCredential>>,
     /// Active SSH tunnel handles, keyed by connection id.
     /// The Mutex is held only across insert/remove — never across an .await.
     pub ssh_tunnels: Mutex<HashMap<String, TunnelHandle>>,
@@ -40,6 +49,7 @@ impl AppState {
             logs_dir,
             mongo_clients: Mutex::new(HashMap::new()),
             mongo_uris: Mutex::new(HashMap::new()),
+            mongo_runner_creds: Mutex::new(HashMap::new()),
             ssh_tunnels: Mutex::new(HashMap::new()),
             active_scripts: Mutex::new(HashMap::new()),
             logger,

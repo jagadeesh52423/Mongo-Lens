@@ -1,4 +1,7 @@
+pub mod credential;
 pub mod executor;
+
+pub use credential::RunnerCredential;
 
 use std::path::PathBuf;
 

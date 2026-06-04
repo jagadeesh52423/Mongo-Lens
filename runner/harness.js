@@ -297,7 +297,24 @@ function extractLine(err) {
 async function run() {
   process.stderr.write(JSON.stringify({ __debug: `[harness] connecting to db=${dbName}` }) + '\n');
   logger.info('mongo connect start');
-  const client = new MongoClient(uri);
+  // Build MongoClient options from structured credential env vars (Option B).
+  // These are only set for password-based auth modes (SCRAM, LDAP). When
+  // absent the URI-embedded credentials (if any) or no-auth path applies,
+  // so existing URI-target connections keep working unchanged.
+  const clientOptions = {};
+  if (process.env.MONGO_USER) {
+    clientOptions.auth = {
+      username: process.env.MONGO_USER,
+      password: process.env.MONGO_PASS || '',
+    };
+  }
+  if (process.env.MONGO_AUTH_SOURCE) {
+    clientOptions.authSource = process.env.MONGO_AUTH_SOURCE;
+  }
+  if (process.env.MONGO_AUTH_MECHANISM) {
+    clientOptions.authMechanism = process.env.MONGO_AUTH_MECHANISM;
+  }
+  const client = new MongoClient(uri, clientOptions);
   try {
     await client.connect();
   } catch (err) {

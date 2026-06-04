@@ -23,3 +23,14 @@ pub fn active_client(state: &State<'_, AppState>, id: &str) -> Result<mongodb::C
 pub fn active_uri(state: &State<'_, AppState>, id: &str) -> Option<String> {
     state.mongo_uris.lock().unwrap().get(id).cloned()
 }
+
+/// Returns the runner credential for an active connection, if one was stored
+/// at connect time (password-based auth modes only). Mirrors `active_uri` —
+/// `None` means either the connection is not active or it uses non-password
+/// auth (X509, no-auth, URI-embedded creds, etc.).
+pub fn active_runner_cred(
+    state: &State<'_, AppState>,
+    id: &str,
+) -> Option<crate::runner::RunnerCredential> {
+    state.mongo_runner_creds.lock().unwrap().get(id).cloned()
+}

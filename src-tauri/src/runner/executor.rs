@@ -1,6 +1,6 @@
 use crate::logctx;
 use crate::logger::Logger;
-use crate::runner::{harness_path, node_modules_dir, runner_dir};
+use crate::runner::{harness_path, node_modules_dir, runner_dir, RunnerCredential};
 use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -120,8 +120,11 @@ pub fn spawn_script(
     logs_dir: &Path,
     level: &str,
     logger: Arc<dyn Logger>,
+    cred: Option<&RunnerCredential>,
 ) -> Result<std::process::Child, String> {
     let node = resolve_node().ok_or("Node.js not found — check node installation")?;
+    // Credential fields are intentionally excluded from this log line —
+    // passwords must never appear in log output.
     logger.info("spawn runner", logctx! {
         "node" => node,
         "harness" => harness_path().display().to_string(),
@@ -131,8 +134,8 @@ pub fn spawn_script(
         "runId" => run_id,
     });
     // Spawn node directly (not via shell) to avoid login-shell startup noise on stderr
-    Command::new(node)
-        .arg(harness_path())
+    let mut cmd = Command::new(node);
+    cmd.arg(harness_path())
         .arg(database)
         .arg(script_path)
         .env("MONGO_URI", uri)
@@ -142,12 +145,38 @@ pub fn spawn_script(
         .env("MONGOMACAPP_LOGS_DIR", logs_dir.display().to_string())
         .env("MONGOMACAPP_LOG_LEVEL", level)
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .map_err(|e| {
-            logger.error("spawn failed", logctx! { "err" => e.to_string() });
-            e.to_string()
-        })
+        .stderr(std::process::Stdio::piped());
+
+    // Unconditionally clear any MONGO_* auth vars inherited from the parent
+    // process before (re-)setting them. Without this, a shell-level
+    // MONGO_USER / MONGO_PASS present in the environment would silently carry
+    // into a no-auth (AuthMode::None) connection and cause unexpected auth
+    // attempts against the server. Clearing first ensures the runner's auth
+    // comes exclusively from the credential we resolve at connect time.
+    cmd.env_remove("MONGO_USER")
+        .env_remove("MONGO_PASS")
+        .env_remove("MONGO_AUTH_SOURCE")
+        .env_remove("MONGO_AUTH_MECHANISM");
+
+    // Inject auth env vars only when the connection uses a password-based
+    // mechanism. Kept out of logs above to avoid leaking secrets.
+    if let Some(credential) = cred {
+        cmd.env("MONGO_USER", &credential.username);
+        if let Some(password) = &credential.password {
+            cmd.env("MONGO_PASS", password);
+        }
+        if let Some(auth_source) = &credential.auth_source {
+            cmd.env("MONGO_AUTH_SOURCE", auth_source);
+        }
+        if let Some(mechanism) = &credential.mechanism {
+            cmd.env("MONGO_AUTH_MECHANISM", mechanism);
+        }
+    }
+
+    cmd.spawn().map_err(|e| {
+        logger.error("spawn failed", logctx! { "err" => e.to_string() });
+        e.to_string()
+    })
 }
 
 #[tauri::command]

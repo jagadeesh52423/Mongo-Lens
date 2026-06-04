@@ -848,6 +848,75 @@ fn oidc_credential(principal: Option<&str>, provider_name: Option<&str>) -> Cred
 }
 
 // ──────────────────────────────────────────────────────────────────────────
+// Runner credential mapping
+// ──────────────────────────────────────────────────────────────────────────
+
+/// Derive the credential the Node query runner needs from the connection's
+/// auth config + resolved password. Only password-based mechanisms are
+/// expressible as runner env vars today; cert/GSSAPI/IAM/OIDC return `None`.
+///
+/// The mapping mirrors `apply_auth` — add a new arm here when a new
+/// password-based `AuthMode` variant lands (look for "EXTENSION POINT" arms).
+///
+/// # Extension contract
+/// To add a new mode: implement `RunnerCredential` construction in the
+/// matching arm. No other code needs to change.
+pub fn runner_credential(
+    resolved: &ResolvedConnection<'_>,
+) -> Option<crate::runner::RunnerCredential> {
+    use crate::runner::RunnerCredential;
+    // EXTENSION POINT: add a new arm here when a new AuthMode variant lands.
+    match &resolved.conn.auth {
+        AuthMode::None => None,
+        AuthMode::Scram { username, auth_db, mechanism } => Some(RunnerCredential {
+            username: username.clone(),
+            password: resolved.auth_password.clone(),
+            auth_source: Some(auth_db.clone()),
+            mechanism: scram_runner_mechanism_token(mechanism.as_ref()),
+        }),
+        AuthMode::LegacyCr { .. } => {
+            // EXTENSION POINT: add runner support for LegacyCr
+            // (MONGODB-CR is not supported by the Node driver; return None)
+            None
+        }
+        AuthMode::Ldap { username } => Some(RunnerCredential {
+            username: username.clone(),
+            password: resolved.auth_password.clone(),
+            auth_source: Some("$external".into()),
+            mechanism: Some("PLAIN".into()),
+        }),
+        AuthMode::X509 { .. } => {
+            // EXTENSION POINT: add runner support for X509 (cert-based auth)
+            None
+        }
+        AuthMode::Kerberos { .. } => {
+            // EXTENSION POINT: add runner support for Kerberos (GSSAPI)
+            None
+        }
+        AuthMode::AwsIam { .. } => {
+            // EXTENSION POINT: add runner support for AwsIam (MONGODB-AWS)
+            None
+        }
+        AuthMode::Oidc { .. } => {
+            // EXTENSION POINT: add runner support for Oidc (MONGODB-OIDC)
+            None
+        }
+    }
+}
+
+/// Map a SCRAM `ScramMechanism` variant to the wire token the Node driver
+/// accepts as `authMechanism`. Returns `None` for `Auto` / `None` so the
+/// driver negotiates the best mechanism automatically.
+fn scram_runner_mechanism_token(mechanism: Option<&ScramMechanism>) -> Option<String> {
+    match mechanism {
+        Some(ScramMechanism::ScramSha1) => Some("SCRAM-SHA-1".into()),
+        Some(ScramMechanism::ScramSha256) => Some("SCRAM-SHA-256".into()),
+        // Auto / None → let the Node driver negotiate; omit the token.
+        Some(ScramMechanism::Auto) | None => None,
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────────
 // Step 6: Advanced prefs
 // ──────────────────────────────────────────────────────────────────────────
 
@@ -1618,6 +1687,113 @@ mod tests {
             sp.authentication,
             Some(("proxy-user".to_string(), "proxy-pw".to_string()))
         );
+    }
+
+    // ── runner_credential mapping ──────────────────────────────────
+
+    #[test]
+    fn runner_credential_scram_sha256_maps_to_token() {
+        let conn = base_conn(
+            direct_target(),
+            AuthMode::Scram {
+                username: "alice".into(),
+                auth_db: "admin".into(),
+                mechanism: Some(ScramMechanism::ScramSha256),
+            },
+        );
+        let mut resolved = ResolvedConnection::bare(&conn);
+        resolved.auth_password = Some("secret".into());
+        let cred = runner_credential(&resolved).expect("should produce a credential");
+        assert_eq!(cred.username, "alice");
+        assert_eq!(cred.password.as_deref(), Some("secret"));
+        assert_eq!(cred.auth_source.as_deref(), Some("admin"));
+        assert_eq!(cred.mechanism.as_deref(), Some("SCRAM-SHA-256"));
+    }
+
+    #[test]
+    fn runner_credential_scram_sha1_maps_to_token() {
+        let conn = base_conn(
+            direct_target(),
+            AuthMode::Scram {
+                username: "bob".into(),
+                auth_db: "mydb".into(),
+                mechanism: Some(ScramMechanism::ScramSha1),
+            },
+        );
+        let resolved = ResolvedConnection::bare(&conn);
+        let cred = runner_credential(&resolved).expect("should produce a credential");
+        assert_eq!(cred.mechanism.as_deref(), Some("SCRAM-SHA-1"));
+    }
+
+    #[test]
+    fn runner_credential_scram_auto_produces_no_mechanism() {
+        // Auto → let the Node driver negotiate; mechanism field omitted.
+        let conn = base_conn(
+            direct_target(),
+            AuthMode::Scram {
+                username: "u".into(),
+                auth_db: "admin".into(),
+                mechanism: Some(ScramMechanism::Auto),
+            },
+        );
+        let resolved = ResolvedConnection::bare(&conn);
+        let cred = runner_credential(&resolved).expect("should produce a credential");
+        assert!(
+            cred.mechanism.is_none(),
+            "Auto mechanism should not set a mechanism token"
+        );
+    }
+
+    #[test]
+    fn runner_credential_scram_none_mechanism_produces_no_mechanism() {
+        // mechanism=None behaves like Auto — driver negotiates.
+        let conn = base_conn(
+            direct_target(),
+            AuthMode::Scram {
+                username: "u".into(),
+                auth_db: "admin".into(),
+                mechanism: None,
+            },
+        );
+        let resolved = ResolvedConnection::bare(&conn);
+        let cred = runner_credential(&resolved).expect("should produce a credential");
+        assert!(cred.mechanism.is_none());
+    }
+
+    #[test]
+    fn runner_credential_ldap_uses_plain_and_external_source() {
+        let conn = base_conn(
+            direct_target(),
+            AuthMode::Ldap { username: "ldap-user".into() },
+        );
+        let mut resolved = ResolvedConnection::bare(&conn);
+        resolved.auth_password = Some("ldap-pw".into());
+        let cred = runner_credential(&resolved).expect("should produce a credential");
+        assert_eq!(cred.username, "ldap-user");
+        assert_eq!(cred.password.as_deref(), Some("ldap-pw"));
+        assert_eq!(cred.auth_source.as_deref(), Some("$external"));
+        assert_eq!(cred.mechanism.as_deref(), Some("PLAIN"));
+    }
+
+    #[test]
+    fn runner_credential_none_auth_returns_none() {
+        let conn = base_conn(direct_target(), AuthMode::None);
+        let resolved = ResolvedConnection::bare(&conn);
+        assert!(runner_credential(&resolved).is_none());
+    }
+
+    #[test]
+    fn runner_credential_x509_returns_none() {
+        // X509 is cert-based; no password env-var support yet.
+        let conn = base_conn(
+            direct_target(),
+            AuthMode::X509 {
+                cert_file: "/tmp/client.pem".into(),
+                cert_key_file: None,
+            },
+        );
+        let resolved = ResolvedConnection::bare(&conn);
+        assert!(runner_credential(&resolved).is_none());
     }
 
     // ── SSH ────────────────────────────────────────────────────────

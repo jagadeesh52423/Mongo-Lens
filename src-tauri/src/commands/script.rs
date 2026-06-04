@@ -103,6 +103,11 @@ pub async fn run_script(
         "connection not established — connect first".to_string()
     })?;
 
+    // Fetch the runner credential (if any) for this connection. Only present
+    // for password-based auth modes; None for X509 / no-auth / URI-embedded
+    // creds. Intentionally not logged — password must stay out of log output.
+    let cred = mongo::active_runner_cred(&state, &connection_id);
+
     // For diagnostics only — derive a one-line "where" string from the v2
     // model. Failure to look up the connection here is non-fatal (we have
     // a working URI already); just emit a tag-free debug log.
@@ -154,6 +159,7 @@ pub async fn run_script(
             &state.logs_dir,
             &level,
             state.logger.clone(),
+            cred.as_ref(),
         )?;
         log.info("child spawned", logctx! { "pid" => child.id() });
         let stdout = child.stdout.take().ok_or_else(|| {

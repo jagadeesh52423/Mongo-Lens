@@ -540,6 +540,7 @@ async fn handle_session_loss_v2(
     let state: State<'_, AppState> = app_handle.state();
     let client: Option<Client> = state.mongo_clients.lock().unwrap().remove(&connection_id);
     state.mongo_uris.lock().unwrap().remove(&connection_id);
+    state.mongo_runner_creds.lock().unwrap().remove(&connection_id);
     let tunnel: Option<TunnelHandle> = state.ssh_tunnels.lock().unwrap().remove(&connection_id);
 
     if let Some(c) = client {
@@ -836,6 +837,16 @@ pub async fn connections_v2_connect(
         .unwrap()
         .insert(id.clone(), resolved_uri);
 
+    // Store the runner credential alongside the URI so the Node child process
+    // can authenticate. Only present for password-based modes; None is a no-op.
+    if let Some(cred) = crate::connection::builder::runner_credential(&resolved) {
+        state
+            .mongo_runner_creds
+            .lock()
+            .unwrap()
+            .insert(id.clone(), cred);
+    }
+
     if let Some(t) = tunnel {
         // Spawn the session-loss monitor BEFORE inserting the handle
         // into state so a race-condition close can't disarm the watch.
@@ -873,10 +884,11 @@ pub async fn connections_v2_disconnect(
     });
     log.info("connections_v2_disconnect", logctx! {});
 
-    // Drain the client + uri entries first (I-2: pool before tunnel).
+    // Drain the client + uri + runner-cred entries first (I-2: pool before tunnel).
     // Drop the Mutex before awaiting shutdown — never hold across await.
     let client = state.mongo_clients.lock().unwrap().remove(&id);
     state.mongo_uris.lock().unwrap().remove(&id);
+    state.mongo_runner_creds.lock().unwrap().remove(&id);
 
     if let Some(c) = client {
         let _ = tokio::time::timeout(std::time::Duration::from_secs(3), c.shutdown()).await;
