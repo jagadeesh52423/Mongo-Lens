@@ -221,6 +221,29 @@ describe('harness integration tests', () => {
     expect(plan.queryPlanner || plan.stages || plan.command).toBeTruthy();
   });
 
+  it('change stream (.watch()) emits an unsupported notice and exits cleanly', async () => {
+    const result = await spawnHarness('db.alert_tracker.watch()');
+    expect(result.error).toBeNull();
+    expect(result.exitCode).toBe(0);
+    expect(result.groups.length).toBe(1);
+    expect(result.groups[0].category).toBe('stream');
+    expect(result.groups[0].docs[0]).toHaveProperty('notice');
+    expect(result.groups[0].docs[0].notice).toMatch(/not supported/i);
+  });
+
+  it('keeps group classification aligned when a watch sits between queries', async () => {
+    const result = await spawnHarness(
+      'db.alert_tracker.find({});\ndb.alert_tracker.watch();\ndb.alert_tracker.find({});',
+      { pageSize: 2 },
+    );
+    expect(result.error).toBeNull();
+    expect(result.exitCode).toBe(0);
+    expect(result.groups.length).toBe(3);
+    expect(result.groups[0].category).toBe('query');
+    expect(result.groups[1].category).toBe('stream');
+    expect(result.groups[2].category).toBe('query');
+  });
+
   it('invalid syntax produces an error and non-zero exit code', async () => {
     const result = await spawnHarness('db.alert_tracker.find(INVALID');
     expect(result.error).not.toBeNull();

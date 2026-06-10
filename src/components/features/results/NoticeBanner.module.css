@@ -1,0 +1,6 @@
+.banner {
+  padding: var(--space-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  border-bottom: 1px solid var(--border);
+}

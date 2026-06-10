@@ -93,20 +93,36 @@ function truncationNotice(shown) {
     'Add a tighter filter/.limit(), or raise MONGO_MAX_DOCS to see more.';
 }
 
+// Surfaced (as a result-group doc) when a script opens a change stream. The
+// runner cannot stream live updates to the UI yet, so .watch() would otherwise
+// produce silence. ResultsPanel renders the 'stream' category as a notice.
+const CHANGE_STREAM_NOTICE =
+  'Change streams (.watch()) are not supported yet — the cursor was closed and no live updates will appear here.';
+
+function safeWatch(open) {
+  try { return open(); } catch (_e) { return null; }
+}
+
+function closeChangeStream(stream) {
+  if (!stream || typeof stream.close !== 'function') return;
+  try {
+    const closing = stream.close();
+    if (closing && typeof closing.then === 'function') closing.catch(() => {});
+  } catch (_e) { /* best-effort close */ }
+}
+
 // Pre-classify every top-level statement. The harness emits groups in
 // statement order (one emitGroup call per MongoDB op, 1:1 with classified
 // statements); `groupClassifications` is consumed by index as groups emit.
 //
-// We drop two kinds of classifications to keep that 1:1 alignment:
-//   - category === null: statement isn't a MongoDB op (pure JS, etc.)
-//   - category === 'stream': watch() returns an infinite ChangeStream and
-//     has no terminal value to emit. Including it would shift every later
-//     group's classification by one.
-// (listIndexes is handled by materialising in makeCollectionProxy, so it
-// stays in the array.)
+// We drop only category === null (statement isn't a MongoDB op — pure JS, etc.).
+// A 'stream' (watch()) statement IS kept: makeCollectionProxy emits exactly one
+// "unsupported" notice group for it, so it occupies its slot and every later
+// group's classification stays aligned. (listIndexes likewise materialises in
+// makeCollectionProxy, so it stays in the array.)
 const groupClassifications = splitStatements(rawScript)
   .map((stmt) => classify(stmt))
-  .filter((c) => c.category !== null && c.category !== 'stream');
+  .filter((c) => c.category !== null);
 
 function emitPagination(total, page, pageSize) {
   process.stdout.write(
@@ -276,6 +292,20 @@ function makeCollectionProxy(col) {
           });
       }
 
+      // watch returns a long-lived ChangeStream the UI cannot consume yet.
+      // Close it immediately (an open change-stream cursor keeps the Node event
+      // loop alive and hangs the harness process), and emit a single notice
+      // group so the statement is visible instead of producing silence. The
+      // group occupies this statement's 'stream' classification slot, keeping
+      // later groups aligned.
+      if (prop === 'watch') {
+        return (...args) => {
+          closeChangeStream(safeWatch(() => target.watch(...args)));
+          emitGroup({ notice: CHANGE_STREAM_NOTICE });
+          return null;
+        };
+      }
+
       const val = target[prop];
       if (typeof val !== 'function') return val;
 
@@ -331,6 +361,16 @@ function wrapDb(raw) {
     get(target, prop) {
       if (prop === 'collection' || prop === 'getCollection') {
         return (n) => makeCollectionProxy(target.collection(n));
+      }
+      // Database-level change stream (db.watch()). Unlike a collection watch it
+      // has no classification slot, so surface the notice on the console (__log)
+      // channel rather than as a result group, and close it to avoid hanging.
+      if (prop === 'watch') {
+        return (...args) => {
+          closeChangeStream(safeWatch(() => target.watch(...args)));
+          emitNotice(CHANGE_STREAM_NOTICE);
+          return null;
+        };
       }
       const val = target[prop];
       if (val === undefined && typeof prop === 'string' && !prop.startsWith('_')) {
