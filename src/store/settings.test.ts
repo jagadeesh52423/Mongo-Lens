@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi, type MockedFunction } from 'vitest';
 import { hydrateOverrides, setVariable, getAllOverrides } from '../themes/overrides';
 import { migrateThemeId } from './settings';
+import { useNotificationsStore } from './notifications';
 
 // Mocked store instance returned by Store.load()
 const mockStoreGet = vi.fn();
@@ -33,6 +34,7 @@ beforeEach(() => {
 
   // Reset overrides state between tests
   hydrateOverrides({});
+  useNotificationsStore.setState({ notifications: [] });
 
   // Reset store state to defaults
   useSettingsStore.setState({
@@ -133,6 +135,28 @@ describe('overrides subscription → persist', () => {
     expect(mockStoreSet).toHaveBeenCalled();
     const [[_key, payload]] = (mockStoreSet as MockedFunction<typeof mockStoreSet>).mock.calls;
     expect(payload.themeOverrides).toEqual({ 'mongodb-dark': { '--bg-primary': '#111' } });
+  });
+});
+
+describe('persist failure surfacing', () => {
+  it('pushes an error notification when the store save rejects', async () => {
+    mockStoreSave.mockRejectedValueOnce(new Error('disk full'));
+
+    useSettingsStore.getState().setTheme('precision-light');
+
+    // Wait for the async persist call to settle and hit the catch block.
+    await new Promise((r) => setTimeout(r, 0));
+
+    const notifications = useNotificationsStore.getState().notifications;
+    expect(notifications).toHaveLength(1);
+    expect(notifications[0].level).toBe('error');
+    expect(notifications[0].detail).toContain('disk full');
+  });
+
+  it('does not notify when persistence succeeds', async () => {
+    useSettingsStore.getState().setTheme('precision-light');
+    await new Promise((r) => setTimeout(r, 0));
+    expect(useNotificationsStore.getState().notifications).toHaveLength(0);
   });
 });
 

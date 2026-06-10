@@ -9,6 +9,7 @@ import { AIChatPanel } from '../ai/AIChatPanel';
 import { SettingsView } from '../../../settings/SettingsView';
 import { SplitHandle } from '../../shared/SplitHandle';
 import { ErrorBoundary } from '../../ui/ErrorBoundary';
+import { Toaster } from '../../ui/Toaster';
 import type { ActivityItem } from '../../../layout/activityBar';
 import { useConnectionsV2 } from '../connections/useConnectionsV2';
 import { useLogger } from '../../../services/logger';
@@ -119,6 +120,7 @@ export function AppShell({
         database={activeDatabase ?? undefined}
         nodeStatus="Node.js ready"
       />
+      <Toaster />
     </div>
   );
 }
