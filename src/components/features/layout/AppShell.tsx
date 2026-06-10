@@ -8,8 +8,10 @@ import { AIFloatingButton } from '../ai/AIFloatingButton';
 import { AIChatPanel } from '../ai/AIChatPanel';
 import { SettingsView } from '../../../settings/SettingsView';
 import { SplitHandle } from '../../shared/SplitHandle';
+import { ErrorBoundary } from '../../ui/ErrorBoundary';
 import type { ActivityItem } from '../../../layout/activityBar';
 import { useConnectionsV2 } from '../connections/useConnectionsV2';
+import { useLogger } from '../../../services/logger';
 import styles from './AppShell.module.css';
 
 interface Props {
@@ -50,6 +52,7 @@ export function AppShell({
   onClearContext,
 }: Props) {
   const sidePanelRef = useRef<ImperativePanelHandle>(null);
+  const logger = useLogger('EditorArea');
   const { connections, activeConnectionId, activeDatabase } = useConnectionsV2();
   const active = connections.find((c) => c.id === activeConnectionId);
 
@@ -80,7 +83,18 @@ export function AppShell({
               <SplitHandle direction="horizontal" />
               <Panel minSize={50} defaultSize={80}>
                 <div className={styles.editorPane}>
-                  <EditorArea />
+                  <ErrorBoundary
+                    fallbackLabel="The editor failed to load"
+                    onError={(error, info) =>
+                      logger.error('EditorArea crashed', {
+                        error: error.message,
+                        stack: error.stack,
+                        componentStack: info.componentStack ?? undefined,
+                      })
+                    }
+                  >
+                    <EditorArea />
+                  </ErrorBoundary>
                 </div>
               </Panel>
             </PanelGroup>

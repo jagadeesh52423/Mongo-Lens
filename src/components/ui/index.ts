@@ -1,4 +1,5 @@
 export * from './Button';
+export * from './ErrorBoundary';
 export * from './IconButton';
 export * from './Panel';
 export * from './Toolbar';
