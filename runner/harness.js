@@ -1,3 +1,11 @@
+// ───────────────────────────────────────────────────────────────────────────
+// MongoLens runner harness — DEPLOY-BY-COPY GUARDED.
+// Bundled into the Tauri binary (include_str!) and installed to
+// ~/.mongomacapp/runner/harness.js. On first spawn the Rust executor compares
+// the installed copy against the bundled source and logs a warning banner if
+// they diverge. After editing this file you MUST redeploy:
+//     cp runner/harness.js ~/.mongomacapp/runner/harness.js
+// ───────────────────────────────────────────────────────────────────────────
 const { MongoClient } = require('mongodb');
 const fs = require('fs');
 const { createLogger } = require('./logger');

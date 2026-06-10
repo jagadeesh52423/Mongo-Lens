@@ -10,6 +10,15 @@ use std::time::{Duration, Instant};
 
 static NODE_PATH: OnceLock<String> = OnceLock::new();
 
+/// Bundled runner harness source, embedded at build time. The deploy-by-copy
+/// guard compares this against the installed `~/.mongomacapp/runner/harness.js`
+/// so a stale install (edited source never redeployed, or stale binary) is
+/// detected instead of silently running divergent code.
+const BUNDLED_HARNESS: &str = include_str!("../../../runner/harness.js");
+
+// Run the integrity check at most once per process.
+static INTEGRITY_CHECKED: OnceLock<()> = OnceLock::new();
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RunnerStatus {
@@ -124,6 +133,8 @@ pub fn spawn_script(
     cred: Option<&RunnerCredential>,
 ) -> Result<std::process::Child, String> {
     let node = resolve_node().ok_or("Node.js not found — check node installation")?;
+    // Deploy-by-copy guard: detect a stale installed harness once per process.
+    INTEGRITY_CHECKED.get_or_init(|| verify_runner_integrity(logger.as_ref()));
     // Credential fields are intentionally excluded from this log line —
     // passwords must never appear in log output.
     logger.info("spawn runner", logctx! {
@@ -250,10 +261,60 @@ pub fn check_node_runner() -> RunnerStatus {
 
 #[tauri::command]
 pub fn install_node_runner() -> Result<(), String> {
-    const HARNESS: &str = include_str!("../../../runner/harness.js");
     const LOGGER_JS: &str = include_str!("../../../runner/logger.js");
     const REDACT_JS: &str = include_str!("../../../runner/redact.js");
-    install_runner(HARNESS, LOGGER_JS, REDACT_JS)
+    install_runner(BUNDLED_HARNESS, LOGGER_JS, REDACT_JS)
+}
+
+#[derive(PartialEq, Debug)]
+enum HarnessIntegrity {
+    Match,
+    Drift,
+    Unreadable,
+}
+
+fn check_harness_integrity(installed: Option<&str>) -> HarnessIntegrity {
+    match installed {
+        Some(content) if content == BUNDLED_HARNESS => HarnessIntegrity::Match,
+        Some(_) => HarnessIntegrity::Drift,
+        None => HarnessIntegrity::Unreadable,
+    }
+}
+
+// FNV-1a 64-bit — dependency-free short content fingerprint for log lines, so a
+// drift warning carries a comparable id without dumping whole files.
+fn fingerprint(content: &str) -> String {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in content.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    format!("{hash:016x}")
+}
+
+/// Deploy-by-copy guard: warn loudly when the installed harness diverges from
+/// the bundled source. Run once per process (subsequent calls are no-ops).
+fn verify_runner_integrity(logger: &dyn Logger) {
+    let path = harness_path();
+    let installed = fs::read_to_string(&path).ok();
+    match check_harness_integrity(installed.as_deref()) {
+        HarnessIntegrity::Match => logger.debug("runner integrity ok", logctx! {
+            "fingerprint" => fingerprint(BUNDLED_HARNESS),
+        }),
+        HarnessIntegrity::Drift => logger.warn(
+            "RUNNER OUT OF DATE — installed harness.js differs from the bundled source. \
+             Run install_node_runner or `cp runner/harness.js ~/.mongomacapp/runner/harness.js`.",
+            logctx! {
+                "installed" => path.display().to_string(),
+                "installedFingerprint" => fingerprint(installed.as_deref().unwrap_or("")),
+                "bundledFingerprint" => fingerprint(BUNDLED_HARNESS),
+            },
+        ),
+        HarnessIntegrity::Unreadable => logger.warn(
+            "runner integrity check skipped — installed harness.js is unreadable",
+            logctx! { "installed" => path.display().to_string() },
+        ),
+    }
 }
 
 #[cfg(test)]
@@ -298,5 +359,29 @@ mod tests {
     fn kill_grace_falls_back_to_default_when_env_unset() {
         std::env::remove_var("MONGOMACAPP_KILL_GRACE_MS");
         assert_eq!(kill_grace(), Duration::from_millis(DEFAULT_KILL_GRACE_MS));
+    }
+
+    #[test]
+    fn integrity_matches_when_installed_equals_bundled() {
+        assert_eq!(
+            check_harness_integrity(Some(BUNDLED_HARNESS)),
+            HarnessIntegrity::Match
+        );
+    }
+
+    #[test]
+    fn integrity_reports_drift_and_unreadable() {
+        assert_eq!(
+            check_harness_integrity(Some("stale harness")),
+            HarnessIntegrity::Drift
+        );
+        assert_eq!(check_harness_integrity(None), HarnessIntegrity::Unreadable);
+    }
+
+    #[test]
+    fn fingerprint_is_stable_and_distinguishes_content() {
+        assert_eq!(fingerprint("abc"), fingerprint("abc"));
+        assert_ne!(fingerprint("abc"), fingerprint("abd"));
+        assert_eq!(fingerprint("abc").len(), 16);
     }
 }
