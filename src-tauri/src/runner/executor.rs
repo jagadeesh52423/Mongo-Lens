@@ -219,10 +219,7 @@ fn kill_grace() -> Duration {
 /// client, wait up to the grace window, then SIGKILL + reap if still alive.
 /// Always reaps the child. Returns true when SIGTERM alone was sufficient.
 ///
-/// Wiring: the cancel/timeout `child.kill()` call sites in
-/// `crate::commands::script` must call this instead. Until that wiring lands the
-/// fn is unreferenced in the binary build, hence the `allow(dead_code)`.
-#[allow(dead_code)]
+/// Called by the cancel/timeout paths in `crate::commands::script`.
 pub fn terminate_child(child: &mut Child) -> bool {
     send_sigterm(child.id());
     let deadline = Instant::now() + kill_grace();
@@ -246,7 +243,6 @@ pub fn terminate_child(child: &mut Child) -> bool {
 // std has no portable signal API and the project pulls in no libc/nix crate, so
 // shell out to /bin/kill (always present on macOS, the only supported target)
 // to deliver SIGTERM.
-#[allow(dead_code)]
 fn send_sigterm(pid: u32) {
     let _ = Command::new("/bin/kill")
         .arg("-TERM")
