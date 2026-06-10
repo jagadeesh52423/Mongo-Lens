@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { PluginDetailPane } from '../plugins/ui/PluginDetailPane';
+import { PluginDetailPane, stateBadgeStyle } from '../plugins/ui/PluginDetailPane';
 import type { PluginRecord } from '../plugins/PluginManager';
 import type { PluginFs } from '../plugins/io';
 import { ConfigService } from '../plugins/config/ConfigService';
@@ -98,6 +98,29 @@ describe('PluginDetailPane', () => {
       onEnable={onEnable} onDisable={() => {}} onUninstall={() => {}} />);
     fireEvent.click(screen.getByRole('button', { name: /Enable/i }));
     expect(onEnable).toHaveBeenCalledWith('acme.foo');
+  });
+});
+
+describe('stateBadgeStyle — themeable colors', () => {
+  const states = ['active', 'discovered', 'failed', 'broken', 'incompatible', 'disabled'];
+
+  it('uses theme tokens, never hardcoded hex or rgba literals', () => {
+    for (const state of states) {
+      const style = stateBadgeStyle(state);
+      const colors = `${String(style.background)} ${String(style.color)}`;
+      expect(colors).not.toMatch(/#[0-9a-f]{3,8}\b/i);
+      expect(colors).not.toMatch(/\brgba?\(/i);
+      expect(colors).toMatch(/var\(--/);
+    }
+  });
+
+  it('maps active to the green accent token and failed to the red accent token', () => {
+    expect(stateBadgeStyle('active').color).toContain('var(--accent-green)');
+    expect(stateBadgeStyle('failed').color).toContain('var(--accent-red)');
+  });
+
+  it('falls back to the discovered palette for an unknown state', () => {
+    expect(stateBadgeStyle('totally-unknown')).toEqual(stateBadgeStyle('discovered'));
   });
 });
 

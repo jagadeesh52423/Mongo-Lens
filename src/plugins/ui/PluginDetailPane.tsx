@@ -188,23 +188,37 @@ const metaStyle: CSSProperties = {
   color: 'var(--fg-dim)',
 };
 
-function stateBadgeStyle(state: string): CSSProperties {
-  const palette: Record<string, { bg: string; fg: string }> = {
-    active:       { bg: 'rgba(80,160,80,0.18)',  fg: '#4caf50' },
-    discovered:   { bg: 'rgba(120,140,180,0.18)', fg: 'var(--fg-dim)' },
-    failed:       { bg: 'rgba(200,80,80,0.18)',  fg: '#e57373' },
-    broken:       { bg: 'rgba(200,80,80,0.18)',  fg: '#e57373' },
-    incompatible: { bg: 'rgba(200,140,80,0.18)', fg: '#ffb74d' },
-    disabled:     { bg: 'rgba(120,120,120,0.18)', fg: 'var(--fg-dim)' },
-  };
-  const c = palette[state] ?? palette.discovered;
+interface BadgePalette {
+  bg: string;
+  fg: string;
+}
+
+/**
+ * state → themeable badge colors. Backgrounds use color-mix over a semantic
+ * accent token (same alpha-derivation pattern as tokens.css) so the badge
+ * tracks the active theme instead of breaking under it.
+ * To support a new state: add a row. No other change needed.
+ */
+const STATE_BADGE_PALETTE: Record<string, BadgePalette> = {
+  active:       { bg: 'color-mix(in srgb, var(--accent-green) 18%, transparent)', fg: 'var(--accent-green)' },
+  discovered:   { bg: 'color-mix(in srgb, var(--fg-muted) 15%, transparent)',     fg: 'var(--fg-dim)' },
+  failed:       { bg: 'color-mix(in srgb, var(--accent-red) 18%, transparent)',   fg: 'var(--accent-red)' },
+  broken:       { bg: 'color-mix(in srgb, var(--accent-red) 18%, transparent)',   fg: 'var(--accent-red)' },
+  incompatible: { bg: 'color-mix(in srgb, var(--accent-amber) 18%, transparent)', fg: 'var(--accent-amber)' },
+  disabled:     { bg: 'color-mix(in srgb, var(--fg-muted) 15%, transparent)',     fg: 'var(--fg-dim)' },
+};
+
+const DEFAULT_BADGE_STATE = 'discovered';
+
+export function stateBadgeStyle(state: string): CSSProperties {
+  const palette = STATE_BADGE_PALETTE[state] ?? STATE_BADGE_PALETTE[DEFAULT_BADGE_STATE];
   return {
     fontSize: 11,
     fontWeight: 500,
     padding: '2px 8px',
     borderRadius: 10,
-    background: c.bg,
-    color: c.fg,
+    background: palette.bg,
+    color: palette.fg,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   };
