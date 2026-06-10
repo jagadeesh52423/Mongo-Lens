@@ -1,3 +1,4 @@
+use crate::connection::secrets::{MasterKeyOutcome, MasterKeyProvider};
 use crate::logctx;
 use crate::logger::Logger;
 use core_foundation::base::TCFType;
@@ -8,7 +9,7 @@ use ring::aead::{Aad, BoundKey, Nonce, NonceSequence, OpeningKey, SealingKey, Un
 use ring::error::Unspecified;
 use security_framework::os::macos::keychain::SecKeychain;
 use security_framework::os::macos::keychain_item::SecKeychainItem;
-use security_framework::passwords::{delete_generic_password, get_generic_password};
+use security_framework::passwords::get_generic_password;
 use security_framework_sys::base::{errSecSuccess, SecKeychainItemRef};
 use security_framework_sys::keychain::SecKeychainAddGenericPassword;
 use std::fs;
@@ -22,6 +23,14 @@ const SERVICE: &str = "com.mongomacapp.app";
 const MASTER_KEY_ACCOUNT: &str = "mongomacapp.master-encryption-key";
 const MASTER_KEY_SIZE: usize = 32; // 256 bits for AES-256
 const NONCE_SIZE: usize = 12; // 96 bits for GCM
+
+/// Surfaced when the master key is gone but encrypted blobs still exist
+/// (e.g. a forced macOS keychain reset). The app refuses to regenerate the
+/// key over them — that would orphan every stored secret. Blobs are kept;
+/// recovery is re-entry.
+const KEY_UNRECOVERABLE_MSG: &str =
+    "Stored secret unavailable: the encryption key is missing but encrypted data exists \
+     (likely a macOS keychain reset). Re-enter the affected secret to continue.";
 
 /// FFI declarations for macOS Security framework functions not exposed
 /// by the `security-framework-sys` crate (ACL and trusted application APIs).
@@ -172,100 +181,144 @@ impl NonceSequence for OneNonceSequence {
     }
 }
 
-/// Gets the master encryption key from Keychain, or creates one if missing.
+/// Stores `secret` as a generic-password keychain item under
+/// `(service, account)` with a self-trusted ACL so future reads from this
+/// binary don't prompt.
 ///
-/// The master key is a 256-bit (32-byte) random key used to encrypt all
-/// connection passwords. It's stored in Keychain with account
-/// `mongomacapp.master-encryption-key` and a self-trusted ACL so that
-/// future accesses from this binary don't trigger password prompts.
-///
-/// If the key doesn't exist, a new one is generated, stored, and returned.
-/// If generation/storage fails, returns Err.
-fn get_or_create_master_key(log: &dyn Logger) -> Result<Vec<u8>, String> {
-    // Try to retrieve existing master key from Keychain
-    match get_generic_password(SERVICE, MASTER_KEY_ACCOUNT) {
-        Ok(key_bytes) => {
-            if key_bytes.len() == MASTER_KEY_SIZE {
-                log.debug("master key retrieved", logctx! {
-                    "size" => key_bytes.len(),
-                });
-                return Ok(key_bytes);
-            } else {
-                log.warn("master key wrong size, regenerating", logctx! {
-                    "got" => key_bytes.len(),
-                    "expected" => MASTER_KEY_SIZE,
-                });
-                // Delete the malformed key before regenerating
-                delete_generic_password(SERVICE, MASTER_KEY_ACCOUNT).ok();
-                // Fall through to regenerate
-            }
-        }
-        Err(e) => {
-            let msg = format!("{}", e);
-            if msg.contains("-25300") || msg.contains("not found") || msg.contains("could not be found") {
-                log.info("master key not found, creating new", logctx! {});
-                // Fall through to create new key
-            } else {
-                log.error("keychain access failed", logctx! {
-                    "err" => e.to_string(),
-                });
-                return Err(format!("Failed to access keychain: {}", e));
-            }
-        }
-    }
-
-    // Generate a new 256-bit master key
-    let mut key = vec![0u8; MASTER_KEY_SIZE];
-    OsRng.fill_bytes(&mut key);
-
-    log.info("generated new master key", logctx! {
-        "size" => key.len(),
-    });
-
-    // Store the master key in Keychain
+/// Returns `Ok(None)` when our write succeeded, or `Ok(Some(existing))` when
+/// a concurrent create won the race (errSecDuplicateItem) and we re-fetched
+/// the stored value. Shared by the legacy path and the v2
+/// `KeychainMasterKeyProvider` so the ACL hardening lives in exactly one
+/// place (the v2 entry previously lacked it).
+pub(crate) fn add_generic_password_with_self_trust(
+    service: &str,
+    account: &str,
+    secret: &[u8],
+    acl_label: &str,
+    log: &dyn Logger,
+) -> Result<Option<Vec<u8>>, String> {
     let keychain = SecKeychain::default().map_err(|e| {
-        log.error("keychain default failed", logctx! {
-            "err" => e.to_string(),
-        });
+        log.error("keychain default failed", logctx! { "err" => e.to_string() });
         e.to_string()
     })?;
 
-    // Use legacy API to capture item ref and apply self-trusted ACL
+    // Legacy API captures the item ref so we can apply the self-trusted ACL.
     let (status, item_ref) = unsafe {
         let mut item_ref: SecKeychainItemRef = ptr::null_mut();
         let status = SecKeychainAddGenericPassword(
             keychain.as_concrete_TypeRef() as *mut _,
-            SERVICE.len() as u32,
-            SERVICE.as_ptr().cast(),
-            MASTER_KEY_ACCOUNT.len() as u32,
-            MASTER_KEY_ACCOUNT.as_ptr().cast(),
-            key.len() as u32,
-            key.as_ptr().cast(),
+            service.len() as u32,
+            service.as_ptr().cast(),
+            account.len() as u32,
+            account.as_ptr().cast(),
+            secret.len() as u32,
+            secret.as_ptr().cast(),
             &mut item_ref,
         );
         (status, item_ref)
     };
 
     if status == errSecSuccess {
-        // Apply self-trusted ACL so future accesses don't prompt
         if !item_ref.is_null() {
             let item = unsafe { SecKeychainItem::wrap_under_create_rule(item_ref) };
-            apply_self_trusted_acl(&item, "master-key", log);
+            apply_self_trusted_acl(&item, acl_label, log);
         }
-        log.info("master key stored successfully", logctx! {});
-        Ok(key)
+        Ok(None)
     } else if status == -25299 {
-        // errSecDuplicateItem: another process/thread created the key
-        // between our check and store. Retrieve the existing one.
-        log.info("master key already exists (concurrent create), retrieving", logctx! {});
-        get_generic_password(SERVICE, MASTER_KEY_ACCOUNT)
-            .map_err(|e| format!("Failed to retrieve master key after duplicate: {}", e))
+        // errSecDuplicateItem: a concurrent create stored it first.
+        log.info(
+            "keychain item already exists (concurrent create), retrieving",
+            logctx! { "account" => account },
+        );
+        get_generic_password(service, account)
+            .map(Some)
+            .map_err(|e| format!("Failed to retrieve existing keychain item: {}", e))
     } else {
-        log.error("master key storage failed", logctx! {
-            "status" => status,
-        });
-        Err(format!("Failed to store master key: OSStatus {}", status))
+        log.error(
+            "keychain item storage failed",
+            logctx! { "account" => account, "status" => status },
+        );
+        Err(format!("Failed to store keychain item: OSStatus {}", status))
     }
+}
+
+/// True if any legacy `~/.mongomacapp/encrypted/*.bin` ciphertext blob
+/// exists. A missing dir counts as "no blobs". Used to gate master-key
+/// creation: we never regenerate a key when ciphertext it can't decrypt
+/// already exists.
+fn legacy_blobs_exist() -> bool {
+    let dir = match std::env::var("HOME") {
+        Ok(home) => Path::new(&home).join(".mongomacapp").join("encrypted"),
+        Err(_) => return false,
+    };
+    match fs::read_dir(&dir) {
+        Ok(entries) => entries.flatten().any(|entry| {
+            entry
+                .file_name()
+                .to_str()
+                .map(|name| name.ends_with(".bin"))
+                .unwrap_or(false)
+        }),
+        Err(_) => false,
+    }
+}
+
+/// Resolve a master key from `provider`, gating creation on `blobs_exist` so
+/// the key is NEVER regenerated over existing ciphertext.
+///
+/// * `Found`       → use it.
+/// * `Unavailable` → transient error; refuse to regenerate (retryable).
+/// * `Absent` + no blobs → genuine first run; create + persist a key.
+/// * `Absent` + blobs exist → the keychain was reset out from under intact
+///   blobs; refuse and surface [`KEY_UNRECOVERABLE_MSG`].
+///
+/// Pure with respect to the keychain (the provider owns that), so it is unit-
+/// testable with an in-memory provider.
+fn resolve_master_key(
+    provider: &dyn MasterKeyProvider,
+    blobs_exist: bool,
+    log: &dyn Logger,
+) -> Result<Vec<u8>, String> {
+    match provider.fetch() {
+        MasterKeyOutcome::Found(key) => Ok(key[..].to_vec()),
+        MasterKeyOutcome::Unavailable(detail) => {
+            log.error(
+                "master key unavailable (transient); not regenerating",
+                logctx! { "err" => detail.clone() },
+            );
+            Err(format!("Failed to access keychain: {}", detail))
+        }
+        MasterKeyOutcome::Absent => {
+            if blobs_exist {
+                log.error(
+                    "master key absent but ciphertext exists; refusing to regenerate",
+                    logctx! {},
+                );
+                Err(KEY_UNRECOVERABLE_MSG.to_string())
+            } else {
+                log.info("master key absent, no ciphertext yet; creating new", logctx! {});
+                provider
+                    .create()
+                    .map(|key| key[..].to_vec())
+                    .map_err(|e| e.to_string())
+            }
+        }
+    }
+}
+
+/// Gets the legacy master encryption key from Keychain, or creates one if
+/// missing — but NEVER regenerates over existing ciphertext (a forced
+/// keychain reset surfaces [`KEY_UNRECOVERABLE_MSG`] instead of silently
+/// orphaning blobs). Creation applies a self-trusted ACL so future reads
+/// from this binary don't prompt.
+fn get_or_create_master_key(log: &dyn Logger) -> Result<Vec<u8>, String> {
+    let provider = crate::connection::secrets::KeychainMasterKeyProvider::new(
+        SERVICE,
+        MASTER_KEY_ACCOUNT,
+        "master-key",
+        log.child(logctx! {}),
+    );
+    resolve_master_key(&provider, legacy_blobs_exist(), log)
 }
 
 /// Encrypts a password using AES-256-GCM with a random nonce.
@@ -404,20 +457,24 @@ fn atomic_write_file(path: &Path, data: &[u8]) -> Result<(), String> {
 
 pub fn set_password(connection_id: &str, password: &str, log: &dyn Logger) -> Result<(), String> {
     // NEVER log `password` — only log that a set happened.
-
-    // Get or create master key
     let master_key = get_or_create_master_key(log)?;
+    set_password_with_key(connection_id, password, &master_key, log)
+}
 
-    // Encrypt password
-    let encrypted = encrypt_password(password, &master_key)?;
-
-    // Ensure encrypted directory exists
+/// Encrypt + persist a password under an explicitly-supplied master key,
+/// bypassing keychain resolution. Production `set_password` resolves the key
+/// then delegates here; tests inject a fixed key so they never touch the real
+/// keychain.
+fn set_password_with_key(
+    connection_id: &str,
+    password: &str,
+    master_key: &[u8],
+    log: &dyn Logger,
+) -> Result<(), String> {
+    let encrypted = encrypt_password(password, master_key)?;
     let dir = ensure_encrypted_dir()?;
     let file_path = dir.join(format!("{}.bin", connection_id));
-
-    // Write encrypted data atomically
     atomic_write_file(&file_path, &encrypted)?;
-
     log.info("password set", logctx! { "connId" => connection_id });
     Ok(())
 }
@@ -484,249 +541,211 @@ pub fn delete_password(connection_id: &str, log: &dyn Logger) -> Result<(), Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::connection::secrets::InMemoryMasterKeyProvider;
     use crate::logger::MemoryLogger;
     use std::sync::Mutex;
 
-    /// Serializes master key tests that share the same keychain item.
-    /// Parallel keychain access to the same item causes macOS ACL races.
-    static MASTER_KEY_LOCK: Mutex<()> = Mutex::new(());
+    /// Serializes tests that mutate the process-global `HOME` env var (so the
+    /// legacy blob dir resolves into a per-test tempdir). Unlike the removed
+    /// `MASTER_KEY_LOCK`, this guards an env var, not the real keychain — no
+    /// keychain access means no panic-while-holding, so no poison cascade.
+    /// Recovered on poison anyway, defensively.
+    static HOME_LOCK: Mutex<()> = Mutex::new(());
 
-    #[test]
-    fn get_or_create_master_key_generates_32_bytes() {
-        let _lock = MASTER_KEY_LOCK.lock().unwrap();
-        let _ui_lock = SecKeychain::disable_user_interaction()
-            .expect("disable_user_interaction");
-        // Clean slate: remove any leftover master key from prior test runs
-        delete_generic_password(SERVICE, MASTER_KEY_ACCOUNT).ok();
-
-        let log = MemoryLogger::new("test");
-        let key = get_or_create_master_key(log.as_ref()).unwrap();
-        assert_eq!(key.len(), 32);
-
-        // Cleanup
-        delete_generic_password(SERVICE, MASTER_KEY_ACCOUNT).ok();
+    /// Run `f` with `HOME` pointed at a fresh tempdir, restoring it after.
+    /// Serialized via `HOME_LOCK` because `HOME` is process-global.
+    fn with_temp_home<T>(f: impl FnOnce() -> T) -> T {
+        let _lock = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let original = std::env::var("HOME").ok();
+        let test_dir =
+            std::env::temp_dir().join(format!("mongomacapp-test-{}", uuid::Uuid::new_v4()));
+        std::env::set_var("HOME", &test_dir);
+        let result = f();
+        fs::remove_dir_all(&test_dir).ok();
+        match original {
+            Some(home) => std::env::set_var("HOME", home),
+            None => std::env::remove_var("HOME"),
+        }
+        result
     }
 
-    #[test]
-    fn get_or_create_master_key_returns_same_key_twice() {
-        let _lock = MASTER_KEY_LOCK.lock().unwrap();
-        let _ui_lock = SecKeychain::disable_user_interaction()
-            .expect("disable_user_interaction");
-        // Clean slate: remove any leftover master key from prior test runs
-        delete_generic_password(SERVICE, MASTER_KEY_ACCOUNT).ok();
+    const TEST_KEY: [u8; 32] = [42u8; 32];
 
-        let log = MemoryLogger::new("test");
-        let key1 = get_or_create_master_key(log.as_ref()).unwrap();
-        let key2 = get_or_create_master_key(log.as_ref()).unwrap();
-        assert_eq!(key1, key2, "master key should persist across calls");
-
-        // Cleanup
-        delete_generic_password(SERVICE, MASTER_KEY_ACCOUNT).ok();
-    }
+    // ── Pure crypto (no keychain, no filesystem) ──────────────────────────
 
     #[test]
     fn encrypt_decrypt_password_roundtrip() {
-        let key = vec![42u8; 32]; // Dummy 256-bit key
         let password = "my-secret-password";
-
-        let encrypted = encrypt_password(password, &key).unwrap();
+        let encrypted = encrypt_password(password, &TEST_KEY).unwrap();
         assert!(encrypted.len() > password.len(), "encrypted should be larger (nonce + tag)");
-
-        let decrypted = decrypt_password(&encrypted, &key).unwrap();
+        let decrypted = decrypt_password(&encrypted, &TEST_KEY).unwrap();
         assert_eq!(decrypted, password);
     }
 
     #[test]
     fn encrypt_password_produces_unique_ciphertexts() {
-        let key = vec![42u8; 32];
         let password = "same-password";
-
-        let encrypted1 = encrypt_password(password, &key).unwrap();
-        let encrypted2 = encrypt_password(password, &key).unwrap();
-
+        let encrypted1 = encrypt_password(password, &TEST_KEY).unwrap();
+        let encrypted2 = encrypt_password(password, &TEST_KEY).unwrap();
         assert_ne!(encrypted1, encrypted2, "each encryption should use unique nonce");
-    }
-
-    #[test]
-    fn ensure_encrypted_dir_creates_directory() {
-        let original_home = std::env::var("HOME").ok();
-        let test_dir = std::env::temp_dir().join(format!("mongomacapp-test-{}", uuid::Uuid::new_v4()));
-        std::env::set_var("HOME", test_dir.to_str().unwrap());
-
-        let dir = ensure_encrypted_dir().unwrap();
-        assert!(dir.exists());
-        assert!(dir.is_dir());
-
-        // Cleanup: restore original HOME to avoid poisoning parallel tests
-        fs::remove_dir_all(&test_dir).ok();
-        match original_home {
-            Some(h) => std::env::set_var("HOME", h),
-            None => std::env::remove_var("HOME"),
-        }
-    }
-
-    #[test]
-    fn atomic_write_file_creates_file() {
-        let test_dir = std::env::temp_dir();
-        let test_file = test_dir.join(format!("test-{}.bin", uuid::Uuid::new_v4()));
-        let data = b"test data";
-
-        atomic_write_file(&test_file, data).unwrap();
-
-        let read_data = fs::read(&test_file).unwrap();
-        assert_eq!(read_data, data);
-
-        // Cleanup
-        fs::remove_file(&test_file).ok();
-    }
-
-    #[test]
-    fn set_password_new_impl_creates_encrypted_file() {
-        let _lock = MASTER_KEY_LOCK.lock().unwrap();
-        let _ui_lock = SecKeychain::disable_user_interaction()
-            .expect("disable_user_interaction");
-        let log = MemoryLogger::new("test");
-        let test_id = format!("test-{}", uuid::Uuid::new_v4());
-
-        set_password(&test_id, "test-password", log.as_ref()).unwrap();
-
-        // Verify encrypted file exists
-        let dir = ensure_encrypted_dir().unwrap();
-        let file_path = dir.join(format!("{}.bin", test_id));
-        assert!(file_path.exists());
-
-        // Cleanup
-        delete_password(&test_id, log.as_ref()).ok();
-        delete_generic_password(SERVICE, MASTER_KEY_ACCOUNT).ok();
-    }
-
-    #[test]
-    fn get_password_new_impl_returns_decrypted() {
-        let _lock = MASTER_KEY_LOCK.lock().unwrap();
-        let _ui_lock = SecKeychain::disable_user_interaction()
-            .expect("disable_user_interaction");
-        let log = MemoryLogger::new("test");
-        let test_id = format!("test-{}", uuid::Uuid::new_v4());
-        let password = "my-test-password";
-
-        set_password(&test_id, password, log.as_ref()).unwrap();
-        let retrieved = get_password(&test_id, log.as_ref()).unwrap();
-
-        assert_eq!(retrieved, Some(password.to_string()));
-
-        // Cleanup
-        delete_password(&test_id, log.as_ref()).ok();
-        delete_generic_password(SERVICE, MASTER_KEY_ACCOUNT).ok();
-    }
-
-    #[test]
-    fn delete_password_removes_encrypted_file() {
-        let _lock = MASTER_KEY_LOCK.lock().unwrap();
-        let _ui_lock = SecKeychain::disable_user_interaction()
-            .expect("disable_user_interaction");
-        let log = MemoryLogger::new("test");
-        let test_id = format!("test-{}", uuid::Uuid::new_v4());
-
-        set_password(&test_id, "test", log.as_ref()).unwrap();
-
-        let dir = ensure_encrypted_dir().unwrap();
-        let file_path = dir.join(format!("{}.bin", test_id));
-        assert!(file_path.exists());
-
-        delete_password(&test_id, log.as_ref()).unwrap();
-        assert!(!file_path.exists());
-
-        // Cleanup
-        delete_generic_password(SERVICE, MASTER_KEY_ACCOUNT).ok();
-    }
-
-    #[test]
-    fn get_password_returns_none_for_missing_file() {
-        let log = MemoryLogger::new("test");
-        let test_id = format!("nonexistent-{}", uuid::Uuid::new_v4());
-
-        let result = get_password(&test_id, log.as_ref()).unwrap();
-        assert_eq!(result, None);
-    }
-
-    #[test]
-    fn set_get_delete_roundtrip() {
-        let _lock = MASTER_KEY_LOCK.lock().unwrap();
-        let _ui_lock = SecKeychain::disable_user_interaction()
-            .expect("disable_user_interaction");
-        let log = MemoryLogger::new("test");
-        let id = format!("test-{}", uuid::Uuid::new_v4());
-        set_password(&id, "hunter2", log.as_ref()).unwrap();
-        let got = get_password(&id, log.as_ref()).unwrap();
-        assert_eq!(got.as_deref(), Some("hunter2"));
-        delete_password(&id, log.as_ref()).unwrap();
-        let after = get_password(&id, log.as_ref()).unwrap();
-        assert!(after.is_none());
-
-        // Cleanup
-        delete_generic_password(SERVICE, MASTER_KEY_ACCOUNT).ok();
-    }
-
-    #[test]
-    fn get_password_handles_corrupted_file() {
-        let _lock = MASTER_KEY_LOCK.lock().unwrap();
-        let _ui_lock = SecKeychain::disable_user_interaction()
-            .expect("disable_user_interaction");
-        let log = MemoryLogger::new("test");
-        let test_id = format!("test-{}", uuid::Uuid::new_v4());
-
-        // Write corrupted data (too short)
-        let dir = ensure_encrypted_dir().unwrap();
-        let file_path = dir.join(format!("{}.bin", test_id));
-        fs::write(&file_path, b"corrupted").unwrap();
-
-        let result = get_password(&test_id, log.as_ref());
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("too short"));
-
-        // Cleanup
-        fs::remove_file(&file_path).ok();
-        delete_generic_password(SERVICE, MASTER_KEY_ACCOUNT).ok();
     }
 
     #[test]
     fn decrypt_password_fails_with_wrong_key() {
         let key1 = vec![1u8; 32];
         let key2 = vec![2u8; 32];
-        let password = "secret";
-
-        let encrypted = encrypt_password(password, &key1).unwrap();
+        let encrypted = encrypt_password("secret", &key1).unwrap();
         let result = decrypt_password(&encrypted, &key2);
-
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Decryption failed"));
     }
 
+    // ── Filesystem helpers (key-injected, no keychain) ────────────────────
+
     #[test]
-    fn get_password_gracefully_handles_master_key_recreation() {
-        let _lock = MASTER_KEY_LOCK.lock().unwrap();
-        let _ui_lock = SecKeychain::disable_user_interaction()
-            .expect("disable_user_interaction");
+    fn ensure_encrypted_dir_creates_directory() {
+        with_temp_home(|| {
+            let dir = ensure_encrypted_dir().unwrap();
+            assert!(dir.exists());
+            assert!(dir.is_dir());
+        });
+    }
+
+    #[test]
+    fn atomic_write_file_creates_file() {
+        let test_file =
+            std::env::temp_dir().join(format!("test-{}.bin", uuid::Uuid::new_v4()));
+        atomic_write_file(&test_file, b"test data").unwrap();
+        assert_eq!(fs::read(&test_file).unwrap(), b"test data");
+        fs::remove_file(&test_file).ok();
+    }
+
+    #[test]
+    fn set_password_with_key_creates_encrypted_file() {
+        with_temp_home(|| {
+            let log = MemoryLogger::new("test");
+            let id = format!("test-{}", uuid::Uuid::new_v4());
+            set_password_with_key(&id, "test-password", &TEST_KEY, log.as_ref()).unwrap();
+            let dir = ensure_encrypted_dir().unwrap();
+            assert!(dir.join(format!("{}.bin", id)).exists());
+        });
+    }
+
+    #[test]
+    fn set_get_delete_roundtrip_with_key() {
+        with_temp_home(|| {
+            let log = MemoryLogger::new("test");
+            let id = format!("test-{}", uuid::Uuid::new_v4());
+            set_password_with_key(&id, "hunter2", &TEST_KEY, log.as_ref()).unwrap();
+            assert_eq!(read_decrypt(&id, &TEST_KEY).unwrap().as_deref(), Some("hunter2"));
+            delete_password(&id, log.as_ref()).unwrap();
+            assert!(read_decrypt(&id, &TEST_KEY).unwrap().is_none());
+        });
+    }
+
+    #[test]
+    fn delete_password_removes_encrypted_file() {
+        with_temp_home(|| {
+            let log = MemoryLogger::new("test");
+            let id = format!("test-{}", uuid::Uuid::new_v4());
+            set_password_with_key(&id, "test", &TEST_KEY, log.as_ref()).unwrap();
+            let file_path = ensure_encrypted_dir().unwrap().join(format!("{}.bin", id));
+            assert!(file_path.exists());
+            delete_password(&id, log.as_ref()).unwrap();
+            assert!(!file_path.exists());
+        });
+    }
+
+    #[test]
+    fn get_password_returns_none_for_missing_file() {
+        with_temp_home(|| {
+            let log = MemoryLogger::new("test");
+            let id = format!("nonexistent-{}", uuid::Uuid::new_v4());
+            assert_eq!(get_password(&id, log.as_ref()).unwrap(), None);
+        });
+    }
+
+    #[test]
+    fn read_decrypt_handles_corrupted_file() {
+        with_temp_home(|| {
+            let id = format!("test-{}", uuid::Uuid::new_v4());
+            let file_path = ensure_encrypted_dir().unwrap().join(format!("{}.bin", id));
+            fs::write(&file_path, b"corrupted").unwrap();
+            let result = read_decrypt(&id, &TEST_KEY);
+            assert!(result.is_err());
+            assert!(result.unwrap_err().contains("too short"));
+        });
+    }
+
+    /// Test-only counterpart of the read path that takes an explicit key,
+    /// so the corrupted-blob and round-trip assertions never touch the
+    /// real keychain.
+    fn read_decrypt(connection_id: &str, master_key: &[u8]) -> Result<Option<String>, String> {
+        let dir = ensure_encrypted_dir()?;
+        let file_path = dir.join(format!("{}.bin", connection_id));
+        let encrypted = match fs::read(&file_path) {
+            Ok(data) => data,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(format!("read failed: {e}")),
+        };
+        decrypt_password(&encrypted, master_key).map(Some)
+    }
+
+    // ── Master-key resolution gating (the new never-regenerate contract) ──
+
+    #[test]
+    fn resolve_master_key_creates_on_fresh_install() {
         let log = MemoryLogger::new("test");
-        let test_id = format!("test-{}", uuid::Uuid::new_v4());
+        let provider = InMemoryMasterKeyProvider::absent();
+        let key = resolve_master_key(&provider, false, log.as_ref()).unwrap();
+        assert_eq!(key.len(), 32);
+        // Second resolve returns the SAME key (now persisted in the provider).
+        let key2 = resolve_master_key(&provider, false, log.as_ref()).unwrap();
+        assert_eq!(key, key2, "master key should persist across resolves");
+    }
 
-        // Set password with initial master key
-        set_password(&test_id, "password1", log.as_ref()).unwrap();
+    /// Replaces the old `gracefully_handles_master_key_recreation`, which
+    /// ENCODED the data-loss behaviour as intended. New contract: an absent
+    /// key over existing blobs must refuse to regenerate.
+    #[test]
+    fn resolve_master_key_refuses_when_blobs_exist_and_key_absent() {
+        let log = MemoryLogger::new("test");
+        let provider = InMemoryMasterKeyProvider::absent();
+        let err = resolve_master_key(&provider, true, log.as_ref()).unwrap_err();
+        assert_eq!(err, KEY_UNRECOVERABLE_MSG, "must not regenerate over blobs");
+        // create() must NOT have been called — provider is still absent.
+        assert!(matches!(provider.fetch(), MasterKeyOutcome::Absent));
+    }
 
-        // Delete master key (simulating loss)
-        delete_generic_password(SERVICE, MASTER_KEY_ACCOUNT).ok();
+    #[test]
+    fn resolve_master_key_does_not_create_on_transient_unavailable() {
+        let log = MemoryLogger::new("test");
+        let provider = InMemoryMasterKeyProvider::unavailable("keychain locked");
+        let err = resolve_master_key(&provider, false, log.as_ref()).unwrap_err();
+        assert!(err.contains("Failed to access keychain"), "got: {err}");
+        assert!(matches!(provider.fetch(), MasterKeyOutcome::Unavailable(_)));
+    }
 
-        // Getting password should fail (old key gone, file encrypted with it)
-        let result = get_password(&test_id, log.as_ref());
-        assert!(result.is_err(), "should fail to decrypt with recreated key");
-
-        // But setting a new password should work (creates new master key)
-        set_password(&test_id, "password2", log.as_ref()).unwrap();
-        let retrieved = get_password(&test_id, log.as_ref()).unwrap();
-        assert_eq!(retrieved, Some("password2".to_string()));
-
-        // Cleanup
-        delete_password(&test_id, log.as_ref()).ok();
-        delete_generic_password(SERVICE, MASTER_KEY_ACCOUNT).ok();
+    /// Manual/local integration coverage of the real macOS keychain via
+    /// `KeychainMasterKeyProvider`. `#[ignore]`d so headless/CI runs never
+    /// hit the login keychain (the prior cause of 8 env-dependent failures).
+    /// Run with `cargo test -- --ignored` on a logged-in macOS session.
+    #[test]
+    #[ignore]
+    fn keychain_provider_create_then_fetch_roundtrip_real_keychain() {
+        use crate::connection::secrets::{KeychainMasterKeyProvider, MasterKeyProvider as _};
+        use security_framework::passwords::delete_generic_password;
+        let _ui = SecKeychain::disable_user_interaction().expect("disable_user_interaction");
+        let log = MemoryLogger::new("test");
+        let account = "mongomacapp.test-master-key";
+        delete_generic_password(SERVICE, account).ok();
+        let provider =
+            KeychainMasterKeyProvider::new(SERVICE, account, "test-key", log.child(logctx! {}));
+        let created = provider.create().expect("create");
+        match provider.fetch() {
+            MasterKeyOutcome::Found(fetched) => assert_eq!(&created[..], &fetched[..]),
+            other => panic!("expected Found, got something else: {}", matches!(other, MasterKeyOutcome::Found(_))),
+        }
+        delete_generic_password(SERVICE, account).ok();
     }
 }

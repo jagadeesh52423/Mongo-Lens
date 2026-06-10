@@ -35,6 +35,16 @@
 //!   master key from the macOS Keychain, blobs at
 //!   `~/.mongomacapp/secrets/`.
 //!
+//! ## Master-key source
+//!
+//! The 32-byte AES master key is resolved through a [`MasterKeyProvider`]
+//! (the named extension point). The store NEVER regenerates a key when
+//! ciphertext already exists on disk — a missing key over existing blobs
+//! surfaces as [`SecretError::SecretsUnrecoverable`] (recoverable by
+//! re-entry / Phase-2 passphrase unwrap), and a transient keychain failure
+//! surfaces as [`SecretError::SecretUnavailable`] (retryable, store
+//! untouched). See [`FileEncryptedStore::resolve_key`].
+//!
 //! ## Phase 2 hardening (tracked, non-blocking for Phase 1)
 //!
 //! 1. `FileEncryptedStore::delete_all_for` matches `conn-{id}-…\.bin` by
@@ -43,10 +53,10 @@
 //!    verify the trailing component (before `.bin`) is a known
 //!    `SecretSlot::ALL.as_wire()` value to close the door if id
 //!    semantics ever change.
-//! 2. `fetch_or_create_master_key` silently overwrites a Keychain
-//!    entry of the wrong length. Add a `log::warn!` (or thread a
-//!    `&dyn Logger` through) so a recurring "key wrong size,
-//!    regenerated" pattern is debuggable rather than invisible.
+//! 2. `PassphraseWrappedKeyProvider` — wrap the master key with an
+//!    Argon2id-derived KEK so a forced keychain reset is recoverable
+//!    without password re-entry. Plugs in behind [`MasterKeyProvider`]
+//!    with zero call-site changes.
 
 use std::collections::HashMap;
 use std::fs;
@@ -54,7 +64,7 @@ use std::io::Write;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use rand::rngs::OsRng;
 use rand::RngCore;
@@ -62,10 +72,12 @@ use ring::aead::{
     Aad, BoundKey, Nonce, NonceSequence, OpeningKey, SealingKey, UnboundKey, AES_256_GCM,
 };
 use ring::error::Unspecified;
-use security_framework::passwords::{
-    delete_generic_password, get_generic_password, set_generic_password,
-};
+use security_framework::passwords::get_generic_password;
 use thiserror::Error;
+use zeroize::Zeroizing;
+
+use crate::logctx;
+use crate::logger::Logger;
 
 // ──────────────────────────────────────────────────────────────────────────
 // Public types
@@ -160,6 +172,22 @@ pub enum SecretError {
     /// (contains `/`, `\`, `\0`, `:` or starts with `.`).
     #[error("invalid connection id: {0}")]
     InvalidId(String),
+    /// The master key is gone (e.g. a forced macOS keychain reset) but
+    /// encrypted blobs still exist on disk. The app refuses to regenerate
+    /// the key over them — doing so would orphan every stored secret. The
+    /// blobs are intact; recovery is re-entry (Phase 1) or passphrase
+    /// unwrap (Phase 2). User-facing and recoverable, never destructive.
+    #[error(
+        "stored secret unavailable: the encryption key is missing but encrypted data exists \
+         (likely a macOS keychain reset). Re-enter the affected password to reconnect."
+    )]
+    SecretsUnrecoverable,
+    /// The keychain was transiently unreachable (locked, prompt dismissed,
+    /// momentary Security-framework error). Distinct from
+    /// [`SecretsUnrecoverable`]: nothing is wrong with the stored data, the
+    /// operation is simply retryable later. The store is never mutated.
+    #[error("secret store temporarily unavailable: {0}")]
+    SecretUnavailable(String),
 }
 
 impl From<std::io::Error> for SecretError {
@@ -169,6 +197,44 @@ impl From<std::io::Error> for SecretError {
 }
 
 pub type Result<T> = std::result::Result<T, SecretError>;
+
+// ──────────────────────────────────────────────────────────────────────────
+// MasterKeyProvider — the key source beneath every SecretStore
+// ──────────────────────────────────────────────────────────────────────────
+
+/// Outcome of asking a [`MasterKeyProvider`] for the existing master key.
+/// Richer than `Result<key>` so the store can tell "genuinely gone" apart
+/// from "transiently unreachable" — the distinction that decides whether
+/// regenerating would orphan data or is safe to retry.
+pub enum MasterKeyOutcome {
+    /// The key exists and is well-formed.
+    Found(Zeroizing<[u8; MASTER_KEY_SIZE]>),
+    /// No key is stored: a fresh install OR a wiped/reset keychain. The
+    /// store decides which by checking whether ciphertext already exists.
+    Absent,
+    /// The backend was reachable-but-failing (locked, denied, transient).
+    /// The store must NOT regenerate; the caller can retry later.
+    Unavailable(String),
+}
+
+/// Source of the 32-byte AES-256 master key that protects every blob in a
+/// [`SecretStore`].
+///
+/// Implement this trait to add a new master-key backend (login keychain,
+/// passphrase-wrapped recovery, plain file, Vault, …) — the
+/// [`FileEncryptedStore`] gates key *creation* on "no ciphertext exists
+/// yet", so a provider never decides alone whether regenerating is safe.
+/// Existing impls: [`KeychainMasterKeyProvider`] (default, macOS login
+/// keychain) and [`InMemoryMasterKeyProvider`] (tests). No call site of the
+/// store changes when a new provider is added.
+pub trait MasterKeyProvider: Send + Sync {
+    /// Fetch the existing key. MUST NOT create one — that is `create`'s job,
+    /// gated by the store on emptiness.
+    fn fetch(&self) -> MasterKeyOutcome;
+    /// Create + persist a fresh key. Only called by the store when no
+    /// ciphertext exists, so this can never silently orphan stored secrets.
+    fn create(&self) -> Result<Zeroizing<[u8; MASTER_KEY_SIZE]>>;
+}
 
 /// Storage abstraction for slotted per-connection secrets.
 ///
@@ -300,13 +366,19 @@ const MASTER_KEY_ACCOUNT_V2: &str = "mongomacapp.connections-v2-master-key";
 /// to the legacy [`crate::keychain`] format so a future migration can
 /// transcrypt blobs in place.
 ///
-/// The master key and base dir are injected (rather than fetched
-/// internally) so unit tests can build a store against a tempdir + a
-/// fixed key, exercising the file-naming and `delete_all_for` logic
-/// without touching the real macOS Keychain.
+/// The master-key *source* is injected as a [`MasterKeyProvider`] (rather
+/// than fetched internally) so the key is resolved lazily and retryably —
+/// a transient keychain failure at construction time no longer permanently
+/// wedges the store — and so unit tests can build a store against a tempdir
+/// + an in-memory provider without touching the real macOS Keychain.
 pub struct FileEncryptedStore {
     base_dir: PathBuf,
-    master_key: Vec<u8>,
+    provider: Arc<dyn MasterKeyProvider>,
+    /// Resolved key, cached after first successful resolution. The Mutex is
+    /// held across the whole fetch-or-create so two concurrent callers never
+    /// both create (in-process); cross-process races are out of scope for a
+    /// single-user desktop app.
+    cached_key: Mutex<Option<Zeroizing<[u8; MASTER_KEY_SIZE]>>>,
 }
 
 // Custom Debug — never leak the master key bytes in logs / panic dumps.
@@ -314,14 +386,18 @@ impl std::fmt::Debug for FileEncryptedStore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FileEncryptedStore")
             .field("base_dir", &self.base_dir)
-            .field("master_key", &format_args!("<redacted; {} bytes>", self.master_key.len()))
+            .field("master_key", &format_args!("<redacted>"))
             .finish()
     }
 }
 
 impl FileEncryptedStore {
-    /// Construct directly with caller-supplied master key + base dir.
-    /// Validates the key length and ensures the dir exists with 0700.
+    /// Construct with a caller-supplied raw master key + base dir. Validates
+    /// the key length, ensures the dir exists with 0700, and wraps the key in
+    /// an [`InMemoryMasterKeyProvider`]. Used by tests and any future
+    /// caller that already holds the key bytes (the bin path uses
+    /// [`open_default_keychain_store`] / [`with_provider`] instead).
+    #[allow(dead_code)]
     pub fn new(base_dir: PathBuf, master_key: Vec<u8>) -> Result<Self> {
         if master_key.len() != MASTER_KEY_SIZE {
             return Err(SecretError::MasterKey(format!(
@@ -329,11 +405,71 @@ impl FileEncryptedStore {
                 master_key.len()
             )));
         }
+        let mut key = [0u8; MASTER_KEY_SIZE];
+        key.copy_from_slice(&master_key);
+        Self::with_provider(base_dir, Arc::new(InMemoryMasterKeyProvider::with_key(key)))
+    }
+
+    /// Construct with an injected [`MasterKeyProvider`]. The key is resolved
+    /// lazily on first secret operation (and cached), so a transient provider
+    /// failure here doesn't permanently break the store.
+    pub fn with_provider(base_dir: PathBuf, provider: Arc<dyn MasterKeyProvider>) -> Result<Self> {
         ensure_dir_0700(&base_dir)?;
         Ok(Self {
             base_dir,
-            master_key,
+            provider,
+            cached_key: Mutex::new(None),
         })
+    }
+
+    /// Resolve the master key, gating creation on emptiness so the key is
+    /// NEVER regenerated over existing ciphertext.
+    ///
+    /// * `Found`       → use it (and cache).
+    /// * `Unavailable` → [`SecretError::SecretUnavailable`]; retryable, no mutation.
+    /// * `Absent` + no blobs → genuine first run; create + persist a key.
+    /// * `Absent` + blobs exist → [`SecretError::SecretsUnrecoverable`]; the
+    ///   keychain was reset out from under intact blobs — refuse to orphan them.
+    fn resolve_key(&self) -> Result<Zeroizing<[u8; MASTER_KEY_SIZE]>> {
+        let mut guard = self.cached_key.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(key) = guard.as_ref() {
+            return Ok(key.clone());
+        }
+        let key = match self.provider.fetch() {
+            MasterKeyOutcome::Found(key) => key,
+            MasterKeyOutcome::Unavailable(detail) => {
+                return Err(SecretError::SecretUnavailable(detail))
+            }
+            MasterKeyOutcome::Absent => {
+                if self.blobs_exist()? {
+                    return Err(SecretError::SecretsUnrecoverable);
+                }
+                self.provider.create()?
+            }
+        };
+        *guard = Some(key.clone());
+        Ok(key)
+    }
+
+    /// Whether any `*.bin` ciphertext blob exists under `base_dir`. A missing
+    /// dir counts as "no blobs". The `.bin.tmp` write-temp is excluded (it
+    /// ends in `.tmp`).
+    fn blobs_exist(&self) -> Result<bool> {
+        match fs::read_dir(&self.base_dir) {
+            Ok(entries) => {
+                for entry in entries {
+                    let entry = entry?;
+                    if let Some(name) = entry.file_name().to_str() {
+                        if name.ends_with(".bin") {
+                            return Ok(true);
+                        }
+                    }
+                }
+                Ok(false)
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(err) => Err(err.into()),
+        }
     }
 
     /// File-naming convention: `conn-{id}-{slot}.bin`. The `conn-{id}-`
@@ -356,7 +492,8 @@ impl FileEncryptedStore {
 
 impl SecretStore for FileEncryptedStore {
     fn set(&self, connection_id: &str, slot: SecretSlot, value: &str) -> Result<()> {
-        let encrypted = aead_seal(value.as_bytes(), &self.master_key)?;
+        let key = self.resolve_key()?;
+        let encrypted = aead_seal(value.as_bytes(), &key[..])?;
         let path = self.path_for(connection_id, slot)?;
         atomic_write_0600(&path, &encrypted)
     }
@@ -365,7 +502,8 @@ impl SecretStore for FileEncryptedStore {
         let path = self.path_for(connection_id, slot)?;
         match fs::read(&path) {
             Ok(bytes) => {
-                let plaintext = aead_open(&bytes, &self.master_key)?;
+                let key = self.resolve_key()?;
+                let plaintext = aead_open(&bytes, &key[..])?;
                 let s = String::from_utf8(plaintext).map_err(|e| {
                     SecretError::Crypto(format!("decrypted bytes not utf-8: {e}"))
                 })?;
@@ -409,15 +547,20 @@ impl SecretStore for FileEncryptedStore {
     }
 }
 
-/// Production constructor. Fetches (or creates) the v2 master key from
-/// the macOS Keychain and stores blobs under `~/.mongomacapp/secrets/`.
-///
-/// Kept separate from [`FileEncryptedStore::new`] so the constructor
-/// itself stays trivially testable.
-pub fn open_default_keychain_store() -> Result<FileEncryptedStore> {
-    let master_key = fetch_or_create_master_key()?;
+/// Production constructor. Wires the [`KeychainMasterKeyProvider`] (macOS
+/// login keychain) to blobs under `~/.mongomacapp/secrets/`. The key is
+/// resolved lazily on first use — a transient keychain failure here no
+/// longer wedges the store, and the key is never regenerated over existing
+/// ciphertext (see [`FileEncryptedStore::resolve_key`]).
+pub fn open_default_keychain_store(log: Arc<dyn Logger>) -> Result<FileEncryptedStore> {
     let base_dir = default_secrets_dir()?;
-    FileEncryptedStore::new(base_dir, master_key)
+    let provider = Arc::new(KeychainMasterKeyProvider::new(
+        KEYCHAIN_SERVICE,
+        MASTER_KEY_ACCOUNT_V2,
+        "connections-v2-master-key",
+        log,
+    ));
+    FileEncryptedStore::with_provider(base_dir, provider)
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -430,28 +573,195 @@ fn default_secrets_dir() -> Result<PathBuf> {
     Ok(PathBuf::from(home).join(".mongomacapp").join("secrets"))
 }
 
-fn fetch_or_create_master_key() -> Result<Vec<u8>> {
-    match get_generic_password(KEYCHAIN_SERVICE, MASTER_KEY_ACCOUNT_V2) {
-        Ok(bytes) if bytes.len() == MASTER_KEY_SIZE => Ok(bytes),
-        Ok(bytes) => {
-            // Wrong size on disk — overwrite with a fresh key. We could
-            // refuse instead, but that would leave the app permanently
-            // broken if a tester or migration ever stored a malformed
-            // entry.
-            let _ = delete_generic_password(KEYCHAIN_SERVICE, MASTER_KEY_ACCOUNT_V2);
-            drop(bytes);
-            create_and_store_master_key()
+/// macOS login-keychain [`MasterKeyProvider`]. `fetch` reports `Absent` only
+/// for a genuine not-found (errSecItemNotFound / "-25300"); every other
+/// keychain error is `Unavailable` (so the store retries rather than
+/// regenerating). A wrong-size stored entry is `Unavailable` too — it is
+/// NEVER silently deleted + overwritten (the prior behaviour, which could
+/// orphan blobs). `create` stores the new key with a self-trusted ACL (via
+/// the shared `keychain` helper) so future reads from this binary don't
+/// re-prompt — closing the gap where the v2 entry lacked the ACL the legacy
+/// entry already had.
+pub struct KeychainMasterKeyProvider {
+    service: &'static str,
+    account: &'static str,
+    acl_label: &'static str,
+    log: Arc<dyn Logger>,
+}
+
+impl KeychainMasterKeyProvider {
+    pub fn new(
+        service: &'static str,
+        account: &'static str,
+        acl_label: &'static str,
+        log: Arc<dyn Logger>,
+    ) -> Self {
+        Self {
+            service,
+            account,
+            acl_label,
+            log,
         }
-        Err(_) => create_and_store_master_key(),
     }
 }
 
-fn create_and_store_master_key() -> Result<Vec<u8>> {
-    let mut key = vec![0u8; MASTER_KEY_SIZE];
-    OsRng.fill_bytes(&mut key);
-    set_generic_password(KEYCHAIN_SERVICE, MASTER_KEY_ACCOUNT_V2, &key)
-        .map_err(|e| SecretError::MasterKey(e.to_string()))?;
-    Ok(key)
+/// True for the not-found OSStatus the Security framework surfaces as a
+/// string. Shared by both keychain paths so "absent" is detected uniformly.
+pub(crate) fn is_keychain_not_found(msg: &str) -> bool {
+    msg.contains("-25300") || msg.contains("not found") || msg.contains("could not be found")
+}
+
+impl MasterKeyProvider for KeychainMasterKeyProvider {
+    fn fetch(&self) -> MasterKeyOutcome {
+        match get_generic_password(self.service, self.account) {
+            Ok(bytes) if bytes.len() == MASTER_KEY_SIZE => {
+                let mut key = [0u8; MASTER_KEY_SIZE];
+                key.copy_from_slice(&bytes);
+                MasterKeyOutcome::Found(Zeroizing::new(key))
+            }
+            Ok(bytes) => {
+                // Wrong size: do NOT delete + regenerate. Treat as transient
+                // unavailability and log loudly so a recurring malformed entry
+                // is debuggable rather than silently orphaning blobs.
+                self.log.error(
+                    "master key wrong size; refusing to overwrite",
+                    logctx! {
+                        "account" => self.account,
+                        "got" => bytes.len(),
+                        "expected" => MASTER_KEY_SIZE,
+                    },
+                );
+                MasterKeyOutcome::Unavailable(format!(
+                    "stored master key has wrong size: {} bytes",
+                    bytes.len()
+                ))
+            }
+            Err(e) => {
+                let msg = e.to_string();
+                if is_keychain_not_found(&msg) {
+                    MasterKeyOutcome::Absent
+                } else {
+                    self.log.error(
+                        "keychain access failed (transient); not regenerating",
+                        logctx! { "account" => self.account, "err" => msg.clone() },
+                    );
+                    MasterKeyOutcome::Unavailable(msg)
+                }
+            }
+        }
+    }
+
+    fn create(&self) -> Result<Zeroizing<[u8; MASTER_KEY_SIZE]>> {
+        let mut key = Zeroizing::new([0u8; MASTER_KEY_SIZE]);
+        OsRng.fill_bytes(&mut key[..]);
+        self.log
+            .info("generating new v2 master key", logctx! { "account" => self.account });
+        match crate::keychain::add_generic_password_with_self_trust(
+            self.service,
+            self.account,
+            &key[..],
+            self.acl_label,
+            self.log.as_ref(),
+        ) {
+            Ok(None) => Ok(key),
+            Ok(Some(existing)) => {
+                // Concurrent create won the race; adopt the stored key.
+                if existing.len() != MASTER_KEY_SIZE {
+                    return Err(SecretError::MasterKey(format!(
+                        "concurrently-stored master key has wrong size: {} bytes",
+                        existing.len()
+                    )));
+                }
+                let mut adopted = [0u8; MASTER_KEY_SIZE];
+                adopted.copy_from_slice(&existing);
+                Ok(Zeroizing::new(adopted))
+            }
+            Err(detail) => Err(SecretError::MasterKey(detail)),
+        }
+    }
+}
+
+/// In-memory [`MasterKeyProvider`] for tests. Models the three states the
+/// store must distinguish — `Found`, `Absent` (fresh install / wiped
+/// keychain), `Unavailable` (transient) — without touching the real macOS
+/// keychain. `create` materialises a key and flips the provider to `Found`,
+/// mirroring a real first-run.
+#[allow(dead_code)]
+pub struct InMemoryMasterKeyProvider {
+    inner: Mutex<InMemKeyState>,
+}
+
+#[allow(dead_code)]
+struct InMemKeyState {
+    mode: InMemKeyMode,
+    key: Option<[u8; MASTER_KEY_SIZE]>,
+}
+
+#[allow(dead_code)]
+enum InMemKeyMode {
+    Found,
+    Absent,
+    Unavailable(String),
+}
+
+#[allow(dead_code)]
+impl InMemoryMasterKeyProvider {
+    /// A provider already holding `key` — simulates an intact keychain.
+    pub fn with_key(key: [u8; MASTER_KEY_SIZE]) -> Self {
+        Self {
+            inner: Mutex::new(InMemKeyState {
+                mode: InMemKeyMode::Found,
+                key: Some(key),
+            }),
+        }
+    }
+
+    /// No key yet: a fresh install OR a wiped keychain. `create` materialises one.
+    pub fn absent() -> Self {
+        Self {
+            inner: Mutex::new(InMemKeyState {
+                mode: InMemKeyMode::Absent,
+                key: None,
+            }),
+        }
+    }
+
+    /// Transient failure: `fetch` reports `Unavailable`. `create` is never
+    /// reached (the store only creates on `Absent`).
+    pub fn unavailable(detail: impl Into<String>) -> Self {
+        Self {
+            inner: Mutex::new(InMemKeyState {
+                mode: InMemKeyMode::Unavailable(detail.into()),
+                key: None,
+            }),
+        }
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, InMemKeyState> {
+        self.inner.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
+
+impl MasterKeyProvider for InMemoryMasterKeyProvider {
+    fn fetch(&self) -> MasterKeyOutcome {
+        let state = self.lock();
+        match &state.mode {
+            InMemKeyMode::Unavailable(detail) => MasterKeyOutcome::Unavailable(detail.clone()),
+            InMemKeyMode::Found | InMemKeyMode::Absent => match state.key {
+                Some(key) => MasterKeyOutcome::Found(Zeroizing::new(key)),
+                None => MasterKeyOutcome::Absent,
+            },
+        }
+    }
+
+    fn create(&self) -> Result<Zeroizing<[u8; MASTER_KEY_SIZE]>> {
+        let mut state = self.lock();
+        let mut key = [0u8; MASTER_KEY_SIZE];
+        OsRng.fill_bytes(&mut key);
+        state.key = Some(key);
+        state.mode = InMemKeyMode::Found;
+        Ok(Zeroizing::new(key))
+    }
 }
 
 /// Reject connection ids that would let a caller escape `base_dir`
@@ -866,5 +1176,80 @@ mod tests {
                 other => panic!("expected InvalidId for {bad:?}, got {other:?}"),
             }
         }
+    }
+
+    // ── Master-key resolution gating (the Phase-1 regression guards) ──────
+
+    /// Core regression guard: a wiped keychain (`Absent`) over existing
+    /// ciphertext must surface `SecretsUnrecoverable`, NEVER regenerate the
+    /// key, and leave every blob byte-for-byte intact.
+    #[test]
+    fn store_refuses_to_regenerate_over_existing_blobs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().to_path_buf();
+
+        // Round 1: an intact key writes a blob.
+        let store1 = FileEncryptedStore::with_provider(
+            base.clone(),
+            Arc::new(InMemoryMasterKeyProvider::with_key([7u8; MASTER_KEY_SIZE])),
+        )
+        .unwrap();
+        store1.set("c1", SecretSlot::AuthPassword, "secret").unwrap();
+        let blob = base.join("conn-c1-auth-password.bin");
+        let before = fs::read(&blob).unwrap();
+
+        // Round 2 (simulated restart): keychain wiped → provider Absent, blob
+        // still on disk.
+        let store2 = FileEncryptedStore::with_provider(
+            base.clone(),
+            Arc::new(InMemoryMasterKeyProvider::absent()),
+        )
+        .unwrap();
+        let err = store2.get("c1", SecretSlot::AuthPassword).unwrap_err();
+        assert!(
+            matches!(err, SecretError::SecretsUnrecoverable),
+            "expected SecretsUnrecoverable, got {err:?}"
+        );
+        // Blob must be untouched — never auto-deleted, never re-encrypted.
+        assert_eq!(fs::read(&blob).unwrap(), before, "blob must be intact");
+    }
+
+    /// A transient `Unavailable` must surface `SecretUnavailable`, never
+    /// create a key, and never write a blob — the operation is retryable.
+    #[test]
+    fn store_does_not_regenerate_on_transient_unavailable() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = FileEncryptedStore::with_provider(
+            tmp.path().to_path_buf(),
+            Arc::new(InMemoryMasterKeyProvider::unavailable("keychain locked")),
+        )
+        .unwrap();
+        let err = store.set("c1", SecretSlot::AuthPassword, "x").unwrap_err();
+        assert!(
+            matches!(err, SecretError::SecretUnavailable(_)),
+            "expected SecretUnavailable, got {err:?}"
+        );
+        let any_blob = fs::read_dir(tmp.path())
+            .unwrap()
+            .flatten()
+            .any(|e| e.file_name().to_str().map(|n| n.ends_with(".bin")).unwrap_or(false));
+        assert!(!any_blob, "no blob should be written on transient failure");
+    }
+
+    /// Fresh install (no blobs) + `Absent` is the genuine first-run path:
+    /// create a key and round-trip normally.
+    #[test]
+    fn store_creates_key_on_fresh_install() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = FileEncryptedStore::with_provider(
+            tmp.path().to_path_buf(),
+            Arc::new(InMemoryMasterKeyProvider::absent()),
+        )
+        .unwrap();
+        store.set("c1", SecretSlot::AuthPassword, "hunter2").unwrap();
+        assert_eq!(
+            store.get("c1", SecretSlot::AuthPassword).unwrap().as_deref(),
+            Some("hunter2")
+        );
     }
 }

@@ -27,7 +27,7 @@ use crate::connection::builder::{
     build_client_options, BuildError, BuildOutcome, BuildStage, ResolvedConnection,
 };
 use crate::connection::model::Connection;
-use crate::connection::secrets::{SecretSlot, SecretStore};
+use crate::connection::secrets::{SecretError, SecretSlot, SecretStore};
 use crate::connection::store;
 use crate::logctx;
 use crate::logger::Logger;
@@ -296,12 +296,24 @@ pub async fn connections_v2_test(
         SecretBag::default()
     } else {
         match secret_store(&state) {
-            Ok(store) => resolve_secrets_for_connect(
+            Ok(store) => match resolve_secrets_for_connect(
                 store.as_ref(),
                 &input.connection.id,
                 None,
                 log.as_ref(),
-            ),
+            ) {
+                Ok(bag) => bag,
+                // Store-wide secret failure (keychain reset / transient).
+                // Surface as an Auth-stage failure so the dialog footer shows
+                // the clear re-enter / retry message.
+                Err(e) => {
+                    log.warn(
+                        "connections_v2_test: secret resolution failed",
+                        logctx! { "err" => e.to_string() },
+                    );
+                    return Ok(TestResultV2::failure(BuildStage::Auth, e.to_string()));
+                }
+            },
             Err(e) => {
                 log.warn(
                     "connections_v2_test: secret store unavailable; using dialog secrets only",
@@ -561,37 +573,48 @@ async fn handle_session_loss_v2(
 /// the dialog's retry flow) takes precedence over any keychain entry —
 /// otherwise we'd loop forever on a wrong cached passphrase.
 ///
-/// Errors from individual slot reads are logged at warn but treated as
-/// "not present" so a single corrupted slot can't block the whole connect.
-/// The builder enforces the real "secret required" contract per auth
-/// variant; a missing slot turns into a clear `BuildError::ssh(...)` /
-/// `BuildError::auth(...)` downstream.
+/// Per-slot read errors (`Crypto`/`Io`/`InvalidId` — a single corrupt or
+/// unreadable blob) are logged at warn and treated as "not present" so one
+/// bad slot can't block the whole connect; the builder turns a genuinely
+/// missing required secret into a clear `BuildError` downstream.
+///
+/// Store-WIDE errors are different and must NOT be swallowed:
+/// [`SecretError::SecretsUnrecoverable`] (keychain reset over existing blobs)
+/// and [`SecretError::SecretUnavailable`] (transient keychain failure) affect
+/// every slot, so they propagate as `Err` for the IPC layer to surface as a
+/// clear "re-enter your password" / "try again" state instead of a confusing
+/// downstream auth failure.
 fn resolve_secrets_for_connect(
     store: &dyn SecretStore,
     connection_id: &str,
     passphrase_override: Option<String>,
     log: &dyn Logger,
-) -> SecretBag {
-    let read = |slot: SecretSlot| -> Option<String> {
+) -> std::result::Result<SecretBag, SecretError> {
+    let read = |slot: SecretSlot| -> std::result::Result<Option<String>, SecretError> {
         match store.get(connection_id, slot) {
-            Ok(v) => v,
-            Err(e) => {
+            Ok(value) => Ok(value),
+            Err(e @ SecretError::SecretsUnrecoverable) => Err(e),
+            Err(e @ SecretError::SecretUnavailable(_)) => Err(e),
+            Err(other) => {
                 log.warn(
                     "connections_v2_connect: secret read failed",
-                    logctx! { "slot" => slot.as_wire(), "err" => e.to_string() },
+                    logctx! { "slot" => slot.as_wire(), "err" => other.to_string() },
                 );
-                None
+                Ok(None)
             }
         }
     };
-    SecretBag {
-        auth_password: read(SecretSlot::AuthPassword),
-        ssh_password: read(SecretSlot::SshPassword),
+    Ok(SecretBag {
+        auth_password: read(SecretSlot::AuthPassword)?,
+        ssh_password: read(SecretSlot::SshPassword)?,
         // Dialog-supplied passphrase wins over keychain (retry path).
-        ssh_key_passphrase: passphrase_override.or_else(|| read(SecretSlot::SshKeyPassphrase)),
-        proxy_password: read(SecretSlot::ProxyPassword),
-        aws_secret_key: read(SecretSlot::AwsSecretKey),
-    }
+        ssh_key_passphrase: match passphrase_override {
+            Some(p) => Some(p),
+            None => read(SecretSlot::SshKeyPassphrase)?,
+        },
+        proxy_password: read(SecretSlot::ProxyPassword)?,
+        aws_secret_key: read(SecretSlot::AwsSecretKey)?,
+    })
 }
 
 /// Owned secret values resolved from the [`SecretStore`] for a connect
@@ -690,9 +713,25 @@ pub async fn connections_v2_connect(
         })?;
     drop(db);
 
-    // 3. Resolve secrets + effective prefs.
-    let bag =
-        resolve_secrets_for_connect(secrets_store.as_ref(), &id, passphrase.clone(), log.as_ref());
+    // 3. Resolve secrets + effective prefs. A store-wide secret failure
+    //    (keychain reset or transient unavailability) surfaces as a clear
+    //    IPC error string — the frontend's ConnectionErrorDialog shows it
+    //    verbatim (no stage prefix → plain message), telling the user to
+    //    re-enter the password or retry. Connection metadata survives in
+    //    SQLite, so only the secret needs re-entry.
+    let bag = resolve_secrets_for_connect(
+        secrets_store.as_ref(),
+        &id,
+        passphrase.clone(),
+        log.as_ref(),
+    )
+    .map_err(|e| {
+        log.warn(
+            "connections_v2_connect: secret resolution failed",
+            logctx! { "err" => e.to_string() },
+        );
+        e.to_string()
+    })?;
     let resolved = bag.apply(&connection);
 
     let global = prefs::load(&app_handle).map_err(|e| {
