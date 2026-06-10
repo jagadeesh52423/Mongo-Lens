@@ -26,12 +26,23 @@ const rawScript = fs.readFileSync(scriptPath, 'utf8');
 // (e.g. the CLI runner with stdin = /dev/null) it reads empty -> null.
 function readStdinCredentials() {
   let raw = '';
-  try { raw = fs.readFileSync(0, 'utf8'); } catch (_e) { return null; }
+  try {
+    raw = fs.readFileSync(0, 'utf8');
+  } catch (err) {
+    // Dropping creds here means the connection silently falls back to no-auth
+    // and fails later with a confusing error — surface the cause.
+    logger.warn('failed to read credentials from stdin', { err: String(err) });
+    return null;
+  }
   const line = raw.split('\n').find((l) => l.trim().length > 0);
   if (!line) return null;
-  try { return JSON.parse(line); } catch (_e) { return null; }
+  try {
+    return JSON.parse(line);
+  } catch (err) {
+    logger.warn('failed to parse stdin credentials JSON', { err: String(err) });
+    return null;
+  }
 }
-const credentials = readStdinCredentials();
 
 const logger = createLogger({
   runId: process.env.MONGOMACAPP_RUN_ID || 'nil',
@@ -45,6 +56,9 @@ const logger = createLogger({
 const transformLogger = logger.child({ logger: 'harness.transform' });
 const cursorLogger = logger.child({ logger: 'harness.cursor' });
 const emitLogger = logger.child({ logger: 'harness.emit' });
+
+// Read after the logger exists so a stdin/parse failure can be reported.
+const credentials = readStdinCredentials();
 
 logger.info('harness start', {
   dbName,

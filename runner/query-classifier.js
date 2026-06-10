@@ -181,7 +181,9 @@ function extractCollection(before) {
  */
 function classify(script, operations) {
   if (!script || typeof script !== 'string') return { category: null, collection: null };
-  const ops = operations || DEFAULT_OPERATIONS;
+  // Guard against a non-array operations arg (null/undefined or a stray object):
+  // fall back to the defaults rather than throwing in the iteration below.
+  const ops = Array.isArray(operations) ? operations : DEFAULT_OPERATIONS;
   const cleaned = stripCommentsAndStrings(script);
 
   let earliestIndex = Infinity;
