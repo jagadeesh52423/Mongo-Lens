@@ -12,6 +12,8 @@ export type QueryCategory =
 export interface OperationDef {
   pattern: RegExp;
   category: QueryCategory;
+  /** Operation method name; drives both dot- and bracket-notation matching. */
+  name?: string;
 }
 
 export interface QueryClassification {
@@ -21,9 +23,21 @@ export interface QueryClassification {
 
 export const DEFAULT_OPERATIONS: readonly OperationDef[];
 
+/** Categories whose operations write or structurally alter data. */
+export const DESTRUCTIVE_CATEGORIES: ReadonlySet<QueryCategory>;
+
 export function classify(
   script: string,
   operations?: readonly OperationDef[],
 ): QueryClassification;
+
+/**
+ * Fail-safe destructiveness check. Unclassifiable input (null/undefined
+ * category) is treated as destructive — aliased/dynamic ops the static
+ * classifier cannot recognize must not be assumed safe.
+ */
+export function isPotentiallyDestructive(
+  value: QueryCategory | QueryClassification | null | undefined,
+): boolean;
 
 export function splitStatements(script: string): string[];

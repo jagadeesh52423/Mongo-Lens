@@ -35,6 +35,8 @@ export interface OperationDef {
    */
   pattern: RegExp;
   category: QueryCategory;
+  /** Operation method name; drives both dot- and bracket-notation matching. */
+  name?: string;
 }
 
 export interface QueryClassification {
@@ -45,6 +47,21 @@ export interface QueryClassification {
 /** Built-in MongoDB operations. See `runner/query-classifier.js` for the source list. */
 export const DEFAULT_OPERATIONS: readonly OperationDef[] =
   classifier.DEFAULT_OPERATIONS as readonly OperationDef[];
+
+/** Categories whose operations write or structurally alter data. */
+export const DESTRUCTIVE_CATEGORIES: ReadonlySet<QueryCategory> =
+  classifier.DESTRUCTIVE_CATEGORIES as ReadonlySet<QueryCategory>;
+
+/**
+ * Fail-safe destructiveness check shared with the runner. Unclassifiable input
+ * (null/undefined category) is treated as destructive so the UI never assumes
+ * an unrecognized (e.g. aliased/dynamic) operation is safe.
+ */
+export function isPotentiallyDestructive(
+  value: QueryCategory | QueryClassification | null | undefined,
+): boolean {
+  return classifier.isPotentiallyDestructive(value);
+}
 
 /** Split a script into top-level statements (by `;`, respecting strings/comments/nesting). */
 export function splitStatements(script: string): string[] {

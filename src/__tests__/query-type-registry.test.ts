@@ -4,6 +4,8 @@ import {
   queryTypeRegistry,
   splitStatements,
   DEFAULT_OPERATIONS,
+  DESTRUCTIVE_CATEGORIES,
+  isPotentiallyDestructive,
 } from '../services/query/QueryTypeRegistry';
 
 describe('QueryTypeRegistry.classify — categories', () => {
@@ -116,6 +118,82 @@ describe('QueryTypeRegistry.classify — collection extraction', () => {
     expect(
       registry.classify('const col = "users"; db.getCollection(col).find({});'),
     ).toEqual({ category: 'query', collection: null });
+  });
+});
+
+describe('QueryTypeRegistry.classify — bracket-notation operations', () => {
+  const registry = new QueryTypeRegistry();
+
+  it.each([
+    ['db.items["drop"]()', 'maintenance', 'items'],
+    ["db.items['drop']()", 'maintenance', 'items'],
+    ['db.logs["deleteMany"]({})', 'mutation', 'logs'],
+    ["db.logs['insertOne']({ x: 1 })", 'mutation', 'logs'],
+    ['db.users["find"]({})', 'query', 'users'],
+  ])('classifies %s as %s on %s', (script, category, collection) => {
+    expect(registry.classify(script)).toEqual({ category, collection });
+  });
+
+  it('classifies bracket op on a bracket collection: db["c"]["deleteMany"]()', () => {
+    expect(registry.classify('db["c"]["deleteMany"]({})')).toEqual({
+      category: 'mutation',
+      collection: 'c',
+    });
+  });
+
+  it('classifies bracket op on getCollection: db.getCollection("c")["drop"]()', () => {
+    expect(registry.classify('db.getCollection("c")["drop"]()')).toEqual({
+      category: 'maintenance',
+      collection: 'c',
+    });
+  });
+
+  it('ignores a bracket op name that lives inside a string literal', () => {
+    expect(registry.classify('const s = "db.x[\'drop\']()"; print(s);')).toEqual({
+      category: null,
+      collection: null,
+    });
+  });
+
+  it('ignores a bracket op on a non-db object', () => {
+    expect(registry.classify("[1,2,3]['find'](x => x > 1)")).toEqual({
+      category: null,
+      collection: null,
+    });
+  });
+});
+
+describe('isPotentiallyDestructive — fail-safe verdict', () => {
+  it('treats writes/structural ops as destructive', () => {
+    expect(isPotentiallyDestructive('mutation')).toBe(true);
+    expect(isPotentiallyDestructive('maintenance')).toBe(true);
+  });
+
+  it('treats reads and streams as non-destructive', () => {
+    expect(isPotentiallyDestructive('query')).toBe(false);
+    expect(isPotentiallyDestructive('transform')).toBe(false);
+    expect(isPotentiallyDestructive('stream')).toBe(false);
+  });
+
+  it('treats UNCLASSIFIABLE input as destructive (fail-safe)', () => {
+    expect(isPotentiallyDestructive(null)).toBe(true);
+    expect(isPotentiallyDestructive(undefined)).toBe(true);
+    expect(isPotentiallyDestructive({ category: null, collection: null })).toBe(true);
+  });
+
+  it('accepts a classification object', () => {
+    expect(isPotentiallyDestructive({ category: 'mutation', collection: 'x' })).toBe(true);
+    expect(isPotentiallyDestructive({ category: 'query', collection: 'x' })).toBe(false);
+  });
+
+  it('DESTRUCTIVE_CATEGORIES contains exactly the write/structural categories', () => {
+    expect(DESTRUCTIVE_CATEGORIES).toEqual(new Set(['mutation', 'maintenance']));
+  });
+
+  it('every unclassifiable bracket alias is reported destructive', () => {
+    const registry = new QueryTypeRegistry();
+    // An aliased op the static classifier can't recognize -> null -> destructive.
+    expect(isPotentiallyDestructive(registry.classify('db.coll.someAlias()'))).toBe(true);
   });
 });
 
