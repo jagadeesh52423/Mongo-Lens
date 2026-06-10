@@ -11,6 +11,20 @@ if (!uri) {
 const [dbName, scriptPath] = process.argv.slice(2);
 const rawScript = fs.readFileSync(scriptPath, 'utf8');
 
+// Credentials arrive as one JSON line on stdin (never env vars — env is
+// readable by same-user processes via `ps -E` / proc inspection). Read
+// synchronously at startup, before connecting. The parent closes fd 0 right
+// after writing, so this returns promptly; when no credential is supplied
+// (e.g. the CLI runner with stdin = /dev/null) it reads empty -> null.
+function readStdinCredentials() {
+  let raw = '';
+  try { raw = fs.readFileSync(0, 'utf8'); } catch (_e) { return null; }
+  const line = raw.split('\n').find((l) => l.trim().length > 0);
+  if (!line) return null;
+  try { return JSON.parse(line); } catch (_e) { return null; }
+}
+const credentials = readStdinCredentials();
+
 const logger = createLogger({
   runId: process.env.MONGOMACAPP_RUN_ID || 'nil',
   logsDir: process.env.MONGOMACAPP_LOGS_DIR || null,
@@ -415,22 +429,22 @@ function extractLine(err) {
 async function run() {
   process.stderr.write(JSON.stringify({ __debug: `[harness] connecting to db=${dbName}` }) + '\n');
   logger.info('mongo connect start');
-  // Build MongoClient options from structured credential env vars (Option B).
-  // These are only set for password-based auth modes (SCRAM, LDAP). When
-  // absent the URI-embedded credentials (if any) or no-auth path applies,
-  // so existing URI-target connections keep working unchanged.
+  // Build MongoClient options from the structured credential read off stdin.
+  // Only present for password-based auth modes (SCRAM, LDAP); when absent the
+  // URI-embedded credentials (if any) or the no-auth path applies, so existing
+  // URI-target connections keep working unchanged.
   const clientOptions = {};
-  if (process.env.MONGO_USER) {
+  if (credentials && credentials.username) {
     clientOptions.auth = {
-      username: process.env.MONGO_USER,
-      password: process.env.MONGO_PASS || '',
+      username: credentials.username,
+      password: credentials.password || '',
     };
   }
-  if (process.env.MONGO_AUTH_SOURCE) {
-    clientOptions.authSource = process.env.MONGO_AUTH_SOURCE;
+  if (credentials && credentials.authSource) {
+    clientOptions.authSource = credentials.authSource;
   }
-  if (process.env.MONGO_AUTH_MECHANISM) {
-    clientOptions.authMechanism = process.env.MONGO_AUTH_MECHANISM;
+  if (credentials && credentials.authMechanism) {
+    clientOptions.authMechanism = credentials.authMechanism;
   }
   const client = new MongoClient(uri, clientOptions);
   activeClient = client;

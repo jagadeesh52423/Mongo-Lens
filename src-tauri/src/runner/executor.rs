@@ -145,39 +145,48 @@ pub fn spawn_script(
         .env("MONGOMACAPP_RUN_ID", run_id)
         .env("MONGOMACAPP_LOGS_DIR", logs_dir.display().to_string())
         .env("MONGOMACAPP_LOG_LEVEL", level)
+        .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
 
-    // Unconditionally clear any MONGO_* auth vars inherited from the parent
-    // process before (re-)setting them. Without this, a shell-level
-    // MONGO_USER / MONGO_PASS present in the environment would silently carry
-    // into a no-auth (AuthMode::None) connection and cause unexpected auth
-    // attempts against the server. Clearing first ensures the runner's auth
-    // comes exclusively from the credential we resolve at connect time.
+    // Defense-in-depth: credentials now travel over stdin, never env vars (env
+    // is readable by same-user processes via `ps -E` / proc inspection). Strip
+    // any inherited MONGO_* auth vars so a stray shell value can't leak in.
     cmd.env_remove("MONGO_USER")
         .env_remove("MONGO_PASS")
         .env_remove("MONGO_AUTH_SOURCE")
         .env_remove("MONGO_AUTH_MECHANISM");
 
-    // Inject auth env vars only when the connection uses a password-based
-    // mechanism. Kept out of logs above to avoid leaking secrets.
-    if let Some(credential) = cred {
-        cmd.env("MONGO_USER", &credential.username);
-        if let Some(password) = &credential.password {
-            cmd.env("MONGO_PASS", password);
-        }
-        if let Some(auth_source) = &credential.auth_source {
-            cmd.env("MONGO_AUTH_SOURCE", auth_source);
-        }
-        if let Some(mechanism) = &credential.mechanism {
-            cmd.env("MONGO_AUTH_MECHANISM", mechanism);
-        }
-    }
-
-    cmd.spawn().map_err(|e| {
+    let mut child = cmd.spawn().map_err(|e| {
         logger.error("spawn failed", logctx! { "err" => e.to_string() });
         e.to_string()
-    })
+    })?;
+
+    // Hand the credential to the harness as one JSON line on stdin, then close
+    // stdin so its blocking read sees EOF. The payload is tiny (well under the
+    // pipe buffer) so write_all cannot deadlock. With no credential we still
+    // close stdin so the harness read returns empty and falls back to the
+    // URI-embedded / no-auth path.
+    if let Some(mut stdin) = child.stdin.take() {
+        if let Some(credential) = cred {
+            use std::io::Write;
+            let line = serde_json::json!({
+                "username": credential.username,
+                "password": credential.password,
+                "authSource": credential.auth_source,
+                "authMechanism": credential.mechanism,
+            })
+            .to_string();
+            if let Err(e) = stdin
+                .write_all(line.as_bytes())
+                .and_then(|_| stdin.write_all(b"\n"))
+            {
+                logger.error("write runner credentials failed", logctx! { "err" => e.to_string() });
+            }
+        }
+        // stdin dropped here -> closed.
+    }
+    Ok(child)
 }
 
 /// Default grace window between SIGTERM and SIGKILL when terminating a runner

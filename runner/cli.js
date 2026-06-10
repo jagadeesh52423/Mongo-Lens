@@ -122,7 +122,11 @@ function main() {
         MONGO_PAGE_SIZE: args.pageSize,
         NODE_PATH: require('os').homedir() + '/.mongomacapp/runner/node_modules',
       },
-      stdio: ['inherit', 'pipe', 'pipe'],
+      // stdin = ignore (/dev/null): the harness reads credentials from stdin and
+      // the CLI supplies none, so it must see an immediate EOF, not a TTY that
+      // would block the harness's synchronous read. Auth, if any, comes from the
+      // --uri connection string.
+      stdio: ['ignore', 'pipe', 'pipe'],
     },
   );
 
