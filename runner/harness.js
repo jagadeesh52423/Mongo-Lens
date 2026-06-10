@@ -39,7 +39,10 @@ function readStdinCredentials() {
   try {
     return JSON.parse(line);
   } catch (err) {
-    logger.warn('failed to parse stdin credentials JSON', { err: String(err) });
+    // Log only the error *name* — never String(err)/err.message: a JSON parse
+    // error embeds a snippet of the offending input, which on this path is the
+    // credential line (and could include the password).
+    logger.warn('failed to parse stdin credentials JSON', { err: err && err.name });
     return null;
   }
 }
