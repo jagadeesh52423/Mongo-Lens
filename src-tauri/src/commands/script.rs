@@ -302,8 +302,9 @@ pub async fn run_script(
         let wait_result = timeout(Duration::from_secs(SCRIPT_TIMEOUT_SECS), async {
             loop {
                 if cancel_flag.load(Ordering::Relaxed) {
-                    let _ = child.kill();
-                    let _ = child.wait();
+                    // SIGTERM + grace before SIGKILL so the harness can close its
+                    // Mongo connection; terminate_child reaps the child itself.
+                    crate::runner::executor::terminate_child(&mut child);
                     return Err(std::io::Error::new(
                         std::io::ErrorKind::Interrupted,
                         "cancelled",
@@ -356,10 +357,10 @@ pub async fn run_script(
                 }
             }
             Err(_) => {
-                // Kill, then reap so we don't leave a zombie and so the
-                // stdout/stderr pipes flush EOF before we join the readers.
-                let _ = child.kill();
-                let _ = child.wait();
+                // SIGTERM + grace before SIGKILL (lets the harness close its Mongo
+                // connection), reaping the child so its stdout/stderr pipes flush EOF
+                // before we join the readers. terminate_child does the reap.
+                crate::runner::executor::terminate_child(&mut child);
                 let _ = stdout_handle.join();
                 let _ = stderr_handle.join();
                 log.warn("run_script timed out", logctx! {
