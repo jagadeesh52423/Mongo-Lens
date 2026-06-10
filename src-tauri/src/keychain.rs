@@ -13,6 +13,7 @@ use security_framework::passwords::get_generic_password;
 use security_framework_sys::base::{errSecSuccess, SecKeychainItemRef};
 use security_framework_sys::keychain::SecKeychainAddGenericPassword;
 use std::fs;
+use zeroize::Zeroizing;
 use std::io::Write;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
@@ -242,25 +243,42 @@ pub(crate) fn add_generic_password_with_self_trust(
     }
 }
 
-/// True if any legacy `~/.mongomacapp/encrypted/*.bin` ciphertext blob
-/// exists. A missing dir counts as "no blobs". Used to gate master-key
-/// creation: we never regenerate a key when ciphertext it can't decrypt
-/// already exists.
-fn legacy_blobs_exist() -> bool {
-    let dir = match std::env::var("HOME") {
-        Ok(home) => Path::new(&home).join(".mongomacapp").join("encrypted"),
-        Err(_) => return false,
+/// Whether legacy `~/.mongomacapp/encrypted/*.bin` ciphertext *may* exist.
+/// Used to gate master-key creation, so it is deliberately FAIL-CLOSED:
+/// only a definitively-empty / definitively-missing dir returns `false`.
+/// `HOME` unset, a non-NotFound `read_dir` error (e.g. permission denied on
+/// an existing-but-unreadable dir), or an un-enumerable entry all return
+/// `true` — "blobs may exist, refuse to regenerate" — mirroring the v2
+/// [`FileEncryptedStore::blobs_exist`] never-orphan stance. The only cost of
+/// a false positive is a recoverable `SecretsUnrecoverable`; the cost of a
+/// false negative is silently orphaning real ciphertext.
+fn legacy_ciphertext_may_exist() -> bool {
+    let home = match std::env::var("HOME") {
+        Ok(home) => home,
+        Err(_) => return true, // can't locate the blob dir → assume it may exist
     };
-    match fs::read_dir(&dir) {
-        Ok(entries) => entries.flatten().any(|entry| {
-            entry
-                .file_name()
-                .to_str()
-                .map(|name| name.ends_with(".bin"))
-                .unwrap_or(false)
-        }),
-        Err(_) => false,
+    let dir = Path::new(&home).join(".mongomacapp").join("encrypted");
+    let entries = match fs::read_dir(&dir) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return false,
+        Err(_) => return true, // unreadable dir → fail closed
+    };
+    for entry in entries {
+        match entry {
+            Ok(entry) => {
+                if entry
+                    .file_name()
+                    .to_str()
+                    .map(|name| name.ends_with(".bin"))
+                    .unwrap_or(false)
+                {
+                    return true;
+                }
+            }
+            Err(_) => return true, // can't enumerate an entry → fail closed
+        }
     }
+    false
 }
 
 /// Resolve a master key from `provider`, gating creation on `blobs_exist` so
@@ -278,9 +296,9 @@ fn resolve_master_key(
     provider: &dyn MasterKeyProvider,
     blobs_exist: bool,
     log: &dyn Logger,
-) -> Result<Vec<u8>, String> {
+) -> Result<Zeroizing<Vec<u8>>, String> {
     match provider.fetch() {
-        MasterKeyOutcome::Found(key) => Ok(key[..].to_vec()),
+        MasterKeyOutcome::Found(key) => Ok(Zeroizing::new(key[..].to_vec())),
         MasterKeyOutcome::Unavailable(detail) => {
             log.error(
                 "master key unavailable (transient); not regenerating",
@@ -299,7 +317,7 @@ fn resolve_master_key(
                 log.info("master key absent, no ciphertext yet; creating new", logctx! {});
                 provider
                     .create()
-                    .map(|key| key[..].to_vec())
+                    .map(|key| Zeroizing::new(key[..].to_vec()))
                     .map_err(|e| e.to_string())
             }
         }
@@ -311,14 +329,14 @@ fn resolve_master_key(
 /// keychain reset surfaces [`KEY_UNRECOVERABLE_MSG`] instead of silently
 /// orphaning blobs). Creation applies a self-trusted ACL so future reads
 /// from this binary don't prompt.
-fn get_or_create_master_key(log: &dyn Logger) -> Result<Vec<u8>, String> {
+fn get_or_create_master_key(log: &dyn Logger) -> Result<Zeroizing<Vec<u8>>, String> {
     let provider = crate::connection::secrets::KeychainMasterKeyProvider::new(
         SERVICE,
         MASTER_KEY_ACCOUNT,
         "master-key",
         log.child(logctx! {}),
     );
-    resolve_master_key(&provider, legacy_blobs_exist(), log)
+    resolve_master_key(&provider, legacy_ciphertext_may_exist(), log)
 }
 
 /// Encrypts a password using AES-256-GCM with a random nonce.
@@ -701,7 +719,7 @@ mod tests {
         assert_eq!(key.len(), 32);
         // Second resolve returns the SAME key (now persisted in the provider).
         let key2 = resolve_master_key(&provider, false, log.as_ref()).unwrap();
-        assert_eq!(key, key2, "master key should persist across resolves");
+        assert_eq!(&key[..], &key2[..], "master key should persist across resolves");
     }
 
     /// Replaces the old `gracefully_handles_master_key_recreation`, which
@@ -726,6 +744,40 @@ mod tests {
         assert!(matches!(provider.fetch(), MasterKeyOutcome::Unavailable(_)));
     }
 
+    /// `legacy_ciphertext_may_exist` must be fail-CLOSED: HOME-unset and an
+    /// existing blob both report "may exist" (so creation is refused over
+    /// possible ciphertext); only a definitively-missing dir reports false.
+    #[test]
+    fn legacy_ciphertext_may_exist_fails_closed() {
+        let _lock = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let original = std::env::var("HOME").ok();
+
+        // HOME unset → can't locate the dir → must fail closed.
+        std::env::remove_var("HOME");
+        assert!(legacy_ciphertext_may_exist(), "HOME unset must fail closed");
+
+        // Fresh temp HOME with no encrypted dir → definitively no blobs.
+        let test_dir =
+            std::env::temp_dir().join(format!("mongomacapp-test-{}", uuid::Uuid::new_v4()));
+        std::env::set_var("HOME", &test_dir);
+        assert!(
+            !legacy_ciphertext_may_exist(),
+            "missing dir → definitively no blobs"
+        );
+
+        // A .bin blob present → blobs exist.
+        let enc = test_dir.join(".mongomacapp").join("encrypted");
+        fs::create_dir_all(&enc).unwrap();
+        fs::write(enc.join("conn-x.bin"), b"x").unwrap();
+        assert!(legacy_ciphertext_may_exist(), "a .bin present → blobs exist");
+
+        fs::remove_dir_all(&test_dir).ok();
+        match original {
+            Some(home) => std::env::set_var("HOME", home),
+            None => std::env::remove_var("HOME"),
+        }
+    }
+
     /// Manual/local integration coverage of the real macOS keychain via
     /// `KeychainMasterKeyProvider`. `#[ignore]`d so headless/CI runs never
     /// hit the login keychain (the prior cause of 8 env-dependent failures).
@@ -744,7 +796,10 @@ mod tests {
         let created = provider.create().expect("create");
         match provider.fetch() {
             MasterKeyOutcome::Found(fetched) => assert_eq!(&created[..], &fetched[..]),
-            other => panic!("expected Found, got something else: {}", matches!(other, MasterKeyOutcome::Found(_))),
+            MasterKeyOutcome::Absent => panic!("expected Found after create, got Absent"),
+            MasterKeyOutcome::Unavailable(detail) => {
+                panic!("expected Found after create, got Unavailable: {detail}")
+            }
         }
         delete_generic_password(SERVICE, account).ok();
     }
