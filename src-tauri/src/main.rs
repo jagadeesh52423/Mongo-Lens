@@ -130,11 +130,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     builder
         .on_window_event(|window, event| {
             // On close: shut down all MongoDB pools (parallel, 1 s each), then all tunnels
-            // (parallel). Ordering preserves the pool-before-tunnel invariant (shut pools
-            // first so no in-flight query hits a dead tunnel). The teardown runs OFF the UI
-            // thread — we hide the window for an instant-feeling close, drain the maps
-            // synchronously (cheap), then spawn the awaits and exit once they finish. This
-            // replaces a block_on that froze the window for up to ~2 s.
+            // (parallel, 2 s each). Ordering preserves the pool-before-tunnel invariant (shut
+            // pools first so no in-flight query hits a dead tunnel). The teardown runs OFF the
+            // UI thread — we hide the window for an instant-feeling close, drain the maps
+            // synchronously (cheap), then spawn the awaits and exit once they finish, with a
+            // watchdog that force-exits within ~3 s. This replaces a block_on that froze the
+            // window for up to ~2 s.
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 let state = window.state::<AppState>();
                 let clients: Vec<_> = state.mongo_clients.lock_recovered().drain().collect();
@@ -145,14 +146,27 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 api.prevent_close();
                 let _ = window.hide();
                 let app = window.app_handle().clone();
+
+                // Hard guarantee: exit within ~3 s no matter what. This backstops a
+                // cleanup task that hangs or panics before reaching app.exit, so we
+                // never leave a hidden-window zombie process behind.
+                let watchdog = app.clone();
                 tauri::async_runtime::spawn(async move {
-                    // All pools in parallel — total wait = max(1 s, slowest pool).
+                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                    watchdog.exit(0);
+                });
+
+                tauri::async_runtime::spawn(async move {
+                    // Pools first (so no in-flight query hits a dead tunnel), each bounded.
                     futures_util::future::join_all(clients.into_iter().map(|(_, c)| {
                         tokio::time::timeout(std::time::Duration::from_secs(1), c.shutdown())
                     }))
                     .await;
-                    // All tunnels in parallel.
-                    futures_util::future::join_all(tunnels.into_iter().map(|(_, t)| t.close())).await;
+                    // Tunnels next, each bounded so a stuck close() can't hang shutdown.
+                    futures_util::future::join_all(tunnels.into_iter().map(|(_, t)| {
+                        tokio::time::timeout(std::time::Duration::from_secs(2), t.close())
+                    }))
+                    .await;
                     app.exit(0);
                 });
             }
