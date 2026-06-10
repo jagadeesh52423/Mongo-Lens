@@ -38,6 +38,32 @@ process.on('exit', (code) => {
   } catch (_e) {}
 });
 
+// Set once the MongoClient is live so a termination signal can close it.
+// The Rust executor sends SIGTERM (not SIGKILL) on cancel/timeout so this
+// handler can release the server-side connection; without it, killed runs
+// leave stale connections that accumulate across repeated cancels.
+let activeClient = null;
+// Bound the graceful close so a hung client.close() can't outlive the SIGKILL
+// the executor sends after its grace period.
+const SIGTERM_CLOSE_TIMEOUT_MS = 2000;
+
+function handleSignal(signal) {
+  try { logger.info('signal received', { signal }); } catch (_e) {}
+  const client = activeClient;
+  activeClient = null;
+  if (!client) {
+    process.exit(0);
+    return;
+  }
+  const finish = () => process.exit(0);
+  Promise.resolve()
+    .then(() => client.close())
+    .then(finish, finish);
+  setTimeout(() => process.exit(0), SIGTERM_CLOSE_TIMEOUT_MS).unref();
+}
+process.on('SIGTERM', () => handleSignal('SIGTERM'));
+process.on('SIGINT', () => handleSignal('SIGINT'));
+
 let groupIndex = 0;
 
 const PAGE = parseInt(process.env.MONGO_PAGE ?? '0', 10);
@@ -407,6 +433,7 @@ async function run() {
     clientOptions.authMechanism = process.env.MONGO_AUTH_MECHANISM;
   }
   const client = new MongoClient(uri, clientOptions);
+  activeClient = client;
   try {
     await client.connect();
   } catch (err) {
@@ -445,6 +472,7 @@ async function run() {
     );
     process.exitCode = 1;
   } finally {
+    activeClient = null;
     try { await client.close(); } catch (_e) {}
   }
 }

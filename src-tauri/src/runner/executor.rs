@@ -4,8 +4,9 @@ use crate::runner::{harness_path, node_modules_dir, runner_dir, RunnerCredential
 use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Child, Command};
 use std::sync::{Arc, OnceLock};
+use std::time::{Duration, Instant};
 
 static NODE_PATH: OnceLock<String> = OnceLock::new();
 
@@ -179,6 +180,60 @@ pub fn spawn_script(
     })
 }
 
+/// Default grace window between SIGTERM and SIGKILL when terminating a runner
+/// child. Overridable via MONGOMACAPP_KILL_GRACE_MS to tune without a rebuild.
+const DEFAULT_KILL_GRACE_MS: u64 = 750;
+
+fn kill_grace() -> Duration {
+    std::env::var("MONGOMACAPP_KILL_GRACE_MS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .map(Duration::from_millis)
+        .unwrap_or(Duration::from_millis(DEFAULT_KILL_GRACE_MS))
+}
+
+/// Terminate a runner child gracefully. std `Child::kill()` only sends SIGKILL,
+/// which bypasses the harness SIGTERM handler (runner/harness.js) and leaves the
+/// server-side Mongo connection dangling — stale connections then accumulate
+/// across repeated cancels. Instead: send SIGTERM so the harness can close its
+/// client, wait up to the grace window, then SIGKILL + reap if still alive.
+/// Always reaps the child. Returns true when SIGTERM alone was sufficient.
+///
+/// Wiring: the cancel/timeout `child.kill()` call sites in
+/// `crate::commands::script` must call this instead. Until that wiring lands the
+/// fn is unreferenced in the binary build, hence the `allow(dead_code)`.
+#[allow(dead_code)]
+pub fn terminate_child(child: &mut Child) -> bool {
+    send_sigterm(child.id());
+    let deadline = Instant::now() + kill_grace();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => return true,
+            Ok(None) => {
+                if Instant::now() >= deadline {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            Err(_) => break,
+        }
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+    false
+}
+
+// std has no portable signal API and the project pulls in no libc/nix crate, so
+// shell out to /bin/kill (always present on macOS, the only supported target)
+// to deliver SIGTERM.
+#[allow(dead_code)]
+fn send_sigterm(pid: u32) {
+    let _ = Command::new("/bin/kill")
+        .arg("-TERM")
+        .arg(pid.to_string())
+        .status();
+}
+
 #[tauri::command]
 pub fn check_node_runner() -> RunnerStatus {
     check_runner()
@@ -219,5 +274,20 @@ mod tests {
         assert_eq!(fs::read_to_string(d.path().join("harness.js")).unwrap(), "H");
         assert_eq!(fs::read_to_string(d.path().join("logger.js")).unwrap(), "L");
         assert_eq!(fs::read_to_string(d.path().join("redact.js")).unwrap(), "R");
+    }
+
+    #[test]
+    fn terminate_child_sigterms_a_running_process_within_grace() {
+        // /bin/sleep terminates on SIGTERM's default action, so terminate_child
+        // should reap it via the graceful path (no SIGKILL needed).
+        let mut child = Command::new("/bin/sleep").arg("30").spawn().unwrap();
+        let graceful = terminate_child(&mut child);
+        assert!(graceful, "sleep should exit from SIGTERM within the grace window");
+    }
+
+    #[test]
+    fn kill_grace_falls_back_to_default_when_env_unset() {
+        std::env::remove_var("MONGOMACAPP_KILL_GRACE_MS");
+        assert_eq!(kill_grace(), Duration::from_millis(DEFAULT_KILL_GRACE_MS));
     }
 }

@@ -244,6 +244,33 @@ describe('harness integration tests', () => {
     expect(result.groups[2].category).toBe('query');
   });
 
+  it('SIGTERM mid-run closes the client and exits cleanly (code 0)', async () => {
+    const tmpFile = path.join(os.tmpdir(), `harness-sig-${randomBytes(8).toString('hex')}.js`);
+    // Materialize a query, then idle — leaving the client open so SIGTERM has
+    // something to close. A missing handler would let the default SIGTERM action
+    // kill the process (exit code null), failing the assertion below.
+    fs.writeFileSync(
+      tmpFile,
+      'await db.alert_tracker.find({}).toArray();\nawait new Promise((r) => setTimeout(r, 10000));',
+    );
+    const child = spawn(process.execPath, [HARNESS_PATH, DEFAULTS.db, tmpFile], {
+      env: {
+        ...process.env,
+        MONGO_URI: DEFAULTS.uri,
+        MONGO_PAGE: '0',
+        MONGO_PAGE_SIZE: '5',
+        NODE_PATH: MONGO_MODULES_DIR,
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const exitCode = await new Promise((resolve) => {
+      child.on('exit', (code) => resolve(code));
+      setTimeout(() => child.kill('SIGTERM'), 1500);
+    });
+    try { fs.unlinkSync(tmpFile); } catch (_e) { /* ignore */ }
+    expect(exitCode).toBe(0);
+  });
+
   it('invalid syntax produces an error and non-zero exit code', async () => {
     const result = await spawnHarness('db.alert_tracker.find(INVALID');
     expect(result.error).not.toBeNull();
