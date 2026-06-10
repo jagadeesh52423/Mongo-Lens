@@ -12,6 +12,7 @@ mod ssh;
 mod state;
 
 use state::AppState;
+use state::LockRecovered;
 use std::fs;
 use std::path::PathBuf;
 use tauri::menu::Menu;
@@ -129,27 +130,31 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     builder
         .on_window_event(|window, event| {
             // On close: shut down all MongoDB pools (parallel, 1 s each), then all tunnels
-            // (parallel, 2 s each). Parallel execution keeps total stall at max(1 s, 2 s)
-            // regardless of connection count (C4). Ordering preserves pool-before-tunnel
-            // invariant (shutdown pools first so no in-flight queries hit a dead tunnel).
-            if let tauri::WindowEvent::CloseRequested { .. } = event {
+            // (parallel). Ordering preserves the pool-before-tunnel invariant (shut pools
+            // first so no in-flight query hits a dead tunnel). The teardown runs OFF the UI
+            // thread — we hide the window for an instant-feeling close, drain the maps
+            // synchronously (cheap), then spawn the awaits and exit once they finish. This
+            // replaces a block_on that froze the window for up to ~2 s.
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 let state = window.state::<AppState>();
-                let clients: Vec<_> = state.mongo_clients.lock().unwrap().drain().collect();
-                let tunnels: Vec<_> = state.ssh_tunnels.lock().unwrap().drain().collect();
-                if !clients.is_empty() || !tunnels.is_empty() {
-                    tauri::async_runtime::block_on(async move {
-                        // All pools in parallel — total wait = max(1 s, slowest pool).
-                        futures_util::future::join_all(clients.into_iter().map(|(_, c)| {
-                            tokio::time::timeout(std::time::Duration::from_secs(1), c.shutdown())
-                        }))
-                        .await;
-                        // All tunnels in parallel — total wait = max(2 s, slowest tunnel).
-                        futures_util::future::join_all(
-                            tunnels.into_iter().map(|(_, t)| t.close()),
-                        )
-                        .await;
-                    });
+                let clients: Vec<_> = state.mongo_clients.lock_recovered().drain().collect();
+                let tunnels: Vec<_> = state.ssh_tunnels.lock_recovered().drain().collect();
+                if clients.is_empty() && tunnels.is_empty() {
+                    return; // nothing to tear down — let the window close immediately
                 }
+                api.prevent_close();
+                let _ = window.hide();
+                let app = window.app_handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    // All pools in parallel — total wait = max(1 s, slowest pool).
+                    futures_util::future::join_all(clients.into_iter().map(|(_, c)| {
+                        tokio::time::timeout(std::time::Duration::from_secs(1), c.shutdown())
+                    }))
+                    .await;
+                    // All tunnels in parallel.
+                    futures_util::future::join_all(tunnels.into_iter().map(|(_, t)| t.close())).await;
+                    app.exit(0);
+                });
             }
         })
         .run(tauri::generate_context!())?;
