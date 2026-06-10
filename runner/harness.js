@@ -43,6 +43,56 @@ let groupIndex = 0;
 const PAGE = parseInt(process.env.MONGO_PAGE ?? '0', 10);
 const PAGE_SIZE = parseInt(process.env.MONGO_PAGE_SIZE ?? '50', 10);
 
+// Result-set safety caps (configurable via env; <= 0 disables each one).
+//   MONGO_MAX_DOCS    — max documents materialized into a single emitted group.
+//                       Without this, cursor.toArray() on a large collection
+//                       buffers the whole result set into memory -> OOM/UI freeze.
+//   MONGO_MAX_TIME_MS — server-side per-operation time budget applied to
+//                       find/aggregate cursors and their count queries, so a
+//                       slow op fails fast instead of riding the 30s kill timer.
+const MAX_DOCS = parseInt(process.env.MONGO_MAX_DOCS ?? '1000', 10);
+const MAX_TIME_MS = parseInt(process.env.MONGO_MAX_TIME_MS ?? '30000', 10);
+const COUNT_OPTIONS = MAX_TIME_MS > 0 ? { maxTimeMS: MAX_TIME_MS } : undefined;
+
+function applyMaxTime(cursor) {
+  if (MAX_TIME_MS > 0 && cursor && typeof cursor.maxTimeMS === 'function') {
+    cursor.maxTimeMS(MAX_TIME_MS);
+  }
+  return cursor;
+}
+
+// Materialize a cursor without buffering an unbounded result set: fetch at most
+// MAX_DOCS + 1 docs so we can flag truncation, then slice to MAX_DOCS. When the
+// caller already constrained the result (pagination limit or a user .limit()
+// <= MAX_DOCS), that smaller bound wins and nothing is truncated.
+async function toArrayCapped(cursor, effectiveLimit) {
+  if (!(MAX_DOCS > 0)) {
+    const docs = await cursor.toArray();
+    return { docs, truncated: false };
+  }
+  const fetchLimit =
+    effectiveLimit != null && effectiveLimit <= MAX_DOCS ? effectiveLimit : MAX_DOCS + 1;
+  const fetched = await cursor.limit(fetchLimit).toArray();
+  if (fetched.length > MAX_DOCS) {
+    return { docs: fetched.slice(0, MAX_DOCS), truncated: true };
+  }
+  return { docs: fetched, truncated: false };
+}
+
+// Surface an out-of-band notice (truncation, unsupported feature, ...) on the
+// same `__log` channel as user print() output. The UI renders these in the
+// Console tab, so a notice is visible without disturbing the result-group
+// stream or its 1:1 classification alignment.
+function emitNotice(message, log = emitLogger) {
+  if (log) log.info('notice', { message });
+  process.stdout.write(JSON.stringify({ __log: { message } }) + '\n');
+}
+
+function truncationNotice(shown) {
+  return `⚠ Result truncated to ${shown} documents — the query matched more. ` +
+    'Add a tighter filter/.limit(), or raise MONGO_MAX_DOCS to see more.';
+}
+
 // Pre-classify every top-level statement. The harness emits groups in
 // statement order (one emitGroup call per MongoDB op, 1:1 with classified
 // statements); `groupClassifications` is consumed by index as groups emit.
@@ -134,17 +184,19 @@ function makeCursorProxy(cursor, countPromise, log = cursorLogger) {
       if (countPromise !== undefined && userLimit === null && userSkip === null) {
         // Only apply pagination when the user did not explicitly chain .limit() or .skip()
         cursor = cursor.skip(PAGE * PAGE_SIZE).limit(PAGE_SIZE);
-        promise = Promise.all([cursor.toArray(), countPromise]).then(([docs, total]) => {
-          if (log) log.debug('cursor materialize', { count: docs.length, total, paginated: true });
-          emitGroup(docs, log);
+        promise = Promise.all([toArrayCapped(cursor, PAGE_SIZE), countPromise]).then(([res, total]) => {
+          if (log) log.debug('cursor materialize', { count: res.docs.length, total, paginated: true, truncated: res.truncated });
+          if (res.truncated) emitNotice(truncationNotice(res.docs.length), log);
+          emitGroup(res.docs, log);
           emitPagination(total, PAGE, PAGE_SIZE);
-          return docs;
+          return res.docs;
         });
       } else {
-        promise = cursor.toArray().then((docs) => {
-          if (log) log.debug('cursor materialize', { count: docs.length, paginated: false });
-          emitGroup(docs, log);
-          return docs;
+        promise = toArrayCapped(cursor, userLimit).then((res) => {
+          if (log) log.debug('cursor materialize', { count: res.docs.length, paginated: false, truncated: res.truncated });
+          if (res.truncated) emitNotice(truncationNotice(res.docs.length), log);
+          emitGroup(res.docs, log);
+          return res.docs;
         });
       }
     }
@@ -231,15 +283,15 @@ function makeCollectionProxy(col) {
       if (prop === 'find') {
         return (filter = {}, options) => {
           const normalizedOptions = normalizeFindOptions(options);
-          const rawCursor = val.call(target, filter, normalizedOptions);
+          const rawCursor = applyMaxTime(val.call(target, filter, normalizedOptions));
           // Empty filter: use estimatedDocumentCount() (reads collection
           // metadata, O(1)) instead of countDocuments({}) which forces a
           // COLLSCAN and hangs on large collections.
           const isEmptyFilter =
             filter && typeof filter === 'object' && Object.keys(filter).length === 0;
           const countPromise = isEmptyFilter
-            ? target.estimatedDocumentCount().catch(() => -1)
-            : target.countDocuments(filter).catch(() => -1);
+            ? target.estimatedDocumentCount(COUNT_OPTIONS).catch(() => -1)
+            : target.countDocuments(filter, COUNT_OPTIONS).catch(() => -1);
           return makeCursorProxy(rawCursor, countPromise);
         };
       }
@@ -249,12 +301,12 @@ function makeCollectionProxy(col) {
           const isTerminal = lastStage && ('$merge' in lastStage || '$out' in lastStage);
           if (isTerminal) {
             // Terminal stages ($merge/$out) must be last — skip pagination
-            return makeCursorProxy(val.call(target, pipeline));
+            return makeCursorProxy(applyMaxTime(val.call(target, pipeline)));
           }
           const paginatedPipeline = [...pipeline, { $skip: PAGE * PAGE_SIZE }, { $limit: PAGE_SIZE }];
-          const rawCursor = val.call(target, paginatedPipeline);
+          const rawCursor = applyMaxTime(val.call(target, paginatedPipeline));
           const countPipeline = [...pipeline, { $count: 'total' }];
-          const countPromise = target.aggregate(countPipeline).toArray()
+          const countPromise = applyMaxTime(target.aggregate(countPipeline)).toArray()
             .then((r) => (r[0]?.total ?? 0))
             .catch(() => -1);
           return makeCursorProxy(rawCursor, countPromise);

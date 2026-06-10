@@ -20,7 +20,7 @@ const DEFAULTS = {
 };
 
 function spawnHarness(query, opts = {}) {
-  const { uri, db, page, pageSize } = { ...DEFAULTS, ...opts };
+  const { uri, db, page, pageSize, env } = { ...DEFAULTS, ...opts };
   const tmpFile = path.join(os.tmpdir(), `harness-test-${randomBytes(8).toString('hex')}.js`);
   fs.writeFileSync(tmpFile, query);
 
@@ -35,6 +35,7 @@ function spawnHarness(query, opts = {}) {
           MONGO_PAGE: String(page),
           MONGO_PAGE_SIZE: String(pageSize),
           NODE_PATH: MONGO_MODULES_DIR,
+          ...(env || {}),
         },
         stdio: ['ignore', 'pipe', 'pipe'],
       },
@@ -58,6 +59,7 @@ function spawnHarness(query, opts = {}) {
       cleanup();
 
       const groups = [];
+      const logs = [];
       let pagination = null;
       let error = null;
 
@@ -69,12 +71,13 @@ function spawnHarness(query, opts = {}) {
           if (msg.__error !== undefined) error = msg.__error;
           else if (msg.__group !== undefined) groups.push(msg);
           else if (msg.__pagination !== undefined) pagination = msg.__pagination;
+          else if (msg.__log !== undefined) logs.push(msg.__log.message);
         }
       };
       parseLines(stdout);
       parseLines(stderr);
 
-      resolve({ groups, pagination, error, exitCode });
+      resolve({ groups, logs, pagination, error, exitCode });
     });
   });
 }
@@ -185,6 +188,27 @@ describe('harness integration tests', () => {
     expect(result.error).toBeNull();
     const printed = result.groups.find((g) => typeof g.docs[0] === 'string' && g.docs[0].startsWith('len='));
     expect(printed).toBeDefined();
+  });
+
+  it('caps the result set at MONGO_MAX_DOCS and emits a truncation notice', async () => {
+    const result = await spawnHarness('db.alert_tracker.find({})', {
+      pageSize: 50,
+      env: { MONGO_MAX_DOCS: '2' },
+    });
+    expect(result.error).toBeNull();
+    expect(result.groups.length).toBe(1);
+    expect(result.groups[0].docs.length).toBe(2);
+    expect(result.logs.some((m) => /truncat/i.test(m))).toBe(true);
+  });
+
+  it('does not flag truncation when the result fits under MONGO_MAX_DOCS', async () => {
+    const result = await spawnHarness('db.alert_tracker.find({})', {
+      pageSize: 3,
+      env: { MONGO_MAX_DOCS: '1000' },
+    });
+    expect(result.error).toBeNull();
+    expect(result.groups[0].docs.length).toBeLessThanOrEqual(3);
+    expect(result.logs.some((m) => /truncat/i.test(m))).toBe(false);
   });
 
   it('cursor.explain() emits a plan group', async () => {
