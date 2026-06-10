@@ -43,4 +43,32 @@ describe('notifications store', () => {
     useNotificationsStore.getState().clear();
     expect(useNotificationsStore.getState().notifications).toHaveLength(0);
   });
+
+  it('dedupes an identical (level + message) toast instead of stacking', () => {
+    const first = useNotificationsStore.getState().notify({ level: 'error', message: 'persist failed' });
+    const second = useNotificationsStore
+      .getState()
+      .notify({ level: 'error', message: 'persist failed', detail: 'disk full' });
+    const list = useNotificationsStore.getState().notifications;
+    expect(list).toHaveLength(1);
+    expect(second).toBe(first); // refreshed in place, same id
+    expect(list[0].detail).toBe('disk full'); // detail refreshed
+  });
+
+  it('treats a different message or level as a distinct toast', () => {
+    useNotificationsStore.getState().notify({ level: 'error', message: 'persist failed' });
+    useNotificationsStore.getState().notify({ level: 'error', message: 'load failed' });
+    useNotificationsStore.getState().notify({ level: 'warning', message: 'persist failed' });
+    expect(useNotificationsStore.getState().notifications).toHaveLength(3);
+  });
+
+  it('caps the queue and drops the oldest distinct toasts', () => {
+    for (let i = 0; i < 8; i += 1) {
+      useNotificationsStore.getState().notify({ level: 'info', message: `msg-${i}` });
+    }
+    const list = useNotificationsStore.getState().notifications;
+    expect(list).toHaveLength(5);
+    expect(list[0].message).toBe('msg-3'); // msg-0..2 evicted
+    expect(list[4].message).toBe('msg-7');
+  });
 });

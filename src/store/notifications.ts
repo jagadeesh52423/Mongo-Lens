@@ -43,25 +43,49 @@ const DEFAULT_DURATION_MS: Record<NotificationLevel, number> = {
   success: 4000,
 };
 
+/** Hard cap on concurrent toasts; a burst of distinct toasts drops the oldest. */
+const MAX_NOTIFICATIONS = 5;
+
 let nextId = 0;
 function makeId(): string {
   nextId += 1;
   return `ntf-${nextId}`;
 }
 
-export const useNotificationsStore = create<NotificationsState>((set) => ({
+export const useNotificationsStore = create<NotificationsState>((set, get) => ({
   notifications: [],
 
   notify: (input) => {
+    const durationMs = input.durationMs ?? DEFAULT_DURATION_MS[input.level];
+
+    // Dedup by (level + message): an identical toast is refreshed in place,
+    // not stacked. A persistent failure (e.g. a settings write erroring on
+    // every rapid theme/override edit) must not pile up unbounded sticky toasts.
+    const existing = get().notifications.find(
+      (n) => n.level === input.level && n.message === input.message,
+    );
+    if (existing) {
+      set((s) => ({
+        notifications: s.notifications.map((n) =>
+          n.id === existing.id ? { ...n, detail: input.detail, durationMs } : n,
+        ),
+      }));
+      return existing.id;
+    }
+
     const id = makeId();
     const notification: Notification = {
       id,
       level: input.level,
       message: input.message,
       detail: input.detail,
-      durationMs: input.durationMs ?? DEFAULT_DURATION_MS[input.level],
+      durationMs,
     };
-    set((s) => ({ notifications: [...s.notifications, notification] }));
+    set((s) => {
+      const next = [...s.notifications, notification];
+      // Bound the queue — keep the most recent MAX_NOTIFICATIONS.
+      return { notifications: next.slice(-MAX_NOTIFICATIONS) };
+    });
     return id;
   },
 
