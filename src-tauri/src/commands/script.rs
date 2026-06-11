@@ -4,7 +4,7 @@ use crate::mongo;
 use crate::runner::executor::spawn_script;
 use crate::state::AppState;
 use serde::Serialize;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
@@ -120,12 +120,20 @@ pub async fn run_script(
         }
     }
 
-    let tmp_dir = std::env::temp_dir();
-    let script_path = tmp_dir.join(format!("mongomacapp-{}.js", uuid::Uuid::new_v4()));
-    std::fs::write(&script_path, &script).map_err(|e| {
+    // Write the query to a 0600 temp file inside the app data dir (~/.mongomacapp)
+    // rather than world-readable /tmp. NamedTempFile deletes on drop, so the
+    // plaintext query never outlives the command — even on panic/timeout/cancel.
+    // The `tmp_script` guard is held in this outer scope until the child exits.
+    let app_data_dir = state
+        .db_path
+        .parent()
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_else(std::env::temp_dir);
+    let tmp_script = write_temp_script(&app_data_dir, &script).map_err(|e| {
         log.error("write tmp script failed", logctx! { "err" => e.to_string() });
         e.to_string()
     })?;
+    let script_path = tmp_script.path().to_path_buf();
     log.debug("script written", logctx! { "path" => script_path.display().to_string() });
 
     let run_id_str = run_id.clone().unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
@@ -146,8 +154,9 @@ pub async fn run_script(
 
     let level = std::env::var("MONGOMACAPP_LOG_LEVEL").unwrap_or_else(|_| "info".into());
 
-    // Wrap the body so the temp script file is always cleaned up,
-    // even if spawn_script or stdout/stderr take fail with `?`.
+    // Body wrapped so the cancel-flag cleanup below always runs, even when
+    // spawn_script or the stdout/stderr taps fail with `?`. The temp script
+    // file is cleaned up by the `tmp_script` RAII guard on scope exit.
     let result: Result<(), String> = async {
         let mut child = spawn_script(
             &uri,
@@ -293,8 +302,9 @@ pub async fn run_script(
         let wait_result = timeout(Duration::from_secs(SCRIPT_TIMEOUT_SECS), async {
             loop {
                 if cancel_flag.load(Ordering::Relaxed) {
-                    let _ = child.kill();
-                    let _ = child.wait();
+                    // SIGTERM + grace before SIGKILL so the harness can close its
+                    // Mongo connection; terminate_child reaps the child itself.
+                    crate::runner::executor::terminate_child(&mut child);
                     return Err(std::io::Error::new(
                         std::io::ErrorKind::Interrupted,
                         "cancelled",
@@ -347,10 +357,10 @@ pub async fn run_script(
                 }
             }
             Err(_) => {
-                // Kill, then reap so we don't leave a zombie and so the
-                // stdout/stderr pipes flush EOF before we join the readers.
-                let _ = child.kill();
-                let _ = child.wait();
+                // SIGTERM + grace before SIGKILL (lets the harness close its Mongo
+                // connection), reaping the child so its stdout/stderr pipes flush EOF
+                // before we join the readers. terminate_child does the reap.
+                crate::runner::executor::terminate_child(&mut child);
                 let _ = stdout_handle.join();
                 let _ = stderr_handle.join();
                 log.warn("run_script timed out", logctx! {
@@ -386,8 +396,24 @@ pub async fn run_script(
         }
     }
 
-    let _ = std::fs::remove_file(&script_path);
+    // `tmp_script` (the NamedTempFile guard) drops here, deleting the file.
+    drop(tmp_script);
     result
+}
+
+/// Write `contents` to a fresh 0600 temp file in `dir` (tempfile's unix default).
+/// The returned guard deletes the file on drop — keep it alive while the path is in use.
+fn write_temp_script(
+    dir: &std::path::Path,
+    contents: &str,
+) -> std::io::Result<tempfile::NamedTempFile> {
+    let mut file = tempfile::Builder::new()
+        .prefix("mongomacapp-script-")
+        .suffix(".js")
+        .tempfile_in(dir)?;
+    file.write_all(contents.as_bytes())?;
+    file.flush()?;
+    Ok(file)
 }
 
 /// Compact "where" tag for a v2 `ConnectionTarget`, used only in debug
@@ -398,5 +424,37 @@ fn host_tag(target: &crate::connection::model::ConnectionTarget) -> String {
     match target {
         ConnectionTarget::Direct { host, port, .. } => format!("{host}:{port}"),
         ConnectionTarget::Uri { .. } => "uri".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::write_temp_script;
+    use std::io::Read;
+
+    #[test]
+    fn temp_script_holds_contents_and_deletes_on_drop() {
+        let dir = std::env::temp_dir();
+        let path;
+        {
+            let guard = write_temp_script(&dir, "db.users.find({})").expect("create temp script");
+            path = guard.path().to_path_buf();
+            assert!(path.starts_with(&dir), "temp file must live in the requested dir");
+
+            let mut contents = String::new();
+            std::fs::File::open(&path)
+                .expect("reopen temp script by path")
+                .read_to_string(&mut contents)
+                .expect("read temp script");
+            assert_eq!(contents, "db.users.find({})");
+
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+                assert_eq!(mode, 0o600, "temp script must be owner-only (0600)");
+            }
+        }
+        assert!(!path.exists(), "temp script must be deleted when the guard drops");
     }
 }

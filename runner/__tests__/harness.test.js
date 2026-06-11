@@ -20,7 +20,7 @@ const DEFAULTS = {
 };
 
 function spawnHarness(query, opts = {}) {
-  const { uri, db, page, pageSize } = { ...DEFAULTS, ...opts };
+  const { uri, db, page, pageSize, env } = { ...DEFAULTS, ...opts };
   const tmpFile = path.join(os.tmpdir(), `harness-test-${randomBytes(8).toString('hex')}.js`);
   fs.writeFileSync(tmpFile, query);
 
@@ -35,6 +35,7 @@ function spawnHarness(query, opts = {}) {
           MONGO_PAGE: String(page),
           MONGO_PAGE_SIZE: String(pageSize),
           NODE_PATH: MONGO_MODULES_DIR,
+          ...(env || {}),
         },
         stdio: ['ignore', 'pipe', 'pipe'],
       },
@@ -58,6 +59,7 @@ function spawnHarness(query, opts = {}) {
       cleanup();
 
       const groups = [];
+      const logs = [];
       let pagination = null;
       let error = null;
 
@@ -69,12 +71,13 @@ function spawnHarness(query, opts = {}) {
           if (msg.__error !== undefined) error = msg.__error;
           else if (msg.__group !== undefined) groups.push(msg);
           else if (msg.__pagination !== undefined) pagination = msg.__pagination;
+          else if (msg.__log !== undefined) logs.push(msg.__log.message);
         }
       };
       parseLines(stdout);
       parseLines(stderr);
 
-      resolve({ groups, pagination, error, exitCode });
+      resolve({ groups, logs, pagination, error, exitCode });
     });
   });
 }
@@ -187,6 +190,27 @@ describe('harness integration tests', () => {
     expect(printed).toBeDefined();
   });
 
+  it('caps the result set at MONGO_MAX_DOCS and emits a truncation notice', async () => {
+    const result = await spawnHarness('db.alert_tracker.find({})', {
+      pageSize: 50,
+      env: { MONGO_MAX_DOCS: '2' },
+    });
+    expect(result.error).toBeNull();
+    expect(result.groups.length).toBe(1);
+    expect(result.groups[0].docs.length).toBe(2);
+    expect(result.logs.some((m) => /truncat/i.test(m))).toBe(true);
+  });
+
+  it('does not flag truncation when the result fits under MONGO_MAX_DOCS', async () => {
+    const result = await spawnHarness('db.alert_tracker.find({})', {
+      pageSize: 3,
+      env: { MONGO_MAX_DOCS: '1000' },
+    });
+    expect(result.error).toBeNull();
+    expect(result.groups[0].docs.length).toBeLessThanOrEqual(3);
+    expect(result.logs.some((m) => /truncat/i.test(m))).toBe(false);
+  });
+
   it('cursor.explain() emits a plan group', async () => {
     const result = await spawnHarness('db.alert_tracker.find({}).explain()');
     expect(result.error).toBeNull();
@@ -195,6 +219,56 @@ describe('harness integration tests', () => {
     expect(plan).toBeDefined();
     expect(typeof plan).toBe('object');
     expect(plan.queryPlanner || plan.stages || plan.command).toBeTruthy();
+  });
+
+  it('change stream (.watch()) emits an unsupported notice and exits cleanly', async () => {
+    const result = await spawnHarness('db.alert_tracker.watch()');
+    expect(result.error).toBeNull();
+    expect(result.exitCode).toBe(0);
+    expect(result.groups.length).toBe(1);
+    expect(result.groups[0].category).toBe('stream');
+    expect(result.groups[0].docs[0]).toHaveProperty('notice');
+    expect(result.groups[0].docs[0].notice).toMatch(/not supported/i);
+  });
+
+  it('keeps group classification aligned when a watch sits between queries', async () => {
+    const result = await spawnHarness(
+      'db.alert_tracker.find({});\ndb.alert_tracker.watch();\ndb.alert_tracker.find({});',
+      { pageSize: 2 },
+    );
+    expect(result.error).toBeNull();
+    expect(result.exitCode).toBe(0);
+    expect(result.groups.length).toBe(3);
+    expect(result.groups[0].category).toBe('query');
+    expect(result.groups[1].category).toBe('stream');
+    expect(result.groups[2].category).toBe('query');
+  });
+
+  it('SIGTERM mid-run closes the client and exits cleanly (code 0)', async () => {
+    const tmpFile = path.join(os.tmpdir(), `harness-sig-${randomBytes(8).toString('hex')}.js`);
+    // Materialize a query, then idle — leaving the client open so SIGTERM has
+    // something to close. A missing handler would let the default SIGTERM action
+    // kill the process (exit code null), failing the assertion below.
+    fs.writeFileSync(
+      tmpFile,
+      'await db.alert_tracker.find({}).toArray();\nawait new Promise((r) => setTimeout(r, 10000));',
+    );
+    const child = spawn(process.execPath, [HARNESS_PATH, DEFAULTS.db, tmpFile], {
+      env: {
+        ...process.env,
+        MONGO_URI: DEFAULTS.uri,
+        MONGO_PAGE: '0',
+        MONGO_PAGE_SIZE: '5',
+        NODE_PATH: MONGO_MODULES_DIR,
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const exitCode = await new Promise((resolve) => {
+      child.on('exit', (code) => resolve(code));
+      setTimeout(() => child.kill('SIGTERM'), 1500);
+    });
+    try { fs.unlinkSync(tmpFile); } catch (_e) { /* ignore */ }
+    expect(exitCode).toBe(0);
   });
 
   it('invalid syntax produces an error and non-zero exit code', async () => {

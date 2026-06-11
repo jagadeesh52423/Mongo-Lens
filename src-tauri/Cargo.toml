@@ -37,9 +37,9 @@ ring = "0.17"
 rand = "0.8"
 russh = "~0.60"
 zeroize = { version = "1", features = ["derive"] }
+tempfile = "3"
 
 [dev-dependencies]
-tempfile = "3"
 filetime = "0.2"
 
 [[bin]]

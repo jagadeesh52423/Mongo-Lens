@@ -12,6 +12,7 @@ import type { RecordContext } from '../../../services/records/RecordContext';
 import type { RecordActionHost } from '../../../services/records/RecordActionHost';
 import type { ResultGroup } from '../../../types';
 import { ErrorBanner } from './ErrorBanner';
+import { NoticeBanner } from './NoticeBanner';
 import { ResultsToolbar } from './ResultsToolbar';
 import { ResultsPagination } from './ResultsPagination';
 import { ConsolePanel } from './ConsolePanel';
@@ -43,6 +44,20 @@ function SelectionClearer({ tabId, isRunning }: { tabId: string; isRunning: bool
   const { clear } = useCellSelection();
   useEffect(() => { clear(); }, [tabId, isRunning]);
   return null;
+}
+
+const STREAM_NOTICE_FALLBACK = 'Change streams (.watch()) are not supported yet.';
+
+// A 'stream' group carries a single notice doc ({ notice: string }) from the
+// runner instead of tabular data. Pull the message out, falling back to a
+// constant if the shape is unexpected.
+function streamNotice(group: ResultGroup): string {
+  const first = group.docs?.[0];
+  if (first && typeof first === 'object' && 'notice' in first) {
+    const { notice } = first as { notice?: unknown };
+    if (typeof notice === 'string') return notice;
+  }
+  return STREAM_NOTICE_FALLBACK;
 }
 
 interface Props {
@@ -197,6 +212,8 @@ export function ResultsPanel({
           <div className={styles.body}>
             {isConsoleActive ? (
               <ConsolePanel logs={logs} />
+            ) : activeGroup?.category === 'stream' ? (
+              <NoticeBanner message={streamNotice(activeGroup)} />
             ) : activeGroup ? (
               (() => {
                 const ViewComponent = viewModeRegistry.get(view)?.Component;

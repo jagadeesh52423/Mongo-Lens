@@ -1,3 +1,11 @@
+// ───────────────────────────────────────────────────────────────────────────
+// MongoLens runner harness — DEPLOY-BY-COPY GUARDED.
+// Bundled into the Tauri binary (include_str!) and installed to
+// ~/.mongomacapp/runner/harness.js. On first spawn the Rust executor compares
+// the installed copy against the bundled source and logs a warning banner if
+// they diverge. After editing this file you MUST redeploy:
+//     cp runner/harness.js ~/.mongomacapp/runner/harness.js
+// ───────────────────────────────────────────────────────────────────────────
 const { MongoClient } = require('mongodb');
 const fs = require('fs');
 const { createLogger } = require('./logger');
@@ -11,6 +19,34 @@ if (!uri) {
 const [dbName, scriptPath] = process.argv.slice(2);
 const rawScript = fs.readFileSync(scriptPath, 'utf8');
 
+// Credentials arrive as one JSON line on stdin (never env vars — env is
+// readable by same-user processes via `ps -E` / proc inspection). Read
+// synchronously at startup, before connecting. The parent closes fd 0 right
+// after writing, so this returns promptly; when no credential is supplied
+// (e.g. the CLI runner with stdin = /dev/null) it reads empty -> null.
+function readStdinCredentials() {
+  let raw = '';
+  try {
+    raw = fs.readFileSync(0, 'utf8');
+  } catch (err) {
+    // Dropping creds here means the connection silently falls back to no-auth
+    // and fails later with a confusing error — surface the cause.
+    logger.warn('failed to read credentials from stdin', { err: String(err) });
+    return null;
+  }
+  const line = raw.split('\n').find((l) => l.trim().length > 0);
+  if (!line) return null;
+  try {
+    return JSON.parse(line);
+  } catch (err) {
+    // Log only the error *name* — never String(err)/err.message: a JSON parse
+    // error embeds a snippet of the offending input, which on this path is the
+    // credential line (and could include the password).
+    logger.warn('failed to parse stdin credentials JSON', { err: err && err.name });
+    return null;
+  }
+}
+
 const logger = createLogger({
   runId: process.env.MONGOMACAPP_RUN_ID || 'nil',
   logsDir: process.env.MONGOMACAPP_LOGS_DIR || null,
@@ -23,6 +59,9 @@ const logger = createLogger({
 const transformLogger = logger.child({ logger: 'harness.transform' });
 const cursorLogger = logger.child({ logger: 'harness.cursor' });
 const emitLogger = logger.child({ logger: 'harness.emit' });
+
+// Read after the logger exists so a stdin/parse failure can be reported.
+const credentials = readStdinCredentials();
 
 logger.info('harness start', {
   dbName,
@@ -38,25 +77,117 @@ process.on('exit', (code) => {
   } catch (_e) {}
 });
 
+// Set once the MongoClient is live so a termination signal can close it.
+// The Rust executor sends SIGTERM (not SIGKILL) on cancel/timeout so this
+// handler can release the server-side connection; without it, killed runs
+// leave stale connections that accumulate across repeated cancels.
+let activeClient = null;
+// Bound the graceful close so a hung client.close() can't outlive the SIGKILL
+// the executor sends after its grace period.
+const SIGTERM_CLOSE_TIMEOUT_MS = 2000;
+
+function handleSignal(signal) {
+  try { logger.info('signal received', { signal }); } catch (_e) {}
+  const client = activeClient;
+  activeClient = null;
+  if (!client) {
+    process.exit(0);
+    return;
+  }
+  const finish = () => process.exit(0);
+  Promise.resolve()
+    .then(() => client.close())
+    .then(finish, finish);
+  setTimeout(() => process.exit(0), SIGTERM_CLOSE_TIMEOUT_MS).unref();
+}
+process.on('SIGTERM', () => handleSignal('SIGTERM'));
+process.on('SIGINT', () => handleSignal('SIGINT'));
+
 let groupIndex = 0;
 
 const PAGE = parseInt(process.env.MONGO_PAGE ?? '0', 10);
 const PAGE_SIZE = parseInt(process.env.MONGO_PAGE_SIZE ?? '50', 10);
 
+// Result-set safety caps (configurable via env; <= 0 disables each one).
+//   MONGO_MAX_DOCS    — max documents materialized into a single emitted group.
+//                       Without this, cursor.toArray() on a large collection
+//                       buffers the whole result set into memory -> OOM/UI freeze.
+//   MONGO_MAX_TIME_MS — server-side per-operation time budget applied to
+//                       find/aggregate cursors and their count queries, so a
+//                       slow op fails fast instead of riding the 30s kill timer.
+const MAX_DOCS = parseInt(process.env.MONGO_MAX_DOCS ?? '1000', 10);
+const MAX_TIME_MS = parseInt(process.env.MONGO_MAX_TIME_MS ?? '30000', 10);
+const COUNT_OPTIONS = MAX_TIME_MS > 0 ? { maxTimeMS: MAX_TIME_MS } : undefined;
+
+function applyMaxTime(cursor) {
+  if (MAX_TIME_MS > 0 && cursor && typeof cursor.maxTimeMS === 'function') {
+    cursor.maxTimeMS(MAX_TIME_MS);
+  }
+  return cursor;
+}
+
+// Materialize a cursor without buffering an unbounded result set: fetch at most
+// MAX_DOCS + 1 docs so we can flag truncation, then slice to MAX_DOCS. When the
+// caller already constrained the result (pagination limit or a user .limit()
+// <= MAX_DOCS), that smaller bound wins and nothing is truncated.
+async function toArrayCapped(cursor, effectiveLimit) {
+  if (!(MAX_DOCS > 0)) {
+    const docs = await cursor.toArray();
+    return { docs, truncated: false };
+  }
+  const fetchLimit =
+    effectiveLimit != null && effectiveLimit <= MAX_DOCS ? effectiveLimit : MAX_DOCS + 1;
+  const fetched = await cursor.limit(fetchLimit).toArray();
+  if (fetched.length > MAX_DOCS) {
+    return { docs: fetched.slice(0, MAX_DOCS), truncated: true };
+  }
+  return { docs: fetched, truncated: false };
+}
+
+// Surface an out-of-band notice (truncation, unsupported feature, ...) on the
+// same `__log` channel as user print() output. The UI renders these in the
+// Console tab, so a notice is visible without disturbing the result-group
+// stream or its 1:1 classification alignment.
+function emitNotice(message, log = emitLogger) {
+  if (log) log.info('notice', { message });
+  process.stdout.write(JSON.stringify({ __log: { message } }) + '\n');
+}
+
+function truncationNotice(shown) {
+  return `⚠ Result truncated to ${shown} documents — the query matched more. ` +
+    'Add a tighter filter/.limit(), or raise MONGO_MAX_DOCS to see more.';
+}
+
+// Surfaced (as a result-group doc) when a script opens a change stream. The
+// runner cannot stream live updates to the UI yet, so .watch() would otherwise
+// produce silence. ResultsPanel renders the 'stream' category as a notice.
+const CHANGE_STREAM_NOTICE =
+  'Change streams (.watch()) are not supported yet — the cursor was closed and no live updates will appear here.';
+
+function safeWatch(open) {
+  try { return open(); } catch (_e) { return null; }
+}
+
+function closeChangeStream(stream) {
+  if (!stream || typeof stream.close !== 'function') return;
+  try {
+    const closing = stream.close();
+    if (closing && typeof closing.then === 'function') closing.catch(() => {});
+  } catch (_e) { /* best-effort close */ }
+}
+
 // Pre-classify every top-level statement. The harness emits groups in
 // statement order (one emitGroup call per MongoDB op, 1:1 with classified
 // statements); `groupClassifications` is consumed by index as groups emit.
 //
-// We drop two kinds of classifications to keep that 1:1 alignment:
-//   - category === null: statement isn't a MongoDB op (pure JS, etc.)
-//   - category === 'stream': watch() returns an infinite ChangeStream and
-//     has no terminal value to emit. Including it would shift every later
-//     group's classification by one.
-// (listIndexes is handled by materialising in makeCollectionProxy, so it
-// stays in the array.)
+// We drop only category === null (statement isn't a MongoDB op — pure JS, etc.).
+// A 'stream' (watch()) statement IS kept: makeCollectionProxy emits exactly one
+// "unsupported" notice group for it, so it occupies its slot and every later
+// group's classification stays aligned. (listIndexes likewise materialises in
+// makeCollectionProxy, so it stays in the array.)
 const groupClassifications = splitStatements(rawScript)
   .map((stmt) => classify(stmt))
-  .filter((c) => c.category !== null && c.category !== 'stream');
+  .filter((c) => c.category !== null);
 
 function emitPagination(total, page, pageSize) {
   process.stdout.write(
@@ -134,17 +265,19 @@ function makeCursorProxy(cursor, countPromise, log = cursorLogger) {
       if (countPromise !== undefined && userLimit === null && userSkip === null) {
         // Only apply pagination when the user did not explicitly chain .limit() or .skip()
         cursor = cursor.skip(PAGE * PAGE_SIZE).limit(PAGE_SIZE);
-        promise = Promise.all([cursor.toArray(), countPromise]).then(([docs, total]) => {
-          if (log) log.debug('cursor materialize', { count: docs.length, total, paginated: true });
-          emitGroup(docs, log);
+        promise = Promise.all([toArrayCapped(cursor, PAGE_SIZE), countPromise]).then(([res, total]) => {
+          if (log) log.debug('cursor materialize', { count: res.docs.length, total, paginated: true, truncated: res.truncated });
+          if (res.truncated) emitNotice(truncationNotice(res.docs.length), log);
+          emitGroup(res.docs, log);
           emitPagination(total, PAGE, PAGE_SIZE);
-          return docs;
+          return res.docs;
         });
       } else {
-        promise = cursor.toArray().then((docs) => {
-          if (log) log.debug('cursor materialize', { count: docs.length, paginated: false });
-          emitGroup(docs, log);
-          return docs;
+        promise = toArrayCapped(cursor, userLimit).then((res) => {
+          if (log) log.debug('cursor materialize', { count: res.docs.length, paginated: false, truncated: res.truncated });
+          if (res.truncated) emitNotice(truncationNotice(res.docs.length), log);
+          emitGroup(res.docs, log);
+          return res.docs;
         });
       }
     }
@@ -224,6 +357,20 @@ function makeCollectionProxy(col) {
           });
       }
 
+      // watch returns a long-lived ChangeStream the UI cannot consume yet.
+      // Close it immediately (an open change-stream cursor keeps the Node event
+      // loop alive and hangs the harness process), and emit a single notice
+      // group so the statement is visible instead of producing silence. The
+      // group occupies this statement's 'stream' classification slot, keeping
+      // later groups aligned.
+      if (prop === 'watch') {
+        return (...args) => {
+          closeChangeStream(safeWatch(() => target.watch(...args)));
+          emitGroup({ notice: CHANGE_STREAM_NOTICE });
+          return null;
+        };
+      }
+
       const val = target[prop];
       if (typeof val !== 'function') return val;
 
@@ -231,15 +378,15 @@ function makeCollectionProxy(col) {
       if (prop === 'find') {
         return (filter = {}, options) => {
           const normalizedOptions = normalizeFindOptions(options);
-          const rawCursor = val.call(target, filter, normalizedOptions);
+          const rawCursor = applyMaxTime(val.call(target, filter, normalizedOptions));
           // Empty filter: use estimatedDocumentCount() (reads collection
           // metadata, O(1)) instead of countDocuments({}) which forces a
           // COLLSCAN and hangs on large collections.
           const isEmptyFilter =
             filter && typeof filter === 'object' && Object.keys(filter).length === 0;
           const countPromise = isEmptyFilter
-            ? target.estimatedDocumentCount().catch(() => -1)
-            : target.countDocuments(filter).catch(() => -1);
+            ? target.estimatedDocumentCount(COUNT_OPTIONS).catch(() => -1)
+            : target.countDocuments(filter, COUNT_OPTIONS).catch(() => -1);
           return makeCursorProxy(rawCursor, countPromise);
         };
       }
@@ -249,12 +396,12 @@ function makeCollectionProxy(col) {
           const isTerminal = lastStage && ('$merge' in lastStage || '$out' in lastStage);
           if (isTerminal) {
             // Terminal stages ($merge/$out) must be last — skip pagination
-            return makeCursorProxy(val.call(target, pipeline));
+            return makeCursorProxy(applyMaxTime(val.call(target, pipeline)));
           }
           const paginatedPipeline = [...pipeline, { $skip: PAGE * PAGE_SIZE }, { $limit: PAGE_SIZE }];
-          const rawCursor = val.call(target, paginatedPipeline);
+          const rawCursor = applyMaxTime(val.call(target, paginatedPipeline));
           const countPipeline = [...pipeline, { $count: 'total' }];
-          const countPromise = target.aggregate(countPipeline).toArray()
+          const countPromise = applyMaxTime(target.aggregate(countPipeline)).toArray()
             .then((r) => (r[0]?.total ?? 0))
             .catch(() => -1);
           return makeCursorProxy(rawCursor, countPromise);
@@ -280,6 +427,16 @@ function wrapDb(raw) {
       if (prop === 'collection' || prop === 'getCollection') {
         return (n) => makeCollectionProxy(target.collection(n));
       }
+      // Database-level change stream (db.watch()). Unlike a collection watch it
+      // has no classification slot, so surface the notice on the console (__log)
+      // channel rather than as a result group, and close it to avoid hanging.
+      if (prop === 'watch') {
+        return (...args) => {
+          closeChangeStream(safeWatch(() => target.watch(...args)));
+          emitNotice(CHANGE_STREAM_NOTICE);
+          return null;
+        };
+      }
       const val = target[prop];
       if (val === undefined && typeof prop === 'string' && !prop.startsWith('_')) {
         return makeCollectionProxy(target.collection(prop));
@@ -297,24 +454,25 @@ function extractLine(err) {
 async function run() {
   process.stderr.write(JSON.stringify({ __debug: `[harness] connecting to db=${dbName}` }) + '\n');
   logger.info('mongo connect start');
-  // Build MongoClient options from structured credential env vars (Option B).
-  // These are only set for password-based auth modes (SCRAM, LDAP). When
-  // absent the URI-embedded credentials (if any) or no-auth path applies,
-  // so existing URI-target connections keep working unchanged.
+  // Build MongoClient options from the structured credential read off stdin.
+  // Only present for password-based auth modes (SCRAM, LDAP); when absent the
+  // URI-embedded credentials (if any) or the no-auth path applies, so existing
+  // URI-target connections keep working unchanged.
   const clientOptions = {};
-  if (process.env.MONGO_USER) {
+  if (credentials && credentials.username) {
     clientOptions.auth = {
-      username: process.env.MONGO_USER,
-      password: process.env.MONGO_PASS || '',
+      username: credentials.username,
+      password: credentials.password || '',
     };
   }
-  if (process.env.MONGO_AUTH_SOURCE) {
-    clientOptions.authSource = process.env.MONGO_AUTH_SOURCE;
+  if (credentials && credentials.authSource) {
+    clientOptions.authSource = credentials.authSource;
   }
-  if (process.env.MONGO_AUTH_MECHANISM) {
-    clientOptions.authMechanism = process.env.MONGO_AUTH_MECHANISM;
+  if (credentials && credentials.authMechanism) {
+    clientOptions.authMechanism = credentials.authMechanism;
   }
   const client = new MongoClient(uri, clientOptions);
+  activeClient = client;
   try {
     await client.connect();
   } catch (err) {
@@ -353,6 +511,7 @@ async function run() {
     );
     process.exitCode = 1;
   } finally {
+    activeClient = null;
     try { await client.close(); } catch (_e) {}
   }
 }

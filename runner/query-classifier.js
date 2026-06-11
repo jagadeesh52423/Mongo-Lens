@@ -14,7 +14,7 @@
 
 /**
  * @typedef {'query' | 'mutation' | 'transform' | 'maintenance' | 'stream'} QueryCategory
- * @typedef {{ pattern: RegExp, category: QueryCategory }} OperationDef
+ * @typedef {{ pattern: RegExp, category: QueryCategory, name?: string }} OperationDef
  * @typedef {{ category: QueryCategory | null, collection: string | null }} QueryClassification
  */
 
@@ -22,44 +22,75 @@ function opPattern(name) {
   return new RegExp(`\\.${name}(?![A-Za-z0-9_$])\\s*\\(`);
 }
 
+// An operation = { name, category }. `name` drives BOTH the dot-notation regex
+// (db.coll.drop()) and the bracket-notation scan (db.coll['drop']()), so adding
+// an operation is a single entry — no hand-authored regex, no second list to
+// keep in sync. To add a new operation: append `op(name, category)`. To add a
+// new category, also register its destructiveness in DESTRUCTIVE_CATEGORIES.
+function op(name, category) {
+  return Object.freeze({ name, pattern: opPattern(name), category });
+}
+
 /** @type {readonly OperationDef[]} */
 const DEFAULT_OPERATIONS = Object.freeze([
   // query — results map 1:1 to source documents; F4 Edit Record applies.
-  Object.freeze({ pattern: opPattern('find'), category: 'query' }),
-  Object.freeze({ pattern: opPattern('findOne'), category: 'query' }),
+  op('find', 'query'),
+  op('findOne', 'query'),
 
   // mutation — modifies documents; results are write acks, not editable.
-  Object.freeze({ pattern: opPattern('insertOne'), category: 'mutation' }),
-  Object.freeze({ pattern: opPattern('insertMany'), category: 'mutation' }),
-  Object.freeze({ pattern: opPattern('updateOne'), category: 'mutation' }),
-  Object.freeze({ pattern: opPattern('updateMany'), category: 'mutation' }),
-  Object.freeze({ pattern: opPattern('deleteOne'), category: 'mutation' }),
-  Object.freeze({ pattern: opPattern('deleteMany'), category: 'mutation' }),
-  Object.freeze({ pattern: opPattern('replaceOne'), category: 'mutation' }),
-  Object.freeze({ pattern: opPattern('findOneAndUpdate'), category: 'mutation' }),
-  Object.freeze({ pattern: opPattern('findOneAndReplace'), category: 'mutation' }),
-  Object.freeze({ pattern: opPattern('findOneAndDelete'), category: 'mutation' }),
-  Object.freeze({ pattern: opPattern('bulkWrite'), category: 'mutation' }),
+  op('insertOne', 'mutation'),
+  op('insertMany', 'mutation'),
+  op('updateOne', 'mutation'),
+  op('updateMany', 'mutation'),
+  op('deleteOne', 'mutation'),
+  op('deleteMany', 'mutation'),
+  op('replaceOne', 'mutation'),
+  op('findOneAndUpdate', 'mutation'),
+  op('findOneAndReplace', 'mutation'),
+  op('findOneAndDelete', 'mutation'),
+  op('bulkWrite', 'mutation'),
 
   // transform — computed/aggregated results; not editable originals.
-  Object.freeze({ pattern: opPattern('aggregate'), category: 'transform' }),
-  Object.freeze({ pattern: opPattern('distinct'), category: 'transform' }),
-  Object.freeze({ pattern: opPattern('countDocuments'), category: 'transform' }),
-  Object.freeze({ pattern: opPattern('estimatedDocumentCount'), category: 'transform' }),
+  op('aggregate', 'transform'),
+  op('distinct', 'transform'),
+  op('countDocuments', 'transform'),
+  op('estimatedDocumentCount', 'transform'),
 
   // maintenance — metadata operations on the collection itself.
-  Object.freeze({ pattern: opPattern('createIndex'), category: 'maintenance' }),
-  Object.freeze({ pattern: opPattern('createIndexes'), category: 'maintenance' }),
-  Object.freeze({ pattern: opPattern('dropIndex'), category: 'maintenance' }),
-  Object.freeze({ pattern: opPattern('dropIndexes'), category: 'maintenance' }),
-  Object.freeze({ pattern: opPattern('listIndexes'), category: 'maintenance' }),
-  Object.freeze({ pattern: opPattern('drop'), category: 'maintenance' }),
-  Object.freeze({ pattern: opPattern('rename'), category: 'maintenance' }),
-  Object.freeze({ pattern: opPattern('stats'), category: 'maintenance' }),
+  op('createIndex', 'maintenance'),
+  op('createIndexes', 'maintenance'),
+  op('dropIndex', 'maintenance'),
+  op('dropIndexes', 'maintenance'),
+  op('listIndexes', 'maintenance'),
+  op('drop', 'maintenance'),
+  op('rename', 'maintenance'),
+  op('stats', 'maintenance'),
 
   // stream — change stream; not an editable result set.
-  Object.freeze({ pattern: opPattern('watch'), category: 'stream' }),
+  op('watch', 'stream'),
 ]);
+
+// Categories whose operations write or structurally alter data. A "potentially
+// destructive" verdict gates confirm-before-run / non-editable treatment in the
+// UI. To add a new destructive category, add it here — callers self-update.
+const DESTRUCTIVE_CATEGORIES = Object.freeze(new Set(['mutation', 'maintenance']));
+
+/**
+ * Fail-safe destructiveness check. Accepts a category string, a
+ * QueryClassification, or null/undefined. An UNCLASSIFIABLE statement (null /
+ * undefined category) is treated as destructive on purpose: aliased or
+ * dynamically-dispatched ops that the static classifier cannot recognize must
+ * not be assumed safe.
+ *
+ * @param {QueryCategory | QueryClassification | null | undefined} value
+ * @returns {boolean}
+ */
+function isPotentiallyDestructive(value) {
+  const category =
+    value && typeof value === 'object' ? value.category : value;
+  if (!category) return true;
+  return DESTRUCTIVE_CATEGORIES.has(category);
+}
 
 /**
  * Strip comment bodies and string contents while preserving their positions.
@@ -150,15 +181,19 @@ function extractCollection(before) {
  */
 function classify(script, operations) {
   if (!script || typeof script !== 'string') return { category: null, collection: null };
-  const ops = operations || DEFAULT_OPERATIONS;
+  // Guard against a non-array operations arg (null/undefined or a stray object):
+  // fall back to the defaults rather than throwing in the iteration below.
+  const ops = Array.isArray(operations) ? operations : DEFAULT_OPERATIONS;
   const cleaned = stripCommentsAndStrings(script);
 
   let earliestIndex = Infinity;
   let earliestCategory = null;
   let earliestBefore = '';
 
-  for (const op of ops) {
-    const re = new RegExp(op.pattern.source, op.pattern.flags.replace('g', ''));
+  // Dot-notation calls: db.coll.find(...). Match on cleaned text so tokens
+  // inside strings/comments don't false-positive.
+  for (const operation of ops) {
+    const re = new RegExp(operation.pattern.source, operation.pattern.flags.replace('g', ''));
     const match = re.exec(cleaned);
     if (!match || match.index >= earliestIndex) continue;
 
@@ -167,7 +202,32 @@ function classify(script, operations) {
     if (!ctx.hasDbPrefix) continue;
 
     earliestIndex = match.index;
-    earliestCategory = op.category;
+    earliestCategory = operation.category;
+    earliestBefore = before;
+  }
+
+  // Bracket-notation calls: db.coll['drop'](), db["c"]["deleteMany"]().
+  // stripCommentsAndStrings blanks string *contents*, so the op name inside the
+  // brackets is gone from `cleaned`; scan the original `script` for the name,
+  // and use `cleaned[idx] === '['` to reject a bracket that lives inside a
+  // string or comment (where the '[' would have been blanked to a space).
+  const nameToCategory = new Map();
+  for (const operation of ops) {
+    if (operation.name) nameToCategory.set(operation.name, operation.category);
+  }
+  const bracketRe = /\[\s*(['"])([A-Za-z_$][\w$]*)\1\s*\]\s*\(/g;
+  let bracketMatch;
+  while ((bracketMatch = bracketRe.exec(script)) !== null) {
+    const idx = bracketMatch.index;
+    if (idx >= earliestIndex) continue;
+    if (cleaned[idx] !== '[') continue;
+    const category = nameToCategory.get(bracketMatch[2]);
+    if (!category) continue;
+    const before = script.slice(0, idx);
+    if (!extractCollection(before).hasDbPrefix) continue;
+
+    earliestIndex = idx;
+    earliestCategory = category;
     earliestBefore = before;
   }
 
@@ -231,6 +291,8 @@ function splitStatements(script) {
 
 module.exports = {
   DEFAULT_OPERATIONS,
+  DESTRUCTIVE_CATEGORIES,
   classify,
+  isPotentiallyDestructive,
   splitStatements,
 };

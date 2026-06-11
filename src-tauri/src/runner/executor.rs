@@ -4,10 +4,20 @@ use crate::runner::{harness_path, node_modules_dir, runner_dir, RunnerCredential
 use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Child, Command};
 use std::sync::{Arc, OnceLock};
+use std::time::{Duration, Instant};
 
 static NODE_PATH: OnceLock<String> = OnceLock::new();
+
+/// Bundled runner harness source, embedded at build time. The deploy-by-copy
+/// guard compares this against the installed `~/.mongomacapp/runner/harness.js`
+/// so a stale install (edited source never redeployed, or stale binary) is
+/// detected instead of silently running divergent code.
+const BUNDLED_HARNESS: &str = include_str!("../../../runner/harness.js");
+
+// Run the integrity check at most once per process.
+static INTEGRITY_CHECKED: OnceLock<()> = OnceLock::new();
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -123,6 +133,8 @@ pub fn spawn_script(
     cred: Option<&RunnerCredential>,
 ) -> Result<std::process::Child, String> {
     let node = resolve_node().ok_or("Node.js not found — check node installation")?;
+    // Deploy-by-copy guard: detect a stale installed harness once per process.
+    INTEGRITY_CHECKED.get_or_init(|| verify_runner_integrity(logger.as_ref()));
     // Credential fields are intentionally excluded from this log line —
     // passwords must never appear in log output.
     logger.info("spawn runner", logctx! {
@@ -144,39 +156,98 @@ pub fn spawn_script(
         .env("MONGOMACAPP_RUN_ID", run_id)
         .env("MONGOMACAPP_LOGS_DIR", logs_dir.display().to_string())
         .env("MONGOMACAPP_LOG_LEVEL", level)
+        .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
 
-    // Unconditionally clear any MONGO_* auth vars inherited from the parent
-    // process before (re-)setting them. Without this, a shell-level
-    // MONGO_USER / MONGO_PASS present in the environment would silently carry
-    // into a no-auth (AuthMode::None) connection and cause unexpected auth
-    // attempts against the server. Clearing first ensures the runner's auth
-    // comes exclusively from the credential we resolve at connect time.
+    // Defense-in-depth: credentials now travel over stdin, never env vars (env
+    // is readable by same-user processes via `ps -E` / proc inspection). Strip
+    // any inherited MONGO_* auth vars so a stray shell value can't leak in.
     cmd.env_remove("MONGO_USER")
         .env_remove("MONGO_PASS")
         .env_remove("MONGO_AUTH_SOURCE")
         .env_remove("MONGO_AUTH_MECHANISM");
 
-    // Inject auth env vars only when the connection uses a password-based
-    // mechanism. Kept out of logs above to avoid leaking secrets.
-    if let Some(credential) = cred {
-        cmd.env("MONGO_USER", &credential.username);
-        if let Some(password) = &credential.password {
-            cmd.env("MONGO_PASS", password);
-        }
-        if let Some(auth_source) = &credential.auth_source {
-            cmd.env("MONGO_AUTH_SOURCE", auth_source);
-        }
-        if let Some(mechanism) = &credential.mechanism {
-            cmd.env("MONGO_AUTH_MECHANISM", mechanism);
-        }
-    }
-
-    cmd.spawn().map_err(|e| {
+    let mut child = cmd.spawn().map_err(|e| {
         logger.error("spawn failed", logctx! { "err" => e.to_string() });
         e.to_string()
-    })
+    })?;
+
+    // Hand the credential to the harness as one JSON line on stdin, then close
+    // stdin so its blocking read sees EOF. The payload is tiny (well under the
+    // pipe buffer) so write_all cannot deadlock. With no credential we still
+    // close stdin so the harness read returns empty and falls back to the
+    // URI-embedded / no-auth path.
+    if let Some(mut stdin) = child.stdin.take() {
+        if let Some(credential) = cred {
+            use std::io::Write;
+            let line = serde_json::json!({
+                "username": credential.username,
+                "password": credential.password,
+                "authSource": credential.auth_source,
+                "authMechanism": credential.mechanism,
+            })
+            .to_string();
+            if let Err(e) = stdin
+                .write_all(line.as_bytes())
+                .and_then(|_| stdin.write_all(b"\n"))
+            {
+                logger.error("write runner credentials failed", logctx! { "err" => e.to_string() });
+            }
+        }
+        // stdin dropped here -> closed.
+    }
+    Ok(child)
+}
+
+/// Default grace window between SIGTERM and SIGKILL when terminating a runner
+/// child. Overridable via MONGOMACAPP_KILL_GRACE_MS to tune without a rebuild.
+const DEFAULT_KILL_GRACE_MS: u64 = 750;
+
+fn kill_grace() -> Duration {
+    std::env::var("MONGOMACAPP_KILL_GRACE_MS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .map(Duration::from_millis)
+        .unwrap_or(Duration::from_millis(DEFAULT_KILL_GRACE_MS))
+}
+
+/// Terminate a runner child gracefully. std `Child::kill()` only sends SIGKILL,
+/// which bypasses the harness SIGTERM handler (runner/harness.js) and leaves the
+/// server-side Mongo connection dangling — stale connections then accumulate
+/// across repeated cancels. Instead: send SIGTERM so the harness can close its
+/// client, wait up to the grace window, then SIGKILL + reap if still alive.
+/// Always reaps the child. Returns true when SIGTERM alone was sufficient.
+///
+/// Called by the cancel/timeout paths in `crate::commands::script`.
+pub fn terminate_child(child: &mut Child) -> bool {
+    send_sigterm(child.id());
+    let deadline = Instant::now() + kill_grace();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => return true,
+            Ok(None) => {
+                if Instant::now() >= deadline {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            Err(_) => break,
+        }
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+    false
+}
+
+// std has no portable signal API and the project pulls in no libc/nix crate, so
+// shell out to /bin/kill (always present on macOS, the only supported target)
+// to deliver SIGTERM.
+fn send_sigterm(pid: u32) {
+    let _ = Command::new("/bin/kill")
+        .arg("-TERM")
+        .arg(pid.to_string())
+        .status();
 }
 
 #[tauri::command]
@@ -186,10 +257,60 @@ pub fn check_node_runner() -> RunnerStatus {
 
 #[tauri::command]
 pub fn install_node_runner() -> Result<(), String> {
-    const HARNESS: &str = include_str!("../../../runner/harness.js");
     const LOGGER_JS: &str = include_str!("../../../runner/logger.js");
     const REDACT_JS: &str = include_str!("../../../runner/redact.js");
-    install_runner(HARNESS, LOGGER_JS, REDACT_JS)
+    install_runner(BUNDLED_HARNESS, LOGGER_JS, REDACT_JS)
+}
+
+#[derive(PartialEq, Debug)]
+enum HarnessIntegrity {
+    Match,
+    Drift,
+    Unreadable,
+}
+
+fn check_harness_integrity(installed: Option<&str>) -> HarnessIntegrity {
+    match installed {
+        Some(content) if content == BUNDLED_HARNESS => HarnessIntegrity::Match,
+        Some(_) => HarnessIntegrity::Drift,
+        None => HarnessIntegrity::Unreadable,
+    }
+}
+
+// FNV-1a 64-bit — dependency-free short content fingerprint for log lines, so a
+// drift warning carries a comparable id without dumping whole files.
+fn fingerprint(content: &str) -> String {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in content.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    format!("{hash:016x}")
+}
+
+/// Deploy-by-copy guard: warn loudly when the installed harness diverges from
+/// the bundled source. Run once per process (subsequent calls are no-ops).
+fn verify_runner_integrity(logger: &dyn Logger) {
+    let path = harness_path();
+    let installed = fs::read_to_string(&path).ok();
+    match check_harness_integrity(installed.as_deref()) {
+        HarnessIntegrity::Match => logger.debug("runner integrity ok", logctx! {
+            "fingerprint" => fingerprint(BUNDLED_HARNESS),
+        }),
+        HarnessIntegrity::Drift => logger.warn(
+            "RUNNER OUT OF DATE — installed harness.js differs from the bundled source. \
+             Run install_node_runner or `cp runner/harness.js ~/.mongomacapp/runner/harness.js`.",
+            logctx! {
+                "installed" => path.display().to_string(),
+                "installedFingerprint" => fingerprint(installed.as_deref().unwrap_or("")),
+                "bundledFingerprint" => fingerprint(BUNDLED_HARNESS),
+            },
+        ),
+        HarnessIntegrity::Unreadable => logger.warn(
+            "runner integrity check skipped — installed harness.js is unreadable",
+            logctx! { "installed" => path.display().to_string() },
+        ),
+    }
 }
 
 #[cfg(test)]
@@ -219,5 +340,44 @@ mod tests {
         assert_eq!(fs::read_to_string(d.path().join("harness.js")).unwrap(), "H");
         assert_eq!(fs::read_to_string(d.path().join("logger.js")).unwrap(), "L");
         assert_eq!(fs::read_to_string(d.path().join("redact.js")).unwrap(), "R");
+    }
+
+    #[test]
+    fn terminate_child_sigterms_a_running_process_within_grace() {
+        // /bin/sleep terminates on SIGTERM's default action, so terminate_child
+        // should reap it via the graceful path (no SIGKILL needed).
+        let mut child = Command::new("/bin/sleep").arg("30").spawn().unwrap();
+        let graceful = terminate_child(&mut child);
+        assert!(graceful, "sleep should exit from SIGTERM within the grace window");
+    }
+
+    #[test]
+    fn kill_grace_falls_back_to_default_when_env_unset() {
+        std::env::remove_var("MONGOMACAPP_KILL_GRACE_MS");
+        assert_eq!(kill_grace(), Duration::from_millis(DEFAULT_KILL_GRACE_MS));
+    }
+
+    #[test]
+    fn integrity_matches_when_installed_equals_bundled() {
+        assert_eq!(
+            check_harness_integrity(Some(BUNDLED_HARNESS)),
+            HarnessIntegrity::Match
+        );
+    }
+
+    #[test]
+    fn integrity_reports_drift_and_unreadable() {
+        assert_eq!(
+            check_harness_integrity(Some("stale harness")),
+            HarnessIntegrity::Drift
+        );
+        assert_eq!(check_harness_integrity(None), HarnessIntegrity::Unreadable);
+    }
+
+    #[test]
+    fn fingerprint_is_stable_and_distinguishes_content() {
+        assert_eq!(fingerprint("abc"), fingerprint("abc"));
+        assert_ne!(fingerprint("abc"), fingerprint("abd"));
+        assert_eq!(fingerprint("abc").len(), 16);
     }
 }

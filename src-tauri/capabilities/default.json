@@ -15,15 +15,14 @@
     "fs:allow-read-dir",
     "fs:allow-copy-file",
     "fs:allow-remove",
-    "fs:allow-home-read-recursive",
-    "fs:allow-home-write-recursive",
     {
       "identifier": "fs:scope",
       "allow": [
-        { "path": "$HOME" },
-        { "path": "$HOME/**" },
         { "path": "$HOME/.mongomacapp" },
-        { "path": "$HOME/.mongomacapp/**" }
+        { "path": "$HOME/.mongomacapp/**" },
+        { "path": "$DOWNLOAD/**" },
+        { "path": "$DESKTOP/**" },
+        { "path": "$DOCUMENT/**" }
       ]
     },
     "store:default"

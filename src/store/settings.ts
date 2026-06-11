@@ -6,6 +6,7 @@ import {
   hydrateOverrides,
   subscribe as overridesSubscribe,
 } from '../themes/overrides';
+import { useNotificationsStore } from './notifications';
 
 const STORE_FILE = 'settings.json';
 const SETTINGS_KEY = 'settings';
@@ -108,6 +109,11 @@ async function persist(settings: PersistedSettings): Promise<void> {
     await store.save();
   } catch (err) {
     console.warn('Failed to persist settings', err);
+    useNotificationsStore.getState().notify({
+      level: 'error',
+      message: 'Settings could not be saved — your changes won’t survive a restart.',
+      detail: err instanceof Error ? err.message : String(err),
+    });
   }
 }
 

@@ -12,6 +12,7 @@ mod ssh;
 mod state;
 
 use state::AppState;
+use state::LockRecovered;
 use std::fs;
 use std::path::PathBuf;
 use tauri::menu::Menu;
@@ -129,27 +130,45 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     builder
         .on_window_event(|window, event| {
             // On close: shut down all MongoDB pools (parallel, 1 s each), then all tunnels
-            // (parallel, 2 s each). Parallel execution keeps total stall at max(1 s, 2 s)
-            // regardless of connection count (C4). Ordering preserves pool-before-tunnel
-            // invariant (shutdown pools first so no in-flight queries hit a dead tunnel).
-            if let tauri::WindowEvent::CloseRequested { .. } = event {
+            // (parallel, 2 s each). Ordering preserves the pool-before-tunnel invariant (shut
+            // pools first so no in-flight query hits a dead tunnel). The teardown runs OFF the
+            // UI thread — we hide the window for an instant-feeling close, drain the maps
+            // synchronously (cheap), then spawn the awaits and exit once they finish, with a
+            // watchdog that force-exits within ~3 s. This replaces a block_on that froze the
+            // window for up to ~2 s.
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 let state = window.state::<AppState>();
-                let clients: Vec<_> = state.mongo_clients.lock().unwrap().drain().collect();
-                let tunnels: Vec<_> = state.ssh_tunnels.lock().unwrap().drain().collect();
-                if !clients.is_empty() || !tunnels.is_empty() {
-                    tauri::async_runtime::block_on(async move {
-                        // All pools in parallel — total wait = max(1 s, slowest pool).
-                        futures_util::future::join_all(clients.into_iter().map(|(_, c)| {
-                            tokio::time::timeout(std::time::Duration::from_secs(1), c.shutdown())
-                        }))
-                        .await;
-                        // All tunnels in parallel — total wait = max(2 s, slowest tunnel).
-                        futures_util::future::join_all(
-                            tunnels.into_iter().map(|(_, t)| t.close()),
-                        )
-                        .await;
-                    });
+                let clients: Vec<_> = state.mongo_clients.lock_recovered().drain().collect();
+                let tunnels: Vec<_> = state.ssh_tunnels.lock_recovered().drain().collect();
+                if clients.is_empty() && tunnels.is_empty() {
+                    return; // nothing to tear down — let the window close immediately
                 }
+                api.prevent_close();
+                let _ = window.hide();
+                let app = window.app_handle().clone();
+
+                // Hard guarantee: exit within ~3 s no matter what. This backstops a
+                // cleanup task that hangs or panics before reaching app.exit, so we
+                // never leave a hidden-window zombie process behind.
+                let watchdog = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                    watchdog.exit(0);
+                });
+
+                tauri::async_runtime::spawn(async move {
+                    // Pools first (so no in-flight query hits a dead tunnel), each bounded.
+                    futures_util::future::join_all(clients.into_iter().map(|(_, c)| {
+                        tokio::time::timeout(std::time::Duration::from_secs(1), c.shutdown())
+                    }))
+                    .await;
+                    // Tunnels next, each bounded so a stuck close() can't hang shutdown.
+                    futures_util::future::join_all(tunnels.into_iter().map(|(_, t)| {
+                        tokio::time::timeout(std::time::Duration::from_secs(2), t.close())
+                    }))
+                    .await;
+                    app.exit(0);
+                });
             }
         })
         .run(tauri::generate_context!())?;
@@ -176,7 +195,8 @@ fn bootstrap_conn_v2(
     use crate::logger::Logger as _;
     use std::sync::Arc;
 
-    let store = match connection::secrets::open_default_keychain_store() {
+    let secrets_log = log.child(logctx! { "logger" => "connection.secrets" });
+    let store = match connection::secrets::open_default_keychain_store(secrets_log) {
         Ok(s) => Arc::new(s) as Arc<dyn connection::secrets::SecretStore>,
         Err(e) => {
             log.warn(

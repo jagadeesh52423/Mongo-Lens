@@ -40,6 +40,27 @@ describe('ResultsPanel', () => {
     expect(screen.getByText(/alice/)).toBeInTheDocument();
   });
 
+  it('renders the unsupported notice for a change-stream group instead of a view', () => {
+    useResultsStore.setState({
+      byTab: {
+        t1: {
+          groups: [{
+            groupIndex: 0,
+            docs: [{ notice: 'Change streams (.watch()) are not supported yet — the cursor was closed.' }],
+            collection: 'events',
+            category: 'stream',
+          }],
+          isRunning: false,
+          executionMs: 3,
+        },
+      },
+    });
+    render(<ResultsPanel tabId="t1" pageSize={50} />);
+    expect(screen.getByText(/not supported yet/i)).toBeInTheDocument();
+    // No editable grid is rendered for a stream group, so F4 is moot.
+    expect(screen.queryAllByRole('cell')).toHaveLength(0);
+  });
+
   it('switches to Table view', async () => {
     useResultsStore.setState({
       byTab: {
@@ -327,7 +348,9 @@ describe('ResultsPanel record modal', () => {
 describe('ResultsPanel F4 category gating', () => {
   // Table-driven: F4 must stay disabled for every non-`query` category even
   // when a collection is cleanly extracted. Spec §"Edit Availability Logic".
-  const disabledCategories = ['mutation', 'transform', 'maintenance', 'stream'] as const;
+  // 'stream' is excluded here because it renders a notice instead of a grid
+  // (covered separately above) — there is no cell to attempt F4 on.
+  const disabledCategories = ['mutation', 'transform', 'maintenance'] as const;
 
   for (const category of disabledCategories) {
     it(`F4 does not open edit modal when category is '${category}'`, async () => {
