@@ -43,3 +43,11 @@ The two to prioritize: **explain plan visualizer** and **prod-write guard with e
 - `ConfigStore.setMany` change detection uses strict equality — switch to structural equality (JSON-stringify) when an `object` or `array` config field ships in a real plugin.
 - Add a `// must precede stringField — both match type:string` comment above the `secretField` registration in `fieldRenderers/index.ts` to harden against accidental reorder.
 - Plus the six "nits" in `CODE_REVIEW.md` if anything resurfaces.
+
+## Keychain-recovery follow-ups (from 2026-06-12 session)
+
+- **Fix pre-existing test flake: `HOME` env race.** `ssh/known_hosts.rs` tests (~line 97) mutate `HOME` without acquiring the cross-module env lock that `keychain.rs` tests (~line 756) use — `legacy_ciphertext_may_exist_fails_closed` fails intermittently under parallel `cargo test`. Serialize all `HOME`-mutating tests behind one shared lock.
+- **`skipped_secret` over-counts on probe-failed migration sweep** — when the read-only probe fails, password-less rows are counted as skipped secrets too. Telemetry-only inaccuracy in `migrate_all` counters.
+- **`ResolveMode::ReadOnly` doc wording** — says "fail-closed" unconditionally, but ReadOnly still mints a key on a genuine fresh install (Absent + no blobs). Tighten the doc comment.
+- **Phase 2 of DESIGN_keychain_resilience.md** — passphrase-wrapped recovery key (`PassphraseWrappedKeyProvider`) so a forced keychain reset is recoverable without password re-entry. Phase 1 (quarantine + re-key on save) shipped in `8228286`/`2e45694`.
+- **Recovery sweep UI (optional)** — surface quarantined `orphaned-*` dirs in settings so a user who restores their keychain from Time Machine can attempt re-decryption of preserved blobs.
