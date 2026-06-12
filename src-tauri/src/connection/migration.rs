@@ -240,6 +240,17 @@ pub fn migrate_all(
 
         match sync_row_to_v2(sqlite, secrets, row, password.as_deref()) {
             Ok(_) => summary.migrated += 1,
+            // Migration guard (spec §6): the v2 metadata row was upserted, but the
+            // secret write is blocked by a keychain reset. Count as migrated + skipped
+            // so the user is prompted on next connect rather than the row being lost.
+            Err(MigrationError::Secret(SecretError::SecretsUnrecoverable)) => {
+                log.warn(
+                    "migration secret skipped: keychain reset detected; user re-enters on connect",
+                    logctx! { "connId" => row.id.clone() },
+                );
+                summary.migrated += 1;
+                summary.skipped_secret += 1;
+            }
             Err(err) => {
                 log.warn(
                     "legacy row migration failed",
