@@ -141,8 +141,123 @@ describe('ConnectionList — skeleton', () => {
   it('activates the row via keyboard Enter', async () => {
     const user = userEvent.setup();
     const { onConnect } = setup();
-    await user.tab(); // focus first row
+    await user.tab(); // focuses search input
+    await user.tab(); // focuses first row
     await user.keyboard('{Enter}');
     expect(onConnect).toHaveBeenCalledWith(expect.objectContaining({ id: '1' }));
+  });
+});
+
+describe('ConnectionList — sections', () => {
+  it('shows an "Active" section label when there are connected items', () => {
+    setup({ connectedIds: new Set(['1']) });
+    expect(screen.getByText('Active')).toBeInTheDocument();
+  });
+
+  it('does not show a section label when nothing is connected', () => {
+    setup({ connectedIds: new Set() });
+    expect(screen.queryByText('Active')).not.toBeInTheDocument();
+  });
+
+  it('shows "Available" section label only when both active and available items exist', () => {
+    setup({
+      connections: [conn('1', 'live'), conn('2', 'idle')],
+      connectedIds: new Set(['1']),
+    });
+    expect(screen.getByText('Active')).toBeInTheDocument();
+    expect(screen.getByText('Available')).toBeInTheDocument();
+  });
+
+  it('does not show "Available" section label when all connections are available', () => {
+    setup({
+      connections: [conn('1', 'alpha'), conn('2', 'beta')],
+      connectedIds: new Set(),
+    });
+    expect(screen.queryByText('Available')).not.toBeInTheDocument();
+  });
+
+  it('renders a search input', () => {
+    setup();
+    expect(screen.getByRole('searchbox', { name: /filter connections/i })).toBeInTheDocument();
+  });
+});
+
+describe('ConnectionList — search filter', () => {
+  it('shows only matching connections when a query is typed', async () => {
+    const user = userEvent.setup();
+    setup({
+      connections: [conn('1', 'local-dev'), conn('2', 'prod-east')],
+    });
+    await user.type(screen.getByRole('searchbox'), 'prod');
+    expect(screen.queryByText('local-dev')).not.toBeInTheDocument();
+    expect(screen.getByText('prod-east')).toBeInTheDocument();
+  });
+
+  it('restores full list when query is cleared', async () => {
+    const user = userEvent.setup();
+    setup({
+      connections: [conn('1', 'local-dev'), conn('2', 'prod-east')],
+    });
+    const input = screen.getByRole('searchbox');
+    await user.type(input, 'prod');
+    expect(screen.queryByText('local-dev')).not.toBeInTheDocument();
+    await user.clear(input);
+    expect(screen.getByText('local-dev')).toBeInTheDocument();
+    expect(screen.getByText('prod-east')).toBeInTheDocument();
+  });
+
+  it('shows a "no matches" message when filter has no results', async () => {
+    const user = userEvent.setup();
+    setup({ connections: [conn('1', 'local-dev')] });
+    await user.type(screen.getByRole('searchbox'), 'zzz');
+    expect(screen.getByText(/no connections match/i)).toBeInTheDocument();
+  });
+
+  it('search is case-insensitive', async () => {
+    const user = userEvent.setup();
+    setup({ connections: [conn('1', 'Production')] });
+    await user.type(screen.getByRole('searchbox'), 'prod');
+    expect(screen.getByText('Production')).toBeInTheDocument();
+  });
+
+  it('matches connections in both Active and Available sections', async () => {
+    const user = userEvent.setup();
+    setup({
+      connections: [conn('1', 'prod-live'), conn('2', 'prod-idle')],
+      connectedIds: new Set(['1']),
+    });
+    await user.type(screen.getByRole('searchbox'), 'prod');
+    expect(screen.getByText('prod-live')).toBeInTheDocument();
+    expect(screen.getByText('prod-idle')).toBeInTheDocument();
+  });
+});
+
+describe('ConnectionList — auto-collapse when searching', () => {
+  it('hides the tree slot for expanded active items while a query is active', async () => {
+    const user = userEvent.setup();
+    setup({
+      connectedIds: new Set(['1']),
+      expandedConns: new Set(['1']),
+      renderTree: (id) => <div data-testid={`tree-${id}`}>tree</div>,
+    });
+    // Tree visible before searching.
+    expect(screen.getByTestId('tree-1')).toBeInTheDocument();
+    await user.type(screen.getByRole('searchbox'), 'local');
+    // Tree auto-collapses while filter is active.
+    expect(screen.queryByTestId('tree-1')).not.toBeInTheDocument();
+  });
+
+  it('restores expanded tree when query is cleared', async () => {
+    const user = userEvent.setup();
+    setup({
+      connectedIds: new Set(['1']),
+      expandedConns: new Set(['1']),
+      renderTree: (id) => <div data-testid={`tree-${id}`}>tree</div>,
+    });
+    const input = screen.getByRole('searchbox');
+    await user.type(input, 'local');
+    expect(screen.queryByTestId('tree-1')).not.toBeInTheDocument();
+    await user.clear(input);
+    expect(screen.getByTestId('tree-1')).toBeInTheDocument();
   });
 });
