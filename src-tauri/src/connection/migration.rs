@@ -225,24 +225,46 @@ pub fn migrate_all(
         ..Default::default()
     };
 
+    // Structural guard (spec §6): probe before writing any secrets.
+    // If the master key is absent over existing blobs (keychain reset) or
+    // transiently unavailable, skip ALL secret writes this sweep so
+    // boot-time migration can never trigger quarantine.
+    let store_available = match secrets.probe_recoverable() {
+        Ok(()) => true,
+        Err(err) => {
+            log.warn(
+                "secret store unavailable during migration; migrating metadata only",
+                logctx! { "reason" => err.to_string() },
+            );
+            false
+        }
+    };
+
     for row in &legacy_rows {
-        let password = match legacy_password_fetch(&row.id) {
-            Ok(value) => value,
-            Err(err) => {
-                log.warn(
-                    "legacy password fetch failed; migrating row without secret",
-                    logctx! { "connId" => row.id.clone(), "err" => err },
-                );
-                summary.skipped_secret += 1;
-                None
+        let password = if !store_available {
+            // Store unavailable: skip secret write for all rows this sweep.
+            summary.skipped_secret += 1;
+            None
+        } else {
+            match legacy_password_fetch(&row.id) {
+                Ok(value) => value,
+                Err(err) => {
+                    log.warn(
+                        "legacy password fetch failed; migrating row without secret",
+                        logctx! { "connId" => row.id.clone(), "err" => err },
+                    );
+                    summary.skipped_secret += 1;
+                    None
+                }
             }
         };
 
         match sync_row_to_v2(sqlite, secrets, row, password.as_deref()) {
             Ok(_) => summary.migrated += 1,
-            // Migration guard (spec §6): the v2 metadata row was upserted, but the
-            // secret write is blocked by a keychain reset. Count as migrated + skipped
-            // so the user is prompted on next connect rather than the row being lost.
+            // Belt-and-suspenders: probe succeeded but set() still hit
+            // SecretsUnrecoverable (e.g. a concurrent keychain wipe between
+            // probe and write). Count as migrated + skipped so the user is
+            // prompted on next connect rather than the row being lost.
             Err(MigrationError::Secret(SecretError::SecretsUnrecoverable)) => {
                 log.warn(
                     "migration secret skipped: keychain reset detected; user re-enters on connect",
@@ -599,6 +621,87 @@ mod tests {
 
         let summary = migrate_all(&sqlite, &secrets, &pw_for_c1_only, log.as_ref()).unwrap();
         assert_eq!(summary, MigrationSummary::default());
+    }
+
+    /// Test (i): migrate_all with an Absent provider over existing blobs must
+    /// produce zero `orphaned-*` dirs, leave the original blob intact, still
+    /// upsert the metadata row, and count skipped_secret.
+    #[test]
+    fn migrate_all_does_not_quarantine_when_store_has_keychain_reset() {
+        use crate::connection::secrets::{FileEncryptedStore, InMemoryMasterKeyProvider};
+        use std::sync::Arc;
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let base = tmp.path().to_path_buf();
+
+        // Write a blob with an intact key — simulates a prior migration run.
+        let prior_store = FileEncryptedStore::with_provider(
+            base.clone(),
+            Arc::new(InMemoryMasterKeyProvider::with_key([7u8; 32])),
+            MemoryLogger::new("test"),
+        )
+        .unwrap();
+        prior_store
+            .set("c1", SecretSlot::AuthPassword, "old-pw")
+            .unwrap();
+        let blob_path = base.join("conn-c1-auth-password.bin");
+        let original_bytes = fs::read(&blob_path).unwrap();
+        drop(prior_store);
+
+        // Seed the legacy row.
+        let sqlite = open_in_memory().unwrap();
+        seed_legacy_row(&sqlite, &{
+            let mut r = bare("c1", "n");
+            r.username = Some("alice".into());
+            r
+        });
+
+        // Simulate a keychain reset: Absent provider with the blob still on disk.
+        let reset_store = FileEncryptedStore::with_provider(
+            base.clone(),
+            Arc::new(InMemoryMasterKeyProvider::absent()),
+            MemoryLogger::new("test"),
+        )
+        .unwrap();
+        let log = MemoryLogger::new("test");
+        let summary = migrate_all(
+            &sqlite,
+            &reset_store as &dyn SecretStore,
+            &|_| Ok(Some("fresh-pw".to_string())),
+            log.as_ref(),
+        )
+        .unwrap();
+
+        assert_eq!(summary.total, 1);
+        assert_eq!(summary.migrated, 1);
+        assert_eq!(summary.skipped_secret, 1);
+        assert_eq!(summary.failed, 0);
+        // Metadata row upserted.
+        assert!(store::get(&sqlite, "c1").unwrap().is_some());
+
+        // No orphaned dir created — the probe blocked all secret writes.
+        let orphaned: Vec<_> = fs::read_dir(&base)
+            .unwrap()
+            .flatten()
+            .filter(|entry| {
+                entry.file_type().map(|t| t.is_dir()).unwrap_or(false)
+                    && entry
+                        .file_name()
+                        .to_str()
+                        .map(|n| n.starts_with("orphaned-"))
+                        .unwrap_or(false)
+            })
+            .collect();
+        assert!(
+            orphaned.is_empty(),
+            "migrate_all must not create orphaned dirs when the key is absent"
+        );
+        // Original blob untouched.
+        assert_eq!(
+            fs::read(&blob_path).unwrap(),
+            original_bytes,
+            "blob must be intact after a probe-gated migration sweep"
+        );
     }
 }
 
