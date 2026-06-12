@@ -92,9 +92,11 @@ export function ConnectionDialogV2({ initial, globals, onSave, onCancel }: Props
 
   useEffect(() => {
     if (!initial?.id) return;
+    let ignore = false;
     setSecretsLoading(true);
     getSecretsV2(initial.id)
       .then((secrets) => {
+        if (ignore) return;
         for (const [slot, value] of Object.entries(secrets)) {
           dispatch({ type: 'set-secret', slot: slot as SecretSlotName, value });
         }
@@ -102,7 +104,8 @@ export function ConnectionDialogV2({ initial, globals, onSave, onCancel }: Props
       .catch(() => {
         // Non-fatal: secrets will be empty and the user can re-enter them
       })
-      .finally(() => setSecretsLoading(false));
+      .finally(() => { if (!ignore) setSecretsLoading(false); });
+    return () => { ignore = true; };
   }, [initial?.id]);
   const issues = useMemo(() => validateConnection(state.draft), [state.draft]);
   const issuesByTab = useMemo(() => new Map(TABS.map((t) => [t.id, t.validate(state.draft)])), [state.draft]);
