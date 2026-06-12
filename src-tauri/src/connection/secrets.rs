@@ -31,8 +31,8 @@
 //! * [`FileEncryptedStore`] — AES-256-GCM-encrypted blobs on disk under
 //!   a configurable base dir, with an injected 32-byte master key. The
 //!   crypto stack mirrors [`crate::keychain`] (which the plan forbids
-//!   modifying). [`open_default_keychain_store`] wires the prod path:
-//!   master key from the macOS Keychain, blobs at
+//!   modifying). [`open_default_store`] wires the prod path:
+//!   master key at `~/.mongomacapp/master.key`, blobs at
 //!   `~/.mongomacapp/secrets/`.
 //!
 //! ## Master-key source
@@ -309,7 +309,7 @@ pub trait SecretStore: Send + Sync {
 /// In-memory [`SecretStore`] backed by a `HashMap`. Primarily used as a
 /// test mock; safe to use as a runtime cache if ever needed. The bin
 /// target never instantiates this — runtime uses `FileEncryptedStore`
-/// via `open_default_keychain_store` — so it carries `#[allow(dead_code)]`
+/// via `open_default_store` — so it carries `#[allow(dead_code)]`
 /// on the constructor/internal helpers.
 ///
 /// `Mutex` (not `RwLock`) because the access pattern is balanced
@@ -728,22 +728,6 @@ impl SecretStore for FileEncryptedStore {
             Err(e) => Err(e.into()),
         }
     }
-}
-
-/// Production constructor. Wires the [`KeychainMasterKeyProvider`] (macOS
-/// login keychain) to blobs under `~/.mongomacapp/secrets/`. The key is
-/// resolved lazily on first use — a transient keychain failure here no
-/// longer wedges the store, and the key is never regenerated over existing
-/// ciphertext (see [`FileEncryptedStore::resolve_key`]).
-pub fn open_default_keychain_store(log: Arc<dyn Logger>) -> Result<FileEncryptedStore> {
-    let base_dir = default_secrets_dir()?;
-    let provider = Arc::new(KeychainMasterKeyProvider::new(
-        KEYCHAIN_SERVICE,
-        MASTER_KEY_ACCOUNT_V2,
-        "connections-v2-master-key",
-        log.clone(),
-    ));
-    FileEncryptedStore::with_provider(base_dir, provider, log)
 }
 
 /// Open the default file-backed secret store. The master key lives at
@@ -1237,19 +1221,6 @@ pub fn try_migrate_legacy_keychain(log: Arc<dyn Logger>) -> MigrationOutcome {
     MigrationOutcome::Migrated { blobs }
 }
 
-/// Decrypt a blob with `old_key` and re-encrypt it with `new_key` in place.
-/// Used for key rotation; not called by the one-shot migration (which copies
-/// the old key rather than introducing a new one).
-pub fn retranscrypt_blob(
-    path: &Path,
-    old_key: &[u8],
-    new_key: &[u8],
-) -> Result<()> {
-    let encrypted = fs::read(path)?;
-    let plaintext = aead_open(&encrypted, old_key)?;
-    let re_encrypted = aead_seal(&plaintext, new_key)?;
-    atomic_write_0600(path, &re_encrypted)
-}
 
 // ──────────────────────────────────────────────────────────────────────────
 // Tests — every assertion runs against MemStore; structural assertions

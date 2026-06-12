@@ -251,21 +251,6 @@ pub struct ResolvedConnection<'a> {
     pub aws_secret_key: Option<String>,
 }
 
-impl<'a> ResolvedConnection<'a> {
-    /// Convenience constructor: a resolved connection with no secrets.
-    /// Useful in tests and for connections that need none of the above
-    /// (e.g. `AuthMode::None`, no-passphrase SSH key, unauthenticated proxy).
-    pub fn bare(conn: &'a Connection) -> Self {
-        Self {
-            conn,
-            auth_password: None,
-            ssh_password: None,
-            ssh_key_passphrase: None,
-            proxy_password: None,
-            aws_secret_key: None,
-        }
-    }
-}
 
 // ──────────────────────────────────────────────────────────────────────────
 // Entry point
