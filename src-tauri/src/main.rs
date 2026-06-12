@@ -196,7 +196,7 @@ fn bootstrap_conn_v2(
     use std::sync::Arc;
 
     let secrets_log = log.child(logctx! { "logger" => "connection.secrets" });
-    let store = match connection::secrets::open_default_keychain_store(secrets_log) {
+    let store = match connection::secrets::open_default_store(secrets_log) {
         Ok(s) => Arc::new(s) as Arc<dyn connection::secrets::SecretStore>,
         Err(e) => {
             log.warn(

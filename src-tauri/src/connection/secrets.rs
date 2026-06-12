@@ -677,6 +677,22 @@ pub fn open_default_keychain_store(log: Arc<dyn Logger>) -> Result<FileEncrypted
     FileEncryptedStore::with_provider(base_dir, provider, log)
 }
 
+/// Open the default file-backed secret store. The master key lives at
+/// `~/.mongomacapp/master.key`; the encrypted blobs live under
+/// `~/.mongomacapp/secrets/`. Replaces `open_default_keychain_store` so the
+/// app never prompts for Keychain access on binary re-sign.
+pub fn open_default_store(log: Arc<dyn Logger>) -> Result<FileEncryptedStore> {
+    let base_dir = default_secrets_dir()?;
+    let provider = Arc::new(FileMasterKeyProvider::new(default_master_key_path()?));
+    FileEncryptedStore::with_provider(base_dir, provider, log)
+}
+
+pub fn default_master_key_path() -> Result<PathBuf> {
+    let home =
+        std::env::var("HOME").map_err(|_| SecretError::Io("HOME not set".to_string()))?;
+    Ok(PathBuf::from(home).join(".mongomacapp").join("master.key"))
+}
+
 // ──────────────────────────────────────────────────────────────────────────
 // Internals — Keychain access, dir handling, AES-GCM
 // ──────────────────────────────────────────────────────────────────────────
