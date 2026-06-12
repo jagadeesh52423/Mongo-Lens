@@ -248,6 +248,48 @@ pub fn connections_v2_delete(state: State<'_, AppState>, id: String) -> Result<(
 }
 
 // ──────────────────────────────────────────────────────────────────────────
+// get_secrets — slot presence query for the connection dialog
+// ──────────────────────────────────────────────────────────────────────────
+
+/// Presence record for one secret slot. Never carries the secret value —
+/// only whether a stored value exists. Used by the dialog to pre-fill
+/// masked inputs with "••••" when a secret is already on disk.
+#[derive(serde::Serialize)]
+pub struct SecretPresence {
+    slot: String,
+    present: bool,
+}
+
+fn get_secrets_for_connection(
+    store: &dyn SecretStore,
+    connection_id: &str,
+) -> std::result::Result<Vec<SecretPresence>, SecretError> {
+    SecretSlot::ALL
+        .iter()
+        .copied()
+        .map(|slot| {
+            store.get(connection_id, slot).map(|value| SecretPresence {
+                slot: slot.as_wire().to_string(),
+                present: value.is_some(),
+            })
+        })
+        .collect()
+}
+
+#[tauri::command]
+pub fn connections_v2_get_secrets(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<Vec<SecretPresence>, String> {
+    let log = state
+        .logger
+        .child(logctx! { "logger" => "commands.connection_v2" });
+    log.info("connections_v2_get_secrets", logctx! { "connId" => id.clone() });
+    let secrets = secret_store(&state)?;
+    get_secrets_for_connection(&*secrets, &id).map_err(|e| e.to_string())
+}
+
+// ──────────────────────────────────────────────────────────────────────────
 // test
 // ──────────────────────────────────────────────────────────────────────────
 

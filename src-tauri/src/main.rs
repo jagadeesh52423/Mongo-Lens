@@ -98,6 +98,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         commands::connection_v2::connections_v2_test,
         commands::connection_v2::connections_v2_connect,
         commands::connection_v2::connections_v2_disconnect,
+        commands::connection_v2::connections_v2_get_secrets,
         commands::prefs::prefs_get,
         commands::prefs::prefs_set,
         commands::prefs::prefs_resolve_effective,
