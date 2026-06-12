@@ -12,3 +12,9 @@ src-tauri/gen
 
 # Standalone plugin source folders (kept out of the main repo)
 plugin-packages/
+
+# Session artifacts — keep out of version control
+CODE_REVIEW*.md
+TEST_REPORT*.md
+DESIGN_*.md
+docs/superpowers/
