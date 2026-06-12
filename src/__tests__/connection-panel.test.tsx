@@ -22,16 +22,13 @@ const v2Conn = (id: string, name: string) => ({
 });
 
 describe('ConnectionPanel', () => {
-  it('loads connections on mount and lists them in the Connect launcher', async () => {
+  it('loads connections on mount and lists them in the connection panel', async () => {
     invokeMock
       .mockResolvedValueOnce([v2Conn('1', 'local')])  // connections_v2_list
       .mockResolvedValueOnce(undefined);              // prefs_get
-    const user = userEvent.setup();
     render(<ConnectionPanel />);
     await waitFor(() => expect(invokeMock).toHaveBeenCalledWith('connections_v2_list'));
-    // Disconnected → not shown in the body; appears only when the launcher opens.
-    expect(screen.queryByText('local')).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Connect' }));
+    // ConnectionList is always visible — no launcher button needed.
     expect(await screen.findByText('local')).toBeInTheDocument();
   });
 
@@ -46,7 +43,7 @@ describe('ConnectionPanel', () => {
     expect(screen.getByLabelText(/connection name/i)).toBeInTheDocument();
   });
 
-  it('duplicates a connection via the launcher right-click menu with smart naming', async () => {
+  it('duplicates a connection via right-click menu with smart naming', async () => {
     invokeMock
       .mockResolvedValueOnce([v2Conn('1', 'test'), v2Conn('2', 'test(1)')])
       .mockResolvedValueOnce(undefined);
@@ -59,7 +56,7 @@ describe('ConnectionPanel', () => {
       .mockResolvedValueOnce(v2Conn('3', 'test(2)'))
       .mockResolvedValueOnce([v2Conn('1', 'test'), v2Conn('2', 'test(1)'), v2Conn('3', 'test(2)')]);
 
-    await user.click(screen.getByRole('button', { name: 'Connect' }));
+    // ConnectionList rows are always visible — right-click directly on the row.
     await user.pointer({ keys: '[MouseRight]', target: screen.getByText('test') });
     await user.click(screen.getByText('Duplicate'));
 
@@ -71,8 +68,7 @@ describe('ConnectionPanel', () => {
     expect(saveCall[1].input.connection).toMatchObject({ id: '', name: 'test(2)' });
     expect(saveCall[1].input.secrets).toEqual([]);
 
-    // Reopen the launcher → the duplicate is now among the available connections.
-    await user.click(screen.getByRole('button', { name: 'Connect' }));
+    // After refresh, the duplicate is visible in the list.
     expect(await screen.findByText('test(2)')).toBeInTheDocument();
   });
 });
