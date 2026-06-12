@@ -86,6 +86,7 @@ function subtitleFor(initial: Connection | null, draft: Connection): string {
 export function ConnectionDialogV2({ initial, globals, onSave, onCancel }: Props) {
   const [state, dispatch] = useReducer(dialogReducer, undefined, () => initialDialogState(initial, globals));
   const [activeTabId, setActiveTabId] = useState<string>('server');
+  const [saving, setSaving] = useState(false);
   const issues = useMemo(() => validateConnection(state.draft), [state.draft]);
   const issuesByTab = useMemo(() => new Map(TABS.map((t) => [t.id, t.validate(state.draft)])), [state.draft]);
   const activeTab = TABS.find((t) => t.id === activeTabId) ?? TABS[0];
@@ -93,10 +94,18 @@ export function ConnectionDialogV2({ initial, globals, onSave, onCancel }: Props
   const prefsTabs = TABS.filter((t) => t.group === 'prefs');
   const test = useConnectionsV2((store) => store.test);
 
-  function handleSave() {
+  async function handleSave() {
+    dispatch({ type: 'save-clear' });
+    setSaving(true);
     const connection = normalizeForSave(state.draft);
     const secrets = pruneSecrets(collectSecrets(state.secrets), connection);
-    onSave({ connection, secrets });
+    try {
+      await onSave({ connection, secrets });
+    } catch (err) {
+      dispatch({ type: 'save-error', message: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function handleTest() {
@@ -188,10 +197,15 @@ export function ConnectionDialogV2({ initial, globals, onSave, onCancel }: Props
               <strong>{stageHeading(state.testResult.stage)}</strong>: {state.testResult.error}
             </div>
           )}
+          {issues.length === 0 && state.saveError && (
+            <div className={styles.testFail}>
+              <strong>Save failed</strong>: {state.saveError}
+            </div>
+          )}
         </div>
         <div className={styles.actions}>
           <Button onClick={onCancel}>Cancel</Button>
-          <Button variant="primary" disabled={issues.length > 0} onClick={handleSave}>Save</Button>
+          <Button variant="primary" disabled={issues.length > 0 || saving} onClick={handleSave}>Save</Button>
         </div>
       </div>
     </Dialog>

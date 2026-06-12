@@ -11,6 +11,8 @@ export type DialogState = {
     | { kind: 'pending' }
     | { kind: 'ok'; serverInfo: unknown }
     | { kind: 'fail'; stage: BuildStage; error: string };
+  // Distinct from testResult — a backend save error must not fight a stale test result.
+  saveError: string | null;
   globals: GlobalPrefs;
 };
 
@@ -20,7 +22,9 @@ export type DialogAction =
   | { type: 'set-target-kind'; kind: 'uri' | 'direct' }
   | { type: 'set-secret'; slot: SecretSlot; value: string }
   | { type: 'test-start' }
-  | { type: 'test-result'; result: TestResult };
+  | { type: 'test-result'; result: TestResult }
+  | { type: 'save-error'; message: string }
+  | { type: 'save-clear' };
 
 export function initialDialogState(seed: Connection | null, globals: GlobalPrefs): DialogState {
   const empty: Connection = {
@@ -34,6 +38,7 @@ export function initialDialogState(seed: Connection | null, globals: GlobalPrefs
     initial: seed,
     secrets: {},
     testResult: null,
+    saveError: null,
     globals,
   };
 }
@@ -74,12 +79,13 @@ export function dialogReducer(state: DialogState, action: DialogAction): DialogS
       // failure heading lingering in the footer after the user starts fixing
       // the offending field (PR-4 review finding #2).
       if (action.path === '') {
-        return { ...state, draft: action.value as Connection, testResult: null };
+        return { ...state, draft: action.value as Connection, testResult: null, saveError: null };
       }
       return {
         ...state,
         draft: setByPath(state.draft, action.path, action.value),
         testResult: null,
+        saveError: null,
       };
     case 'set-auth-kind':
       // Switching auth mode wipes the previous test result for the same
@@ -88,6 +94,7 @@ export function dialogReducer(state: DialogState, action: DialogAction): DialogS
         ...state,
         draft: { ...state.draft, auth: authBlank(action.kind) },
         testResult: null,
+        saveError: null,
       };
     case 'set-target-kind':
       return {
@@ -107,6 +114,7 @@ export function dialogReducer(state: DialogState, action: DialogAction): DialogS
         ...state,
         secrets: { ...state.secrets, [action.slot]: action.value },
         testResult: null,
+        saveError: null,
       };
     case 'test-start':
       return { ...state, testResult: { kind: 'pending' } };
@@ -117,5 +125,9 @@ export function dialogReducer(state: DialogState, action: DialogAction): DialogS
           ? { kind: 'ok', serverInfo: action.result.serverInfo }
           : { kind: 'fail', stage: action.result.stage, error: action.result.error },
       };
+    case 'save-error':
+      return { ...state, saveError: action.message };
+    case 'save-clear':
+      return { ...state, saveError: null };
   }
 }

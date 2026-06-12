@@ -50,6 +50,24 @@ describe('dialogReducer', () => {
     expect(next.testResult).toEqual({ kind: 'fail', stage: 'auth', error: 'bad creds' });
   });
 
+  it('save-error sets saveError message', () => {
+    const next = dialogReducer(init, { type: 'save-error', message: 'key missing' });
+    expect(next.saveError).toBe('key missing');
+  });
+
+  it('save-clear resets saveError to null', () => {
+    const withErr = dialogReducer(init, { type: 'save-error', message: 'key missing' });
+    expect(dialogReducer(withErr, { type: 'save-clear' }).saveError).toBeNull();
+  });
+
+  it('clears saveError when the user edits a field, changes auth kind, or changes a secret', () => {
+    const withErr = dialogReducer(init, { type: 'save-error', message: 'key missing' });
+
+    expect(dialogReducer(withErr, { type: 'set-field', path: 'name', value: 'X' }).saveError).toBeNull();
+    expect(dialogReducer(withErr, { type: 'set-auth-kind', kind: 'x509' }).saveError).toBeNull();
+    expect(dialogReducer(withErr, { type: 'set-secret', slot: 'auth-password', value: 'pw' }).saveError).toBeNull();
+  });
+
   it('clears testResult when the user edits a field (PR-4 review finding #2)', () => {
     // First seed a failing test result …
     const failed = dialogReducer(init, {

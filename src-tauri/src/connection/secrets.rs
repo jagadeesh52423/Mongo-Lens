@@ -72,6 +72,7 @@ use ring::aead::{
     Aad, BoundKey, Nonce, NonceSequence, OpeningKey, SealingKey, UnboundKey, AES_256_GCM,
 };
 use ring::error::Unspecified;
+use security_framework::base::Error as SfError;
 use security_framework::passwords::get_generic_password;
 use thiserror::Error;
 use zeroize::Zeroizing;
@@ -266,6 +267,20 @@ pub trait SecretStore: Send + Sync {
     /// Called by the connection-delete path so leftover secrets don't
     /// outlive their owner.
     fn delete_all_for(&self, connection_id: &str) -> Result<usize>;
+
+    /// Non-destructively probe whether the master key is resolvable.
+    /// Returns `Ok(())` if the key is present or can be safely minted
+    /// (fresh install, no existing ciphertext). Returns
+    /// `SecretsUnrecoverable` when the key is absent but ciphertext blobs
+    /// exist; returns `SecretUnavailable` on a transient backend failure.
+    ///
+    /// Migration callers MUST check this before writing secrets so that
+    /// the boot-time migration sweep can never trigger quarantine. The
+    /// default implementation always returns `Ok(())` — suitable for
+    /// `MemStore` and other in-memory mocks that have no master-key concept.
+    fn probe_recoverable(&self) -> Result<()> {
+        Ok(())
+    }
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -359,6 +374,23 @@ const TAG_SIZE: usize = 16;
 const KEYCHAIN_SERVICE: &str = "com.mongomacapp.app";
 const MASTER_KEY_ACCOUNT_V2: &str = "mongomacapp.connections-v2-master-key";
 
+// ── ResolveMode ───────────────────────────────────────────────────────────
+
+/// Controls how [`FileEncryptedStore::resolve_key`] handles a missing master
+/// key over existing ciphertext.
+///
+/// * `ReadOnly`   — fail-closed: return `SecretsUnrecoverable`. Used by
+///   `get()` so read operations never mutate the on-disk layout.
+/// * `Recovering` — write path: quarantine orphaned blobs into a timestamped
+///   subdir and mint a fresh key, all within the `cached_key` lock.
+///   Used by `set()` so a user who re-enters a password after a keychain
+///   reset succeeds instead of getting a permanent `SecretsUnrecoverable`.
+#[derive(Copy, Clone, PartialEq)]
+enum ResolveMode {
+    ReadOnly,
+    Recovering,
+}
+
 /// File-backed [`SecretStore`] using AES-256-GCM.
 ///
 /// The on-disk layout for one secret is `{base_dir}/conn-{id}-{slot}.bin`
@@ -379,6 +411,7 @@ pub struct FileEncryptedStore {
     /// both create (in-process); cross-process races are out of scope for a
     /// single-user desktop app.
     cached_key: Mutex<Option<Zeroizing<[u8; MASTER_KEY_SIZE]>>>,
+    log: Arc<dyn Logger>,
 }
 
 // Custom Debug — never leak the master key bytes in logs / panic dumps.
@@ -387,16 +420,15 @@ impl std::fmt::Debug for FileEncryptedStore {
         f.debug_struct("FileEncryptedStore")
             .field("base_dir", &self.base_dir)
             .field("master_key", &format_args!("<redacted>"))
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
 impl FileEncryptedStore {
     /// Construct with a caller-supplied raw master key + base dir. Validates
     /// the key length, ensures the dir exists with 0700, and wraps the key in
-    /// an [`InMemoryMasterKeyProvider`]. Used by tests and any future
-    /// caller that already holds the key bytes (the bin path uses
-    /// [`open_default_keychain_store`] / [`with_provider`] instead).
+    /// an [`InMemoryMasterKeyProvider`]. Used by tests only.
+    #[cfg(test)]
     #[allow(dead_code)]
     pub fn new(base_dir: PathBuf, master_key: Vec<u8>) -> Result<Self> {
         if master_key.len() != MASTER_KEY_SIZE {
@@ -407,30 +439,44 @@ impl FileEncryptedStore {
         }
         let mut key = [0u8; MASTER_KEY_SIZE];
         key.copy_from_slice(&master_key);
-        Self::with_provider(base_dir, Arc::new(InMemoryMasterKeyProvider::with_key(key)))
+        Self::with_provider(
+            base_dir,
+            Arc::new(InMemoryMasterKeyProvider::with_key(key)),
+            crate::logger::MemoryLogger::new("file-encrypted-store"),
+        )
     }
 
     /// Construct with an injected [`MasterKeyProvider`]. The key is resolved
     /// lazily on first secret operation (and cached), so a transient provider
     /// failure here doesn't permanently break the store.
-    pub fn with_provider(base_dir: PathBuf, provider: Arc<dyn MasterKeyProvider>) -> Result<Self> {
+    pub fn with_provider(
+        base_dir: PathBuf,
+        provider: Arc<dyn MasterKeyProvider>,
+        log: Arc<dyn Logger>,
+    ) -> Result<Self> {
         ensure_dir_0700(&base_dir)?;
         Ok(Self {
             base_dir,
             provider,
             cached_key: Mutex::new(None),
+            log,
         })
     }
 
     /// Resolve the master key, gating creation on emptiness so the key is
-    /// NEVER regenerated over existing ciphertext.
+    /// NEVER regenerated over existing ciphertext unless the caller
+    /// explicitly opts into write-path recovery via `ResolveMode::Recovering`.
     ///
     /// * `Found`       → use it (and cache).
     /// * `Unavailable` → [`SecretError::SecretUnavailable`]; retryable, no mutation.
     /// * `Absent` + no blobs → genuine first run; create + persist a key.
-    /// * `Absent` + blobs exist → [`SecretError::SecretsUnrecoverable`]; the
-    ///   keychain was reset out from under intact blobs — refuse to orphan them.
-    fn resolve_key(&self) -> Result<Zeroizing<[u8; MASTER_KEY_SIZE]>> {
+    /// * `Absent` + blobs + `ReadOnly`   → [`SecretError::SecretsUnrecoverable`];
+    ///   read operations never mutate layout.
+    /// * `Absent` + blobs + `Recovering` → quarantine all orphaned blobs into a
+    ///   timestamped subdir, mint a fresh key. Quarantine + create + cache all
+    ///   happen within the `cached_key` lock so a multi-slot `set()` loop
+    ///   quarantines at most once per store instance.
+    fn resolve_key(&self, mode: ResolveMode) -> Result<Zeroizing<[u8; MASTER_KEY_SIZE]>> {
         let mut guard = self.cached_key.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(key) = guard.as_ref() {
             return Ok(key.clone());
@@ -442,23 +488,84 @@ impl FileEncryptedStore {
             }
             MasterKeyOutcome::Absent => {
                 if self.blobs_exist()? {
-                    return Err(SecretError::SecretsUnrecoverable);
+                    if mode == ResolveMode::ReadOnly {
+                        return Err(SecretError::SecretsUnrecoverable);
+                    }
+                    // Recovering: quarantine orphaned blobs, then create a fresh key.
+                    // All within the lock so concurrent set() calls quarantine at most once.
+                    let (orphaned_dir, blob_count) = self.quarantine_blobs()?;
+                    self.log.warn(
+                        "keychain reset detected; orphaned ciphertext quarantined",
+                        logctx! {
+                            "blobCount" => blob_count,
+                            "orphanedDir" => orphaned_dir.display().to_string()
+                        },
+                    );
+                    self.provider.create()?
+                } else {
+                    self.provider.create()?
                 }
-                self.provider.create()?
             }
         };
         *guard = Some(key.clone());
         Ok(key)
     }
 
+    /// Move all regular `*.bin` files under `base_dir` into a new
+    /// `orphaned-<unix_secs>-<hex8>` subdirectory (0700). Returns the
+    /// quarantine dir path and the number of files moved.
+    ///
+    /// Fails fast on the first failed rename — no partial quarantine is left
+    /// visible: the quarantine dir exists but may contain fewer blobs than
+    /// `base_dir` had. On failure the caller must NOT mint a new key.
+    fn quarantine_blobs(&self) -> Result<(PathBuf, usize)> {
+        let dir_name = generate_quarantine_dir_name();
+        let quarantine_dir = self.base_dir.join(&dir_name);
+        // Dir is created lazily on the first matching blob to avoid an empty
+        // orphaned dir on a TOCTOU race where blobs_exist() fired but the
+        // files were removed before we get here.
+        let mut moved = 0usize;
+        for entry in fs::read_dir(&self.base_dir)? {
+            let entry = entry?;
+            if !entry.file_type()?.is_file() {
+                continue;
+            }
+            let fname = entry.file_name();
+            let name_str = match fname.to_str() {
+                Some(s) => s,
+                None => continue,
+            };
+            if !name_str.ends_with(".bin") {
+                continue;
+            }
+            if moved == 0 {
+                ensure_dir_0700(&quarantine_dir)?;
+            }
+            let src = entry.path();
+            let dst = quarantine_dir.join(&fname);
+            fs::rename(&src, &dst).map_err(|e| {
+                SecretError::Io(format!(
+                    "quarantine move failed for {}: {e}",
+                    src.display()
+                ))
+            })?;
+            moved += 1;
+        }
+        Ok((quarantine_dir, moved))
+    }
+
     /// Whether any `*.bin` ciphertext blob exists under `base_dir`. A missing
-    /// dir counts as "no blobs". The `.bin.tmp` write-temp is excluded (it
-    /// ends in `.tmp`).
+    /// dir counts as "no blobs". Only regular files are matched — a directory
+    /// named `*.bin` does not qualify. The `.bin.tmp` write-temp is excluded
+    /// (it ends in `.tmp`).
     fn blobs_exist(&self) -> Result<bool> {
         match fs::read_dir(&self.base_dir) {
             Ok(entries) => {
                 for entry in entries {
                     let entry = entry?;
+                    if !entry.file_type()?.is_file() {
+                        continue;
+                    }
                     if let Some(name) = entry.file_name().to_str() {
                         if name.ends_with(".bin") {
                             return Ok(true);
@@ -492,7 +599,9 @@ impl FileEncryptedStore {
 
 impl SecretStore for FileEncryptedStore {
     fn set(&self, connection_id: &str, slot: SecretSlot, value: &str) -> Result<()> {
-        let key = self.resolve_key()?;
+        // Write path: Recovering mode quarantines orphaned blobs and re-keys so a
+        // user who re-enters a password after a keychain reset succeeds.
+        let key = self.resolve_key(ResolveMode::Recovering)?;
         let encrypted = aead_seal(value.as_bytes(), &key[..])?;
         let path = self.path_for(connection_id, slot)?;
         atomic_write_0600(&path, &encrypted)
@@ -502,7 +611,8 @@ impl SecretStore for FileEncryptedStore {
         let path = self.path_for(connection_id, slot)?;
         match fs::read(&path) {
             Ok(bytes) => {
-                let key = self.resolve_key()?;
+                // Read path: fail-closed so reads never mutate the on-disk layout.
+                let key = self.resolve_key(ResolveMode::ReadOnly)?;
                 let plaintext = aead_open(&bytes, &key[..])?;
                 let s = String::from_utf8(plaintext).map_err(|e| {
                     SecretError::Crypto(format!("decrypted bytes not utf-8: {e}"))
@@ -545,6 +655,10 @@ impl SecretStore for FileEncryptedStore {
         }
         Ok(removed)
     }
+
+    fn probe_recoverable(&self) -> Result<()> {
+        self.resolve_key(ResolveMode::ReadOnly).map(|_| ())
+    }
 }
 
 /// Production constructor. Wires the [`KeychainMasterKeyProvider`] (macOS
@@ -558,9 +672,9 @@ pub fn open_default_keychain_store(log: Arc<dyn Logger>) -> Result<FileEncrypted
         KEYCHAIN_SERVICE,
         MASTER_KEY_ACCOUNT_V2,
         "connections-v2-master-key",
-        log,
+        log.clone(),
     ));
-    FileEncryptedStore::with_provider(base_dir, provider)
+    FileEncryptedStore::with_provider(base_dir, provider, log)
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -605,10 +719,12 @@ impl KeychainMasterKeyProvider {
     }
 }
 
-/// True for the not-found OSStatus the Security framework surfaces as a
-/// string. Shared by both keychain paths so "absent" is detected uniformly.
-pub(crate) fn is_keychain_not_found(msg: &str) -> bool {
-    msg.contains("-25300") || msg.contains("not found") || msg.contains("could not be found")
+/// True when the Security framework error is `errSecItemNotFound` (-25300).
+/// Uses the typed error code rather than string matching for robustness
+/// across locales and future SDK versions.
+pub(crate) fn is_keychain_not_found(err: &SfError) -> bool {
+    const ERR_SEC_ITEM_NOT_FOUND: i32 = -25300;
+    err.code() == ERR_SEC_ITEM_NOT_FOUND
 }
 
 impl MasterKeyProvider for KeychainMasterKeyProvider {
@@ -637,10 +753,10 @@ impl MasterKeyProvider for KeychainMasterKeyProvider {
                 ))
             }
             Err(e) => {
-                let msg = e.to_string();
-                if is_keychain_not_found(&msg) {
+                if is_keychain_not_found(&e) {
                     MasterKeyOutcome::Absent
                 } else {
+                    let msg = e.to_string();
                     self.log.error(
                         "keychain access failed (transient); not regenerating",
                         logctx! { "account" => self.account, "err" => msg.clone() },
@@ -820,6 +936,18 @@ fn atomic_write_0600(path: &Path, data: &[u8]) -> Result<()> {
     Ok(())
 }
 
+/// Generate a unique quarantine directory name: `orphaned-<unix_secs>-<hex8>`.
+fn generate_quarantine_dir_name() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let mut rnd = [0u8; 4];
+    OsRng.fill_bytes(&mut rnd);
+    format!("orphaned-{ts}-{:08x}", u32::from_le_bytes(rnd))
+}
+
 /// One-shot NonceSequence: returns the supplied nonce once, then errors.
 struct OneNonce(Option<[u8; NONCE_SIZE]>);
 impl NonceSequence for OneNonce {
@@ -880,8 +1008,13 @@ fn aead_open(encrypted: &[u8], master_key: &[u8]) -> Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::logger::MemoryLogger;
     use std::path::PathBuf;
     use tempfile::TempDir;
+
+    fn test_log() -> Arc<dyn Logger> {
+        MemoryLogger::new("secrets-test")
+    }
 
     // ── SecretSlot ────────────────────────────────────────────────────────
 
@@ -1041,6 +1174,13 @@ mod tests {
         (store, tmp)
     }
 
+    fn file_store_with_provider(
+        base: PathBuf,
+        provider: Arc<dyn MasterKeyProvider>,
+    ) -> FileEncryptedStore {
+        FileEncryptedStore::with_provider(base, provider, test_log()).expect("construct store")
+    }
+
     #[test]
     fn file_round_trip() {
         let (store, _tmp) = file_store_in_tempdir();
@@ -1181,37 +1321,35 @@ mod tests {
     // ── Master-key resolution gating (the Phase-1 regression guards) ──────
 
     /// Core regression guard: a wiped keychain (`Absent`) over existing
-    /// ciphertext must surface `SecretsUnrecoverable`, NEVER regenerate the
-    /// key, and leave every blob byte-for-byte intact.
+    /// ciphertext must surface `SecretsUnrecoverable` on READ, NEVER regenerate
+    /// the key, and leave every blob byte-for-byte intact.
     #[test]
     fn store_refuses_to_regenerate_over_existing_blobs() {
         let tmp = tempfile::tempdir().unwrap();
         let base = tmp.path().to_path_buf();
 
         // Round 1: an intact key writes a blob.
-        let store1 = FileEncryptedStore::with_provider(
+        let store1 = file_store_with_provider(
             base.clone(),
             Arc::new(InMemoryMasterKeyProvider::with_key([7u8; MASTER_KEY_SIZE])),
-        )
-        .unwrap();
+        );
         store1.set("c1", SecretSlot::AuthPassword, "secret").unwrap();
         let blob = base.join("conn-c1-auth-password.bin");
         let before = fs::read(&blob).unwrap();
 
         // Round 2 (simulated restart): keychain wiped → provider Absent, blob
-        // still on disk.
-        let store2 = FileEncryptedStore::with_provider(
+        // still on disk. READ must fail-closed.
+        let store2 = file_store_with_provider(
             base.clone(),
             Arc::new(InMemoryMasterKeyProvider::absent()),
-        )
-        .unwrap();
+        );
         let err = store2.get("c1", SecretSlot::AuthPassword).unwrap_err();
         assert!(
             matches!(err, SecretError::SecretsUnrecoverable),
-            "expected SecretsUnrecoverable, got {err:?}"
+            "expected SecretsUnrecoverable on get, got {err:?}"
         );
-        // Blob must be untouched — never auto-deleted, never re-encrypted.
-        assert_eq!(fs::read(&blob).unwrap(), before, "blob must be intact");
+        // Blob must be untouched — never auto-deleted, never re-encrypted by a read.
+        assert_eq!(fs::read(&blob).unwrap(), before, "blob must be intact after failed read");
     }
 
     /// A transient `Unavailable` must surface `SecretUnavailable`, never
@@ -1219,11 +1357,10 @@ mod tests {
     #[test]
     fn store_does_not_regenerate_on_transient_unavailable() {
         let tmp = tempfile::tempdir().unwrap();
-        let store = FileEncryptedStore::with_provider(
+        let store = file_store_with_provider(
             tmp.path().to_path_buf(),
             Arc::new(InMemoryMasterKeyProvider::unavailable("keychain locked")),
-        )
-        .unwrap();
+        );
         let err = store.set("c1", SecretSlot::AuthPassword, "x").unwrap_err();
         assert!(
             matches!(err, SecretError::SecretUnavailable(_)),
@@ -1241,15 +1378,265 @@ mod tests {
     #[test]
     fn store_creates_key_on_fresh_install() {
         let tmp = tempfile::tempdir().unwrap();
-        let store = FileEncryptedStore::with_provider(
+        let store = file_store_with_provider(
             tmp.path().to_path_buf(),
             Arc::new(InMemoryMasterKeyProvider::absent()),
-        )
-        .unwrap();
+        );
         store.set("c1", SecretSlot::AuthPassword, "hunter2").unwrap();
         assert_eq!(
             store.get("c1", SecretSlot::AuthPassword).unwrap().as_deref(),
             Some("hunter2")
+        );
+    }
+
+    // ── Write-path recovery (quarantine) tests ────────────────────────────
+
+    /// `set()` on a wiped keychain with existing blobs must quarantine the
+    /// orphaned blobs, mint a new key, and succeed. The orphaned dir must
+    /// contain the original blobs; no blob remains in `base_dir`.
+    #[test]
+    fn set_quarantines_and_rekeys_after_keychain_reset() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().to_path_buf();
+
+        // Write one blob with an intact key.
+        let store1 = file_store_with_provider(
+            base.clone(),
+            Arc::new(InMemoryMasterKeyProvider::with_key([9u8; MASTER_KEY_SIZE])),
+        );
+        store1.set("c1", SecretSlot::AuthPassword, "original").unwrap();
+        let original_blob = base.join("conn-c1-auth-password.bin");
+        let original_bytes = fs::read(&original_blob).unwrap();
+
+        // Simulate keychain reset: provider reports Absent, blob still on disk.
+        let store2 = file_store_with_provider(
+            base.clone(),
+            Arc::new(InMemoryMasterKeyProvider::absent()),
+        );
+        // set() must succeed via quarantine + re-key.
+        store2.set("c1", SecretSlot::AuthPassword, "new-secret").unwrap();
+
+        // An orphaned-* subdirectory must exist containing the original blob byte-for-byte.
+        let orphaned_entries: Vec<_> = fs::read_dir(&base)
+            .unwrap()
+            .flatten()
+            .filter(|e| {
+                e.file_type().map(|t| t.is_dir()).unwrap_or(false)
+                    && e.file_name()
+                        .to_str()
+                        .map(|n| n.starts_with("orphaned-"))
+                        .unwrap_or(false)
+            })
+            .collect();
+        assert_eq!(orphaned_entries.len(), 1, "exactly one orphaned dir expected");
+        let orphan_blob = orphaned_entries[0].path().join("conn-c1-auth-password.bin");
+        assert!(orphan_blob.exists(), "original blob must be in orphaned dir");
+        assert_eq!(
+            fs::read(&orphan_blob).unwrap(),
+            original_bytes,
+            "orphaned blob bytes must be identical to original"
+        );
+
+        // The blob at the original path should now contain NEW ciphertext (different bytes).
+        let new_bytes = fs::read(&original_blob).unwrap();
+        assert_ne!(
+            new_bytes, original_bytes,
+            "new blob must have different ciphertext than orphaned blob"
+        );
+
+        // New blob must decrypt to the new value.
+        assert_eq!(
+            store2.get("c1", SecretSlot::AuthPassword).unwrap().as_deref(),
+            Some("new-secret")
+        );
+    }
+
+    /// After quarantine + re-key, a second `set()` must reuse the cached key
+    /// (no second quarantine, no second provider.create() call).
+    #[test]
+    fn second_set_reuses_cached_key_no_double_quarantine() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().to_path_buf();
+
+        let store1 = file_store_with_provider(
+            base.clone(),
+            Arc::new(InMemoryMasterKeyProvider::with_key([3u8; MASTER_KEY_SIZE])),
+        );
+        store1.set("c1", SecretSlot::AuthPassword, "pw1").unwrap();
+        store1.set("c2", SecretSlot::AuthPassword, "pw2").unwrap();
+
+        // Keychain reset: both blobs exist, provider is now Absent.
+        let store2 = file_store_with_provider(
+            base.clone(),
+            Arc::new(InMemoryMasterKeyProvider::absent()),
+        );
+        // First set() triggers quarantine.
+        store2.set("c1", SecretSlot::AuthPassword, "new1").unwrap();
+        // Second set() must use the cached key — no new quarantine dir created.
+        store2.set("c2", SecretSlot::AuthPassword, "new2").unwrap();
+
+        let orphaned_dirs: Vec<_> = fs::read_dir(&base)
+            .unwrap()
+            .flatten()
+            .filter(|e| {
+                e.file_name()
+                    .to_str()
+                    .map(|n| n.starts_with("orphaned-"))
+                    .unwrap_or(false)
+            })
+            .collect();
+        assert_eq!(
+            orphaned_dirs.len(),
+            1,
+            "exactly one quarantine must occur even for multiple set() calls"
+        );
+
+        // Both new secrets must round-trip.
+        assert_eq!(
+            store2.get("c1", SecretSlot::AuthPassword).unwrap().as_deref(),
+            Some("new1")
+        );
+        assert_eq!(
+            store2.get("c2", SecretSlot::AuthPassword).unwrap().as_deref(),
+            Some("new2")
+        );
+    }
+
+    /// Quarantine abort: if dir creation fails (base dir non-writable),
+    /// `set()` must return an Io error, no key is minted, and the original
+    /// blob bytes are preserved at their original path.
+    #[cfg(unix)]
+    #[test]
+    fn quarantine_abort_leaves_blob_intact_and_no_key_minted() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().to_path_buf();
+
+        // Write one blob with an intact key.
+        let store1 = file_store_with_provider(
+            base.clone(),
+            Arc::new(InMemoryMasterKeyProvider::with_key([9u8; MASTER_KEY_SIZE])),
+        );
+        store1.set("c1", SecretSlot::AuthPassword, "original").unwrap();
+        let blob_path = base.join("conn-c1-auth-password.bin");
+        let original_bytes = fs::read(&blob_path).unwrap();
+
+        // Simulate keychain reset: Absent provider with blob still on disk.
+        let store2 = file_store_with_provider(
+            base.clone(),
+            Arc::new(InMemoryMasterKeyProvider::absent()),
+        );
+
+        // Make base_dir non-writable: mkdir(quarantine_subdir) will fail with
+        // EACCES, but read_dir still works (read+execute = 0o555).
+        fs::set_permissions(&base, fs::Permissions::from_mode(0o555)).unwrap();
+
+        let err = store2.set("c1", SecretSlot::AuthPassword, "new").unwrap_err();
+
+        // Restore write permission before any asserts so the tempdir cleanup works.
+        fs::set_permissions(&base, fs::Permissions::from_mode(0o755)).unwrap();
+
+        assert!(
+            matches!(err, SecretError::Io(_)),
+            "expected Io error on quarantine failure, got {err:?}"
+        );
+        // Original blob must be intact — quarantine failed before any rename.
+        assert_eq!(
+            fs::read(&blob_path).unwrap(),
+            original_bytes,
+            "original blob must be untouched on quarantine abort"
+        );
+        // No orphaned dir created (lazy creation means no dir on failure).
+        let orphaned_dirs: Vec<_> = fs::read_dir(&base)
+            .unwrap()
+            .flatten()
+            .filter(|e| {
+                e.file_type().map(|t| t.is_dir()).unwrap_or(false)
+                    && e.file_name()
+                        .to_str()
+                        .map(|n| n.starts_with("orphaned-"))
+                        .unwrap_or(false)
+            })
+            .collect();
+        assert!(orphaned_dirs.is_empty(), "no orphaned dir must exist after abort");
+    }
+
+    /// Two consecutive keychain-reset recovery events must each create a
+    /// distinct `orphaned-*` directory.
+    #[test]
+    fn two_recovery_events_create_two_distinct_orphaned_dirs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().to_path_buf();
+
+        // Round 1: write a blob with key A.
+        let store1 = file_store_with_provider(
+            base.clone(),
+            Arc::new(InMemoryMasterKeyProvider::with_key([1u8; MASTER_KEY_SIZE])),
+        );
+        store1.set("c1", SecretSlot::AuthPassword, "pw1").unwrap();
+        drop(store1); // clear cached key
+
+        // Recovery 1: Absent provider quarantines key-A blob, mints key B.
+        let recovery1 = file_store_with_provider(
+            base.clone(),
+            Arc::new(InMemoryMasterKeyProvider::absent()),
+        );
+        recovery1.set("c1", SecretSlot::AuthPassword, "new1").unwrap();
+        drop(recovery1); // clear cached key
+
+        // Recovery 2: key-B blob is now on disk; simulate another reset.
+        let recovery2 = file_store_with_provider(
+            base.clone(),
+            Arc::new(InMemoryMasterKeyProvider::absent()),
+        );
+        recovery2.set("c1", SecretSlot::AuthPassword, "new2").unwrap();
+
+        let orphaned_dirs: Vec<_> = fs::read_dir(&base)
+            .unwrap()
+            .flatten()
+            .filter(|e| {
+                e.file_type().map(|t| t.is_dir()).unwrap_or(false)
+                    && e.file_name()
+                        .to_str()
+                        .map(|n| n.starts_with("orphaned-"))
+                        .unwrap_or(false)
+            })
+            .collect();
+        assert_eq!(
+            orphaned_dirs.len(),
+            2,
+            "each reset must produce a distinct orphaned dir"
+        );
+        assert_ne!(
+            orphaned_dirs[0].file_name(),
+            orphaned_dirs[1].file_name(),
+            "orphaned dir names must be distinct"
+        );
+        // The latest value is still readable.
+        assert_eq!(
+            recovery2.get("c1", SecretSlot::AuthPassword).unwrap().as_deref(),
+            Some("new2")
+        );
+    }
+
+    /// `blobs_exist` must not match a directory named `*.bin`.
+    #[test]
+    fn blobs_exist_ignores_directories_named_bin() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().to_path_buf();
+        // Create a directory whose name ends in ".bin" — must not be counted.
+        fs::create_dir(base.join("fake.bin")).unwrap();
+
+        let store = file_store_with_provider(
+            base,
+            Arc::new(InMemoryMasterKeyProvider::absent()),
+        );
+        // No real blobs → fresh install → set() must succeed (create key, no quarantine).
+        store.set("c1", SecretSlot::AuthPassword, "pw").unwrap();
+        assert_eq!(
+            store.get("c1", SecretSlot::AuthPassword).unwrap().as_deref(),
+            Some("pw")
         );
     }
 }
