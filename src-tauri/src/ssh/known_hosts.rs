@@ -90,9 +90,9 @@ mod tests {
     use tempfile::TempDir;
 
     /// Temporarily overrides HOME for the duration of a test closure, then restores it.
-    /// Tests must not be run in parallel — use `#[serial_test::serial]` if available,
-    /// or accept that individual functions are tested in isolation here.
+    /// Acquires `crate::HOME_LOCK` to serialise with other modules that manipulate HOME.
     fn with_home(dir: &TempDir, f: impl FnOnce()) {
+        let _lock = crate::HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let old = std::env::var("HOME").ok();
         std::env::set_var("HOME", dir.path());
         f();

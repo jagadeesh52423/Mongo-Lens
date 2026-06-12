@@ -10,7 +10,7 @@ import { isBlankSsh, isBlankProxy, isBlankTls } from '../../../../connection/fea
 import { stageHeading } from '../../../../connection/staged-error';
 import type { Connection } from '../../../../connection/model';
 import type { GlobalPrefs } from '../../../../connection/overrides';
-import type { SaveInput, SecretInput, SecretSlot } from '../../../../connection/ipc';
+import type { SaveInput, SecretInput, SecretSlot, SecretSlotName } from '../../../../connection/ipc';
 import { getSecretsV2 } from '../../../../connection/ipc';
 import styles from './ConnectionDialogV2.module.css';
 
@@ -95,8 +95,8 @@ export function ConnectionDialogV2({ initial, globals, onSave, onCancel }: Props
     setSecretsLoading(true);
     getSecretsV2(initial.id)
       .then((secrets) => {
-        for (const { slot, value } of secrets) {
-          dispatch({ type: 'set-secret', slot, value });
+        for (const [slot, value] of Object.entries(secrets)) {
+          dispatch({ type: 'set-secret', slot: slot as SecretSlotName, value });
         }
       })
       .catch(() => {

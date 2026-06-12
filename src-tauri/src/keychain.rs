@@ -563,17 +563,10 @@ mod tests {
     use crate::logger::MemoryLogger;
     use std::sync::Mutex;
 
-    /// Serializes tests that mutate the process-global `HOME` env var (so the
-    /// legacy blob dir resolves into a per-test tempdir). Unlike the removed
-    /// `MASTER_KEY_LOCK`, this guards an env var, not the real keychain — no
-    /// keychain access means no panic-while-holding, so no poison cascade.
-    /// Recovered on poison anyway, defensively.
-    static HOME_LOCK: Mutex<()> = Mutex::new(());
-
     /// Run `f` with `HOME` pointed at a fresh tempdir, restoring it after.
-    /// Serialized via `HOME_LOCK` because `HOME` is process-global.
+    /// Serialized via `crate::HOME_LOCK` because `HOME` is process-global.
     fn with_temp_home<T>(f: impl FnOnce() -> T) -> T {
-        let _lock = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _lock = crate::HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let original = std::env::var("HOME").ok();
         let test_dir =
             std::env::temp_dir().join(format!("mongomacapp-test-{}", uuid::Uuid::new_v4()));
@@ -749,7 +742,7 @@ mod tests {
     /// possible ciphertext); only a definitively-missing dir reports false.
     #[test]
     fn legacy_ciphertext_may_exist_fails_closed() {
-        let _lock = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _lock = crate::HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let original = std::env::var("HOME").ok();
 
         // HOME unset → can't locate the dir → must fail closed.

@@ -24,3 +24,9 @@ pub mod prefs;
 pub mod runner;
 pub mod ssh;
 pub mod state;
+
+/// Serialises `HOME` mutations across all test modules in this crate.
+/// Both `keychain::tests` and `ssh::known_hosts::tests` mutate `HOME`;
+/// any test that does so must hold this lock for the duration.
+#[cfg(test)]
+pub static HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());

@@ -55,11 +55,10 @@ describe('AuthTab', () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
-  it('password placeholder reads "(stored in Keychain…)" when editing an existing connection without a typed secret', () => {
+  it('password field renders masked by default (no keychain placeholder)', () => {
     renderAuthTab(baseScram, {});
-    expect(screen.getByLabelText(/password/i)).toHaveAttribute(
-      'placeholder',
-      expect.stringMatching(/stored in keychain/i),
-    );
+    const input = screen.getByLabelText(/^password$/i);
+    expect(input).toHaveAttribute('type', 'password');
+    expect(input).not.toHaveAttribute('placeholder', expect.stringMatching(/keychain/i));
   });
 });

@@ -101,8 +101,8 @@ export const connectV2 = (
 export const disconnectV2 = (id: string): Promise<void> =>
   invoke<void>('connections_v2_disconnect', { id });
 
-export const getSecretsV2 = (id: string): Promise<SecretInput[]> =>
-  invoke<SecretInput[]>('connections_v2_get_secrets', { id });
+export const getSecretsV2 = (id: string): Promise<Partial<Record<SecretSlotName, string>>> =>
+  invoke<Partial<Record<SecretSlotName, string>>>('connections_v2_get_secrets', { id });
 
 // ──────────────────────────────────────────────────────────────────────────
 // prefs_*

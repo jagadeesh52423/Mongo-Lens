@@ -21,6 +21,8 @@ const sample: Connection = {
 describe('ConnectionDialogV2', () => {
   beforeEach(() => {
     vi.mocked(invoke).mockReset();
+    // Default: getSecretsV2 returns empty map; tests that care use mockResolvedValueOnce
+    vi.mocked(invoke).mockResolvedValue({});
   });
 
   it('renders name + color picker + Server tab content for existing connection', () => {
@@ -97,7 +99,9 @@ describe('ConnectionDialogV2', () => {
   });
 
   it('Test button calls connections_v2_test with current draft + secrets', async () => {
-    vi.mocked(invoke).mockResolvedValueOnce({ ok: true, serverInfo: {} });
+    vi.mocked(invoke)
+      .mockResolvedValueOnce({})                    // connections_v2_get_secrets (useEffect)
+      .mockResolvedValueOnce({ ok: true, serverInfo: {} }); // connections_v2_test (click)
     render(<ConnectionDialogV2 initial={sample} globals={DEFAULT_GLOBAL_PREFS} onSave={vi.fn()} onCancel={vi.fn()} />);
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /test connection/i }));
@@ -108,7 +112,9 @@ describe('ConnectionDialogV2', () => {
   });
 
   it('renders "SSH tunnel failed" heading when test result stage is ssh', async () => {
-    vi.mocked(invoke).mockResolvedValueOnce({ ok: false, stage: 'ssh', error: 'no route to host' });
+    vi.mocked(invoke)
+      .mockResolvedValueOnce({})                                              // connections_v2_get_secrets (useEffect)
+      .mockResolvedValueOnce({ ok: false, stage: 'ssh', error: 'no route to host' }); // connections_v2_test (click)
     render(<ConnectionDialogV2 initial={sample} globals={DEFAULT_GLOBAL_PREFS} onSave={vi.fn()} onCancel={vi.fn()} />);
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /test connection/i }));
@@ -118,7 +124,9 @@ describe('ConnectionDialogV2', () => {
   });
 
   it('renders "✓ Connection OK" when test result is ok', async () => {
-    vi.mocked(invoke).mockResolvedValueOnce({ ok: true, serverInfo: { version: '7.0' } });
+    vi.mocked(invoke)
+      .mockResolvedValueOnce({})                                             // connections_v2_get_secrets (useEffect)
+      .mockResolvedValueOnce({ ok: true, serverInfo: { version: '7.0' } }); // connections_v2_test (click)
     render(<ConnectionDialogV2 initial={sample} globals={DEFAULT_GLOBAL_PREFS} onSave={vi.fn()} onCancel={vi.fn()} />);
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /test connection/i }));
