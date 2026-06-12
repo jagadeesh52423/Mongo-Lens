@@ -1,7 +1,9 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import type { Connection } from '../../../connection/model';
 import { connectionSummary } from './connectionSummary';
 import styles from './ConnectionList.module.css';
+
+const PREFIX_RESET_MS = 600;
 
 interface Props {
   connections: Connection[];
@@ -17,7 +19,9 @@ function ConnectionRow({
   c,
   isConnected,
   isExpanded,
+  highlighted,
   searching,
+  rowRef,
   onRowClick,
   onContextMenu,
   renderTree,
@@ -25,11 +29,19 @@ function ConnectionRow({
   c: Connection;
   isConnected: boolean;
   isExpanded: boolean;
+  highlighted: boolean;
   searching: boolean;
+  rowRef?: (el: HTMLDivElement | null) => void;
   onRowClick: (c: Connection) => void;
   onContextMenu: (c: Connection, x: number, y: number) => void;
   renderTree?: (id: string) => React.ReactNode;
 }) {
+  const rowClass = [
+    styles.row,
+    isConnected ? styles.rowActive : '',
+    highlighted ? styles.rowHighlighted : '',
+  ].filter(Boolean).join(' ');
+
   return (
     <li
       className={styles.item}
@@ -39,8 +51,10 @@ function ConnectionRow({
       }}
     >
       <div
-        className={`${styles.row}${isConnected ? ` ${styles.rowActive}` : ''}`}
+        ref={rowRef}
+        className={rowClass}
         data-testid={`cl-row-${c.id}`}
+        data-highlighted={highlighted || undefined}
         onClick={() => onRowClick(c)}
         role="button"
         tabIndex={0}
@@ -77,6 +91,12 @@ export function ConnectionList({
   renderTree,
 }: Props) {
   const [query, setQuery] = useState('');
+  const [prefixHighlight, setPrefixHighlight] = useState<string | null>(null);
+
+  const prefixBufRef = useRef('');
+  const prefixTimerRef = useRef<number | null>(null);
+  const rowRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
 
   const needle = query.trim().toLowerCase();
   const filtered = needle
@@ -94,24 +114,54 @@ export function ConnectionList({
     }
   }
 
+  function handleWrapperKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+    if (document.activeElement === searchInputRef.current) return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key === 'Escape') {
+      setPrefixHighlight(null);
+      prefixBufRef.current = '';
+      return;
+    }
+    if (e.key.length !== 1 || !/^[A-Za-z0-9_.\-$ ]$/.test(e.key)) return;
+
+    e.preventDefault();
+    if (prefixTimerRef.current) window.clearTimeout(prefixTimerRef.current);
+    prefixBufRef.current += e.key.toLowerCase();
+    const prefix = prefixBufRef.current;
+    const match = filtered.find((c) => c.name.toLowerCase().startsWith(prefix));
+    if (match) {
+      setPrefixHighlight(match.id);
+      rowRefs.current.get(match.id)?.scrollIntoView?.({ block: 'nearest' });
+      rowRefs.current.get(match.id)?.focus();
+    }
+    prefixTimerRef.current = window.setTimeout(() => {
+      prefixBufRef.current = '';
+    }, PREFIX_RESET_MS);
+  }
+
   if (connections.length === 0) {
     return <div className={styles.empty}>No saved connections yet</div>;
   }
 
+  function rowRefSetter(id: string) {
+    return (el: HTMLDivElement | null) => { rowRefs.current.set(id, el); };
+  }
+
   return (
-    <div>
+    <div onKeyDown={handleWrapperKeyDown}>
       <div className={styles.searchWrap}>
         <input
+          ref={searchInputRef}
           type="search"
           className={styles.search}
           placeholder="Filter connections…"
           aria-label="Filter connections"
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={(e) => { setQuery(e.target.value); setPrefixHighlight(null); prefixBufRef.current = ''; }}
         />
       </div>
       {filtered.length === 0 && (
-        <div className={styles.empty}>No connections match "{query}"</div>
+        <div className={styles.empty}>No connections match &ldquo;{query}&rdquo;</div>
       )}
       {active.length > 0 && (
         <>
@@ -123,7 +173,9 @@ export function ConnectionList({
                 c={c}
                 isConnected
                 isExpanded={expandedConns.has(c.id)}
+                highlighted={prefixHighlight === c.id}
                 searching={needle.length > 0}
+                rowRef={rowRefSetter(c.id)}
                 onRowClick={handleRowClick}
                 onContextMenu={onItemContextMenu}
                 renderTree={renderTree}
@@ -142,7 +194,9 @@ export function ConnectionList({
                 c={c}
                 isConnected={false}
                 isExpanded={false}
+                highlighted={prefixHighlight === c.id}
                 searching={false}
+                rowRef={rowRefSetter(c.id)}
                 onRowClick={handleRowClick}
                 onContextMenu={onItemContextMenu}
               />

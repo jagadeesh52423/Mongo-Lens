@@ -261,3 +261,70 @@ describe('ConnectionList — auto-collapse when searching', () => {
     expect(screen.getByTestId('tree-1')).toBeInTheDocument();
   });
 });
+
+describe('ConnectionList — keyboard prefix navigation', () => {
+  it('highlights the first connection matching a typed prefix', async () => {
+    const user = userEvent.setup();
+    setup({
+      connections: [conn('1', 'alpha'), conn('2', 'beta'), conn('3', 'gamma')],
+    });
+    // Tab past search to land focus inside the list area, then type
+    const row1 = screen.getByTestId('cl-row-1');
+    row1.focus();
+    await user.keyboard('b');
+    expect(screen.getByTestId('cl-row-2')).toHaveAttribute('data-highlighted');
+  });
+
+  it('extends the prefix buffer to refine the match', async () => {
+    const user = userEvent.setup();
+    setup({
+      connections: [conn('1', 'prod-east'), conn('2', 'prod-west'), conn('3', 'staging')],
+    });
+    screen.getByTestId('cl-row-1').focus();
+    await user.keyboard('p');
+    expect(screen.getByTestId('cl-row-1')).toHaveAttribute('data-highlighted');
+    await user.keyboard('r');
+    // 'pr' still matches prod-east (first)
+    expect(screen.getByTestId('cl-row-1')).toHaveAttribute('data-highlighted');
+  });
+
+  it('does not trigger prefix nav when the search input is focused', async () => {
+    const user = userEvent.setup();
+    setup({
+      connections: [conn('1', 'alpha'), conn('2', 'beta')],
+    });
+    // Focus the search input, type a letter — should update the search filter, not prefix nav
+    await user.click(screen.getByRole('searchbox'));
+    await user.keyboard('b');
+    // beta should still be visible (search matched it), alpha hidden
+    expect(screen.getByText('beta')).toBeInTheDocument();
+    expect(screen.queryByText('alpha')).not.toBeInTheDocument();
+    // No prefix highlight applied to any row
+    expect(screen.getByTestId('cl-row-2')).not.toHaveAttribute('data-highlighted');
+  });
+
+  it('matches only within the current filtered set when search is also active', async () => {
+    const user = userEvent.setup();
+    setup({
+      connections: [conn('1', 'prod-alpha'), conn('2', 'prod-beta'), conn('3', 'staging')],
+    });
+    // Filter to prod-* via search box
+    await user.type(screen.getByRole('searchbox'), 'prod');
+    // staging is not in DOM; prefix 'p' matches prod-alpha
+    screen.getByTestId('cl-row-1').focus();
+    await user.keyboard('p');
+    expect(screen.getByTestId('cl-row-1')).toHaveAttribute('data-highlighted');
+  });
+
+  it('clears prefix highlight on Escape', async () => {
+    const user = userEvent.setup();
+    setup({
+      connections: [conn('1', 'alpha'), conn('2', 'beta')],
+    });
+    screen.getByTestId('cl-row-1').focus();
+    await user.keyboard('b');
+    expect(screen.getByTestId('cl-row-2')).toHaveAttribute('data-highlighted');
+    await user.keyboard('{Escape}');
+    expect(screen.getByTestId('cl-row-2')).not.toHaveAttribute('data-highlighted');
+  });
+});

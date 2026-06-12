@@ -22,6 +22,7 @@
 }
 .row:hover { background: var(--bg-hover); }
 .row:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.rowHighlighted { background: var(--bg-hover); }
 
 /* Connected rows pin below any sticky header while their tree scrolls under. */
 .rowActive {
