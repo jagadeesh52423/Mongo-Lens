@@ -1,4 +1,5 @@
 import { FormField } from '../../../../../ui/FormField';
+import { PasswordField } from '../../../../../ui/PasswordField';
 import type { SubFormProps } from '../types';
 
 export function AwsIamForm({ value, onChange, secrets, onSecretChange }: SubFormProps) {
@@ -16,9 +17,8 @@ export function AwsIamForm({ value, onChange, secrets, onSecretChange }: SubForm
       </FormField>
       <FormField>
         <FormField.Label htmlFor="aws-secret">Secret access key</FormField.Label>
-        <FormField.Input
+        <PasswordField
           id="aws-secret"
-          type="password"
           value={secrets['aws-secret-key'] ?? ''}
           onChange={(e) => onSecretChange('aws-secret-key', e.target.value)}
         />

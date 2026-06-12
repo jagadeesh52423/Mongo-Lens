@@ -1,4 +1,5 @@
 import { FormField } from '../../../../../ui/FormField';
+import { PasswordField } from '../../../../../ui/PasswordField';
 import type { SubFormProps } from '../types';
 
 type ScramMechanism = 'SCRAM-SHA-1' | 'SCRAM-SHA-256' | 'auto';
@@ -18,9 +19,8 @@ export function ScramForm({ value, onChange, secrets, onSecretChange }: SubFormP
       </FormField>
       <FormField>
         <FormField.Label htmlFor="scram-pw">Password</FormField.Label>
-        <FormField.Input
+        <PasswordField
           id="scram-pw"
-          type="password"
           value={secrets['auth-password'] ?? ''}
           onChange={(e) => onSecretChange('auth-password', e.target.value)}
         />

@@ -1,6 +1,7 @@
 import type { TabFormProps } from './types';
 import type { Proxy } from '../../../../../connection/model';
 import { FormField } from '../../../../ui/FormField';
+import { PasswordField } from '../../../../ui/PasswordField';
 import { SegmentedControl } from '../../../../ui';
 import { BLANK_PROXY } from '../../../../../connection/feature-state';
 import styles from './ProxyTab.module.css';
@@ -87,9 +88,8 @@ export function ProxyTab({ value, onChange, secrets, onSecretChange }: TabFormPr
         {proxy.auth && (
           <FormField>
             <FormField.Label htmlFor="proxy-pw">Password</FormField.Label>
-            <FormField.Input
+            <PasswordField
               id="proxy-pw"
-              type="password"
               value={secrets['proxy-password'] ?? ''}
               onChange={(e) => onSecretChange('proxy-password', e.target.value)}
             />

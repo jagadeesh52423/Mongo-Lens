@@ -1,4 +1,5 @@
 import { FormField } from '../../../../../ui/FormField';
+import { PasswordField } from '../../../../../ui/PasswordField';
 import type { SubFormProps } from '../types';
 
 export function LdapForm({ value, onChange, secrets, onSecretChange }: SubFormProps) {
@@ -17,9 +18,8 @@ export function LdapForm({ value, onChange, secrets, onSecretChange }: SubFormPr
       </FormField>
       <FormField>
         <FormField.Label htmlFor="ldap-pw">Password</FormField.Label>
-        <FormField.Input
+        <PasswordField
           id="ldap-pw"
-          type="password"
           value={secrets['auth-password'] ?? ''}
           onChange={(e) => onSecretChange('auth-password', e.target.value)}
         />

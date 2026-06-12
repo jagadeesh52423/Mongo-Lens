@@ -1,4 +1,5 @@
 import { FormField } from '../../../../../ui/FormField';
+import { PasswordField } from '../../../../../ui/PasswordField';
 import type { SubFormProps } from '../types';
 
 export function PasswordForm({ value, secrets, onSecretChange }: SubFormProps) {
@@ -6,9 +7,8 @@ export function PasswordForm({ value, secrets, onSecretChange }: SubFormProps) {
   return (
     <FormField>
       <FormField.Label htmlFor="ssh-pw">SSH password</FormField.Label>
-      <FormField.Input
+      <PasswordField
         id="ssh-pw"
-        type="password"
         value={secrets['ssh-password'] ?? ''}
         onChange={(e) => onSecretChange('ssh-password', e.target.value)}
       />
