@@ -1000,6 +1000,52 @@ fn aead_open(encrypted: &[u8], master_key: &[u8]) -> Result<Vec<u8>> {
 }
 
 // ──────────────────────────────────────────────────────────────────────────
+// FileMasterKeyProvider — file-backed master key (replaces Keychain)
+// ──────────────────────────────────────────────────────────────────────────
+
+/// File-based `MasterKeyProvider`: stores the 32-byte AES-256 master key at
+/// `path` with 0600 permissions. Replaces `KeychainMasterKeyProvider` so the
+/// app no longer triggers Keychain access prompts on binary re-sign/update.
+pub struct FileMasterKeyProvider {
+    path: PathBuf,
+}
+
+impl FileMasterKeyProvider {
+    pub fn new(path: PathBuf) -> Self {
+        Self { path }
+    }
+}
+
+impl MasterKeyProvider for FileMasterKeyProvider {
+    fn fetch(&self) -> MasterKeyOutcome {
+        match fs::read(&self.path) {
+            Ok(bytes) if bytes.len() == MASTER_KEY_SIZE => {
+                let mut key = Zeroizing::new([0u8; MASTER_KEY_SIZE]);
+                key.copy_from_slice(&bytes);
+                MasterKeyOutcome::Found(key)
+            }
+            Ok(bytes) => MasterKeyOutcome::Unavailable(format!(
+                "master key file has wrong size: {} bytes (expected {})",
+                bytes.len(),
+                MASTER_KEY_SIZE
+            )),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => MasterKeyOutcome::Absent,
+            Err(e) => MasterKeyOutcome::Unavailable(e.to_string()),
+        }
+    }
+
+    fn create(&self) -> Result<Zeroizing<[u8; MASTER_KEY_SIZE]>> {
+        let mut key = Zeroizing::new([0u8; MASTER_KEY_SIZE]);
+        OsRng.fill_bytes(&mut key[..]);
+        if let Some(parent) = self.path.parent() {
+            ensure_dir_0700(parent)?;
+        }
+        atomic_write_0600(&self.path, &key[..])?;
+        Ok(key)
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────────
 // Tests — every assertion runs against MemStore; structural assertions
 // (file naming, on-disk crypto, delete_all_for sweep) additionally run
 // against FileEncryptedStore in a tempdir with a fixed master key.
@@ -1638,5 +1684,45 @@ mod tests {
             store.get("c1", SecretSlot::AuthPassword).unwrap().as_deref(),
             Some("pw")
         );
+    }
+
+    // ── FileMasterKeyProvider ──────────────────────────────────────────────
+
+    #[test]
+    fn file_key_provider_absent_when_no_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let provider = FileMasterKeyProvider::new(tmp.path().join("master.key"));
+        assert!(matches!(provider.fetch(), MasterKeyOutcome::Absent));
+    }
+
+    #[test]
+    fn file_key_provider_create_writes_key_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("master.key");
+        let provider = FileMasterKeyProvider::new(path.clone());
+        provider.create().unwrap();
+        let bytes = fs::read(&path).unwrap();
+        assert_eq!(bytes.len(), MASTER_KEY_SIZE);
+    }
+
+    #[test]
+    fn file_key_provider_fetch_returns_found_with_created_key() {
+        let tmp = tempfile::tempdir().unwrap();
+        let provider = FileMasterKeyProvider::new(tmp.path().join("master.key"));
+        let created = provider.create().unwrap();
+        match provider.fetch() {
+            MasterKeyOutcome::Found(fetched) => assert_eq!(*fetched, *created),
+            MasterKeyOutcome::Absent => panic!("expected Found, got Absent"),
+            MasterKeyOutcome::Unavailable(msg) => panic!("expected Found, got Unavailable: {msg}"),
+        }
+    }
+
+    #[test]
+    fn file_key_provider_unavailable_on_wrong_size() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("master.key");
+        atomic_write_0600(&path, &[0u8; 16]).unwrap();
+        let provider = FileMasterKeyProvider::new(path);
+        assert!(matches!(provider.fetch(), MasterKeyOutcome::Unavailable(_)));
     }
 }
