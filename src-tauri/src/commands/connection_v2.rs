@@ -39,6 +39,7 @@ use mongodb::Client;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
+use uuid::Uuid;
 
 // ──────────────────────────────────────────────────────────────────────────
 // Inputs
@@ -187,6 +188,13 @@ pub fn connections_v2_save(
         }
     }
 
+    // A new connection arrives with an empty id; generate one here so both
+    // the DB row and the secret store use the same stable id.
+    let mut connection = input.connection;
+    if connection.id.is_empty() {
+        connection.id = Uuid::new_v4().to_string();
+    }
+
     let secrets = secret_store(&state)?;
 
     let conn = state.open_db().map_err(|e| {
@@ -194,7 +202,7 @@ pub fn connections_v2_save(
         e.to_string()
     })?;
 
-    store::upsert(&conn, &input.connection).map_err(|e| {
+    store::upsert(&conn, &connection).map_err(|e| {
         log.error("store::upsert failed", logctx! { "err" => e.to_string() });
         e.to_string()
     })?;
@@ -204,7 +212,7 @@ pub fn connections_v2_save(
     for entry in &input.secrets {
         let slot = SecretSlot::from_wire(&entry.slot)
             .expect("unknown slot rejected above");
-        if let Err(e) = secrets.set(&input.connection.id, slot, &entry.value) {
+        if let Err(e) = secrets.set(&connection.id, slot, &entry.value) {
             log.warn(
                 "connections_v2_save: secret set failed",
                 logctx! { "slot" => entry.slot.clone(), "err" => e.to_string() },
@@ -213,7 +221,7 @@ pub fn connections_v2_save(
         }
     }
 
-    Ok(input.connection)
+    Ok(connection)
 }
 
 #[tauri::command]
