@@ -1,4 +1,4 @@
-import { useMemo, useReducer, useState } from 'react';
+import { useEffect, useMemo, useReducer, useState } from 'react';
 import { Dialog } from '../../../ui/Dialog';
 import { Button } from '../../../ui/Button';
 import { ColorPicker } from './tabs/shared/ColorPicker';
@@ -11,6 +11,7 @@ import { stageHeading } from '../../../../connection/staged-error';
 import type { Connection } from '../../../../connection/model';
 import type { GlobalPrefs } from '../../../../connection/overrides';
 import type { SaveInput, SecretInput, SecretSlot } from '../../../../connection/ipc';
+import { getSecretsV2 } from '../../../../connection/ipc';
 import styles from './ConnectionDialogV2.module.css';
 
 interface Props {
@@ -87,6 +88,22 @@ export function ConnectionDialogV2({ initial, globals, onSave, onCancel }: Props
   const [state, dispatch] = useReducer(dialogReducer, undefined, () => initialDialogState(initial, globals));
   const [activeTabId, setActiveTabId] = useState<string>('server');
   const [saving, setSaving] = useState(false);
+  const [secretsLoading, setSecretsLoading] = useState(false);
+
+  useEffect(() => {
+    if (!initial?.id) return;
+    setSecretsLoading(true);
+    getSecretsV2(initial.id)
+      .then((secrets) => {
+        for (const { slot, value } of secrets) {
+          dispatch({ type: 'set-secret', slot, value });
+        }
+      })
+      .catch(() => {
+        // Non-fatal: secrets will be empty and the user can re-enter them
+      })
+      .finally(() => setSecretsLoading(false));
+  }, [initial?.id]);
   const issues = useMemo(() => validateConnection(state.draft), [state.draft]);
   const issuesByTab = useMemo(() => new Map(TABS.map((t) => [t.id, t.validate(state.draft)])), [state.draft]);
   const activeTab = TABS.find((t) => t.id === activeTabId) ?? TABS[0];
@@ -137,6 +154,7 @@ export function ConnectionDialogV2({ initial, globals, onSave, onCancel }: Props
       </div>
 
       <div className={styles.body}>
+        {secretsLoading && <div className={styles.secretsLoading}>Loading saved credentials…</div>}
         <nav className={styles.sidebar} role="tablist" aria-label="Connection settings tabs">
           <div className={styles.glabel}>CONNECTION</div>
           {transportTabs.map((t) => (

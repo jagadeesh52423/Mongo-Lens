@@ -13,7 +13,6 @@ const KIND_OPTIONS = [
 
 export function ProxyTab({ value, onChange, secrets, onSecretChange }: TabFormProps) {
   const proxy: Proxy = value.proxy ?? BLANK_PROXY;
-  const editingExisting = !!value.id;
 
   function setProxy(next: Proxy) {
     onChange({ ...value, proxy: next });
@@ -92,7 +91,6 @@ export function ProxyTab({ value, onChange, secrets, onSecretChange }: TabFormPr
               id="proxy-pw"
               type="password"
               value={secrets['proxy-password'] ?? ''}
-              placeholder={editingExisting && secrets['proxy-password'] === undefined ? '(stored in Keychain — leave blank to keep)' : ''}
               onChange={(e) => onSecretChange('proxy-password', e.target.value)}
             />
           </FormField>

@@ -4,7 +4,6 @@ import type { SubFormProps } from '../types';
 export function LdapForm({ value, onChange, secrets, onSecretChange }: SubFormProps) {
   if (value.auth.kind !== 'ldap') return null;
   const auth = value.auth;
-  const editingExisting = !!value.id;
   return (
     <>
       <p>LDAP requires MongoDB Enterprise.</p>
@@ -22,7 +21,6 @@ export function LdapForm({ value, onChange, secrets, onSecretChange }: SubFormPr
           id="ldap-pw"
           type="password"
           value={secrets['auth-password'] ?? ''}
-          placeholder={editingExisting && secrets['auth-password'] === undefined ? '(stored in Keychain — leave blank to keep)' : ''}
           onChange={(e) => onSecretChange('auth-password', e.target.value)}
         />
       </FormField>

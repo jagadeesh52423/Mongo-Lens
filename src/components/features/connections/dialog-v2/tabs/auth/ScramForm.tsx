@@ -6,7 +6,6 @@ type ScramMechanism = 'SCRAM-SHA-1' | 'SCRAM-SHA-256' | 'auto';
 export function ScramForm({ value, onChange, secrets, onSecretChange }: SubFormProps) {
   if (value.auth.kind !== 'scram') return null;
   const auth = value.auth;
-  const editingExisting = !!value.id;
   return (
     <>
       <FormField>
@@ -23,7 +22,6 @@ export function ScramForm({ value, onChange, secrets, onSecretChange }: SubFormP
           id="scram-pw"
           type="password"
           value={secrets['auth-password'] ?? ''}
-          placeholder={editingExisting && secrets['auth-password'] === undefined ? '(stored in Keychain — leave blank to keep)' : ''}
           onChange={(e) => onSecretChange('auth-password', e.target.value)}
         />
       </FormField>

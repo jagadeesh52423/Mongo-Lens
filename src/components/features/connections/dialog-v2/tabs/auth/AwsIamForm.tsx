@@ -4,7 +4,6 @@ import type { SubFormProps } from '../types';
 export function AwsIamForm({ value, onChange, secrets, onSecretChange }: SubFormProps) {
   if (value.auth.kind !== 'aws-iam') return null;
   const auth = value.auth;
-  const editingExisting = !!value.id;
   return (
     <>
       <FormField>
@@ -21,7 +20,6 @@ export function AwsIamForm({ value, onChange, secrets, onSecretChange }: SubForm
           id="aws-secret"
           type="password"
           value={secrets['aws-secret-key'] ?? ''}
-          placeholder={editingExisting && secrets['aws-secret-key'] === undefined ? '(stored in Keychain — leave blank to keep)' : ''}
           onChange={(e) => onSecretChange('aws-secret-key', e.target.value)}
         />
       </FormField>

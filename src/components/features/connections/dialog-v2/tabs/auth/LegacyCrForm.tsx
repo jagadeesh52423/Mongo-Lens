@@ -4,7 +4,6 @@ import type { SubFormProps } from '../types';
 export function LegacyCrForm({ value, onChange, secrets, onSecretChange }: SubFormProps) {
   if (value.auth.kind !== 'legacy-cr') return null;
   const auth = value.auth;
-  const editingExisting = !!value.id;
   return (
     <>
       <p>⚠ Legacy MONGODB-CR is deprecated; use SCRAM for new deployments.</p>
@@ -22,7 +21,6 @@ export function LegacyCrForm({ value, onChange, secrets, onSecretChange }: SubFo
           id="cr-pw"
           type="password"
           value={secrets['auth-password'] ?? ''}
-          placeholder={editingExisting && secrets['auth-password'] === undefined ? '(stored in Keychain — leave blank to keep)' : ''}
           onChange={(e) => onSecretChange('auth-password', e.target.value)}
         />
       </FormField>
