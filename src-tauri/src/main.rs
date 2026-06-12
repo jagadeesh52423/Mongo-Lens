@@ -196,6 +196,32 @@ fn bootstrap_conn_v2(
     use crate::logger::Logger as _;
     use std::sync::Arc;
 
+    let migrate_log = log.child(logctx! { "logger" => "connection.secrets.migration" });
+    match connection::secrets::try_migrate_legacy_keychain(migrate_log) {
+        connection::secrets::MigrationOutcome::AlreadyMigrated => {}
+        connection::secrets::MigrationOutcome::FreshInstall => {
+            log.info("keychain migration: fresh install — no blobs to migrate", logctx! {});
+        }
+        connection::secrets::MigrationOutcome::Migrated { blobs } => {
+            log.info(
+                "keychain migration: legacy key copied to master.key",
+                logctx! { "blobs" => blobs },
+            );
+        }
+        connection::secrets::MigrationOutcome::LegacyKeyAbsent => {
+            log.warn(
+                "keychain migration: keychain absent but blobs exist; re-enter passwords to reconnect",
+                logctx! {},
+            );
+        }
+        connection::secrets::MigrationOutcome::KeychainUnavailable(msg) => {
+            log.warn(
+                "keychain migration: skipped (transient keychain error)",
+                logctx! { "err" => msg },
+            );
+        }
+    }
+
     let secrets_log = log.child(logctx! { "logger" => "connection.secrets" });
     let store = match connection::secrets::open_default_store(secrets_log) {
         Ok(s) => Arc::new(s) as Arc<dyn connection::secrets::SecretStore>,

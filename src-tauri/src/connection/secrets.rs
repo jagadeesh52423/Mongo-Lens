@@ -1131,6 +1131,127 @@ impl MasterKeyProvider for FileMasterKeyProvider {
 }
 
 // ──────────────────────────────────────────────────────────────────────────
+// One-shot keychain → file migration
+// ──────────────────────────────────────────────────────────────────────────
+
+/// Outcome of [`try_migrate_legacy_keychain`].
+#[derive(Debug)]
+pub enum MigrationOutcome {
+    /// `master.key` already exists — nothing to do (migrated or fresh install).
+    AlreadyMigrated,
+    /// Keychain had no entry and secrets dir has no blobs — genuine fresh install.
+    FreshInstall,
+    /// Keychain key was read and copied to `master.key`. `blobs` is the number
+    /// of existing encrypted blobs that will now decrypt under the file key.
+    Migrated { blobs: usize },
+    /// Keychain had no entry but blobs exist — user must re-enter passwords.
+    LegacyKeyAbsent,
+    /// Transient keychain error — migration skipped. Retried next boot.
+    KeychainUnavailable(String),
+}
+
+/// One-shot migration: copy the legacy Keychain master key to `master.key`.
+///
+/// Safe to call on every boot — it is a no-op when `master.key` already
+/// exists. On success the file store and Keychain store share the same 32-byte
+/// key, so all existing encrypted blobs decrypt without re-encryption.
+pub fn try_migrate_legacy_keychain(log: Arc<dyn Logger>) -> MigrationOutcome {
+    let key_path = match default_master_key_path() {
+        Ok(p) => p,
+        Err(e) => return MigrationOutcome::KeychainUnavailable(e.to_string()),
+    };
+
+    // Already migrated (or a fresh install that already ran create()).
+    if key_path.exists() {
+        return MigrationOutcome::AlreadyMigrated;
+    }
+
+    // Try to read the legacy Keychain key.
+    let old_key = match KeychainMasterKeyProvider::new(
+        KEYCHAIN_SERVICE,
+        MASTER_KEY_ACCOUNT_V2,
+        "connections-v2-master-key",
+        log.clone(),
+    )
+    .fetch()
+    {
+        MasterKeyOutcome::Found(k) => k,
+        MasterKeyOutcome::Absent => {
+            // No legacy key. Determine if blobs exist (user must re-enter)
+            // or if this is genuinely a fresh install.
+            let has_blobs = default_secrets_dir()
+                .and_then(|dir| {
+                    if !dir.exists() {
+                        return Ok(false);
+                    }
+                    Ok(fs::read_dir(&dir)?.any(|entry| {
+                        entry
+                            .ok()
+                            .and_then(|e| {
+                                let is_file = e.file_type().ok()?.is_file();
+                                let name = e.file_name();
+                                let ends_bin = name.to_str()?.ends_with(".bin");
+                                Some(is_file && ends_bin)
+                            })
+                            .unwrap_or(false)
+                    }))
+                })
+                .unwrap_or(false);
+            return if has_blobs {
+                MigrationOutcome::LegacyKeyAbsent
+            } else {
+                MigrationOutcome::FreshInstall
+            };
+        }
+        MasterKeyOutcome::Unavailable(msg) => {
+            return MigrationOutcome::KeychainUnavailable(msg);
+        }
+    };
+
+    // Write the legacy key to master.key so the file store can use it.
+    if let Some(parent) = key_path.parent() {
+        if let Err(e) = ensure_dir_0700(parent) {
+            return MigrationOutcome::KeychainUnavailable(e.to_string());
+        }
+    }
+    if let Err(e) = atomic_write_0600(&key_path, &old_key[..]) {
+        return MigrationOutcome::KeychainUnavailable(e.to_string());
+    }
+
+    // Count blobs for the summary log.
+    let blobs = default_secrets_dir()
+        .and_then(|dir| {
+            Ok(fs::read_dir(&dir)?
+                .filter_map(|e| e.ok())
+                .filter(|e| {
+                    e.file_type().map(|t| t.is_file()).unwrap_or(false)
+                        && e.file_name()
+                            .to_str()
+                            .map(|n| n.ends_with(".bin"))
+                            .unwrap_or(false)
+                })
+                .count())
+        })
+        .unwrap_or(0);
+
+    MigrationOutcome::Migrated { blobs }
+}
+
+/// Decrypt a blob with `old_key` and re-encrypt it with `new_key` in place.
+/// Used for key rotation; not called by the one-shot migration (which copies
+/// the old key rather than introducing a new one).
+pub fn retranscrypt_blob(
+    path: &Path,
+    old_key: &[u8],
+    new_key: &[u8],
+) -> Result<()> {
+    let encrypted = fs::read(path)?;
+    let plaintext = aead_open(&encrypted, old_key)?;
+    let re_encrypted = aead_seal(&plaintext, new_key)?;
+    atomic_write_0600(path, &re_encrypted)
+}
+
+// ──────────────────────────────────────────────────────────────────────────
 // Tests — every assertion runs against MemStore; structural assertions
 // (file naming, on-disk crypto, delete_all_for sweep) additionally run
 // against FileEncryptedStore in a tempdir with a fixed master key.
