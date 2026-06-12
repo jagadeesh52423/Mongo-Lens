@@ -281,6 +281,25 @@ pub trait SecretStore: Send + Sync {
     fn probe_recoverable(&self) -> Result<()> {
         Ok(())
     }
+
+    /// Store an arbitrary secret under a caller-supplied `key` string.
+    /// Used by the plugin-secrets surface (`set_plugin_secret`) which passes
+    /// freeform namespaces such as `plugin:my-plugin:secret:token`.
+    // implement this interface to add a new variant
+    fn set_raw(&self, _key: &str, _value: &str) -> Result<()> {
+        Err(SecretError::Io("set_raw not supported by this store".into()))
+    }
+
+    /// Retrieve a secret stored via [`set_raw`]. Returns `Ok(None)` when the
+    /// key has never been written.
+    fn get_raw(&self, _key: &str) -> Result<Option<String>> {
+        Err(SecretError::Io("get_raw not supported by this store".into()))
+    }
+
+    /// Delete a secret stored via [`set_raw`]. Missing key is a no-op.
+    fn delete_raw(&self, _key: &str) -> Result<()> {
+        Err(SecretError::Io("delete_raw not supported by this store".into()))
+    }
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -350,6 +369,20 @@ impl SecretStore for MemStore {
             guard.remove(key);
         }
         Ok(to_remove.len())
+    }
+
+    fn set_raw(&self, key: &str, value: &str) -> Result<()> {
+        self.locked().insert(format!("raw:{key}"), value.to_string());
+        Ok(())
+    }
+
+    fn get_raw(&self, key: &str) -> Result<Option<String>> {
+        Ok(self.locked().get(&format!("raw:{key}")).cloned())
+    }
+
+    fn delete_raw(&self, key: &str) -> Result<()> {
+        self.locked().remove(&format!("raw:{key}"));
+        Ok(())
     }
 }
 
@@ -595,6 +628,14 @@ impl FileEncryptedStore {
         let id = validated_id(connection_id)?;
         Ok(format!("conn-{id}-"))
     }
+
+    /// Map an arbitrary raw key to a filesystem-safe blob path by hex-encoding
+    /// the key bytes. Collision-free and handles any UTF-8 string (including
+    /// namespaces containing `:` used by the plugin-secrets surface).
+    fn raw_path_for(&self, key: &str) -> PathBuf {
+        let hex: String = key.bytes().map(|b| format!("{b:02x}")).collect();
+        self.base_dir.join(format!("raw-{hex}.bin"))
+    }
 }
 
 impl SecretStore for FileEncryptedStore {
@@ -658,6 +699,34 @@ impl SecretStore for FileEncryptedStore {
 
     fn probe_recoverable(&self) -> Result<()> {
         self.resolve_key(ResolveMode::ReadOnly).map(|_| ())
+    }
+
+    fn set_raw(&self, key: &str, value: &str) -> Result<()> {
+        let master_key = self.resolve_key(ResolveMode::Recovering)?;
+        let encrypted = aead_seal(value.as_bytes(), &master_key[..])?;
+        atomic_write_0600(&self.raw_path_for(key), &encrypted)
+    }
+
+    fn get_raw(&self, key: &str) -> Result<Option<String>> {
+        match fs::read(self.raw_path_for(key)) {
+            Ok(bytes) => {
+                let master_key = self.resolve_key(ResolveMode::ReadOnly)?;
+                let plaintext = aead_open(&bytes, &master_key[..])?;
+                String::from_utf8(plaintext)
+                    .map(Some)
+                    .map_err(|e| SecretError::Crypto(format!("decrypted bytes not utf-8: {e}")))
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    fn delete_raw(&self, key: &str) -> Result<()> {
+        match fs::remove_file(self.raw_path_for(key)) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e.into()),
+        }
     }
 }
 
