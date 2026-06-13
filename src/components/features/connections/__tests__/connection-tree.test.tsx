@@ -27,7 +27,7 @@ describe('ConnectionPanel env color dot (read from useConnectionsV2)', () => {
 
     render(<ConnectionPanel />);
     await waitFor(() => expect(screen.getByText('prod-db')).toBeInTheDocument());
-    const dot = screen.getByTestId('conn-env-1');
+    const dot = screen.getByTestId('cl-env-1');
     expect(dot.style.background).toMatch(/#ef4444|rgb\(239, ?68, ?68\)/);
   });
 
@@ -44,7 +44,7 @@ describe('ConnectionPanel env color dot (read from useConnectionsV2)', () => {
 
     render(<ConnectionPanel />);
     await waitFor(() => expect(screen.getByText('no-tag')).toBeInTheDocument());
-    const dot = screen.getByTestId('conn-env-2');
+    const dot = screen.getByTestId('cl-env-2');
     expect(dot.style.background).toBe('');
   });
 });
