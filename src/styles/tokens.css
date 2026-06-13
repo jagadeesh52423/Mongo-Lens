@@ -72,5 +72,5 @@
   /* connections panel sticky metrics — heights used to stack sticky offsets
      (Connect launcher → connection header → database row). Tune ±2px if the
      launcher/row paddings change. */
-  --connect-btn-h: 56px; --conn-row-h: 30px;
+  --connect-btn-h: 56px; --conn-row-h: 30px; --search-bar-h: 38px;
 }

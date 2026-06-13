@@ -27,7 +27,7 @@
 /* Connected rows pin below any sticky header while their tree scrolls under. */
 .rowActive {
   position: sticky;
-  top: 0;
+  top: var(--search-bar-h);
   z-index: 2;
   background: var(--bg-panel);
 }
@@ -160,6 +160,7 @@
   width: 100%;
   box-sizing: border-box;
   padding: 5px var(--space-2);
+  line-height: 14px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg-input, var(--bg-elev-2));
