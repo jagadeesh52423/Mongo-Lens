@@ -60,6 +60,7 @@
 }
 .name {
   font-size: var(--fs-md);
+  line-height: 16px;
   font-weight: 600;
   color: var(--fg);
   overflow: hidden;
@@ -68,6 +69,7 @@
 }
 .sub {
   font-size: var(--fs-xs);
+  line-height: 13px;
   color: var(--fg-dim);
   font-family: var(--font-mono);
   overflow: hidden;

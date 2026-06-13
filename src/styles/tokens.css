@@ -71,5 +71,5 @@
 
   /* connections panel sticky metrics — heights used to stack sticky offsets
      (search bar → connection header → database row). Adjust if paddings change. */
-  --conn-row-h: 44px; --search-bar-h: 38px;
+  --conn-row-h: 41px; --search-bar-h: 38px;
 }
