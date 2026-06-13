@@ -106,6 +106,7 @@ export function ConnectionTree({ connectionId, onOpenCollection }: Props) {
     if (!db || !expanded[db]) return;
     const cols = collections[db];
     if (!cols || cols.length === 0) return;
+    e.stopPropagation();
 
     if (e.key === 'Enter') {
       if (selected && selected.db === db) {
