@@ -38,7 +38,7 @@ interface UseConnectionActions {
   // Expansion state for connected entries (so the tree opens automatically).
   expandedConns: Set<string>;
   toggleExpanded: (id: string) => void;
-  setExpanded: (next: Set<string>) => void;
+  setExpanded: (next: Set<string> | ((prev: Set<string>) => Set<string>)) => void;
 }
 
 /**
