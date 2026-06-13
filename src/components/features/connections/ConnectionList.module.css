@@ -157,6 +157,8 @@
   background: var(--bg-panel);
 }
 .search {
+  -webkit-appearance: none;
+  appearance: none;
   width: 100%;
   box-sizing: border-box;
   padding: 5px var(--space-2);

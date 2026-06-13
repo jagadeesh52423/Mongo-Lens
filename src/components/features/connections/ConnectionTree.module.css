@@ -17,12 +17,11 @@
   padding: 6px;
 }
 
-/* DB row sticks just below the connection row. The offset matches
-   --conn-row-h (declared on .row in ConnectionPanel.module.css). */
+/* DB row sticks below the search bar + connection header row. */
 .dbRow {
   position: sticky;
-  /* Stack under the sticky Connect launcher + the connection header row. */
-  top: calc(var(--connect-btn-h, 56px) + var(--conn-row-h, 30px));
+  /* search-bar (38px) + connection header (~44px) */
+  top: calc(var(--search-bar-h) + var(--conn-row-h));
   z-index: 1;
   background: var(--bg-panel);
 }

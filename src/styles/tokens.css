@@ -70,7 +70,6 @@
   --z-dropdown: 80; --z-dialog: 100; --z-tooltip: 120;
 
   /* connections panel sticky metrics — heights used to stack sticky offsets
-     (Connect launcher → connection header → database row). Tune ±2px if the
-     launcher/row paddings change. */
-  --connect-btn-h: 56px; --conn-row-h: 30px; --search-bar-h: 38px;
+     (search bar → connection header → database row). Adjust if paddings change. */
+  --conn-row-h: 44px; --search-bar-h: 38px;
 }
