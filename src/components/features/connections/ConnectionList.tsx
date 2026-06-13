@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Connection } from '../../../connection/model';
 import { connectionSummary } from './connectionSummary';
 import styles from './ConnectionList.module.css';
@@ -42,6 +42,12 @@ function ConnectionRow({
     highlighted ? styles.rowHighlighted : '',
   ].filter(Boolean).join(' ');
 
+  function handleMenuBtn(e: React.MouseEvent<HTMLButtonElement>) {
+    e.stopPropagation();
+    const rect = e.currentTarget.getBoundingClientRect();
+    onContextMenu(c, rect.right, rect.bottom);
+  }
+
   return (
     <li
       className={styles.item}
@@ -75,6 +81,14 @@ function ConnectionRow({
         </span>
         {c.ssh && <span className={styles.ssh} aria-label="SSH tunnel">SSH</span>}
         {isConnected && <span className={styles.live} aria-label="Connected" />}
+        <button
+          className={styles.menuBtn}
+          aria-label={`Options for ${c.name}`}
+          data-testid={`cl-menu-${c.id}`}
+          onClick={handleMenuBtn}
+          onKeyDown={(e) => e.stopPropagation()}
+          tabIndex={-1}
+        >⋯</button>
       </div>
       {isConnected && isExpanded && !searching && renderTree?.(c.id)}
     </li>
@@ -92,11 +106,20 @@ export function ConnectionList({
 }: Props) {
   const [query, setQuery] = useState('');
   const [prefixHighlight, setPrefixHighlight] = useState<string | null>(null);
+  const [disconnectedCollapsed, setDisconnectedCollapsed] = useState(false);
 
   const prefixBufRef = useRef('');
   const prefixTimerRef = useRef<number | null>(null);
   const rowRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const prevConnectedSizeRef = useRef(connectedIds.size);
+
+  useEffect(() => {
+    if (prevConnectedSizeRef.current === 0 && connectedIds.size > 0) {
+      setDisconnectedCollapsed(true);
+    }
+    prevConnectedSizeRef.current = connectedIds.size;
+  }, [connectedIds]);
 
   const needle = query.trim().toLowerCase();
   const filtered = needle
@@ -117,12 +140,30 @@ export function ConnectionList({
   function handleWrapperKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
     if (document.activeElement === searchInputRef.current) return;
     if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const visibleIds = [
+        ...active.map((c) => c.id),
+        ...(disconnectedCollapsed ? [] : available.map((c) => c.id)),
+      ];
+      if (visibleIds.length === 0) return;
+      const currentIdx = prefixHighlight !== null ? visibleIds.indexOf(prefixHighlight) : -1;
+      const nextIdx = e.key === 'ArrowDown'
+        ? (currentIdx + 1) % visibleIds.length
+        : currentIdx <= 0 ? visibleIds.length - 1 : currentIdx - 1;
+      const nextId = visibleIds[nextIdx];
+      setPrefixHighlight(nextId);
+      rowRefs.current.get(nextId)?.scrollIntoView?.({ block: 'nearest' });
+      return;
+    }
+
     if (e.key === 'Escape') {
       setPrefixHighlight(null);
       prefixBufRef.current = '';
       return;
     }
-    if (e.key.length !== 1 || !/^[A-Za-z0-9_.\-$ ]$/.test(e.key)) return;
+    if (e.key.length !== 1 || !/^[A-Za-z0-9_.\-$]$/.test(e.key)) return;
 
     e.preventDefault();
     if (prefixTimerRef.current) window.clearTimeout(prefixTimerRef.current);
@@ -130,6 +171,9 @@ export function ConnectionList({
     const prefix = prefixBufRef.current;
     const match = filtered.find((c) => c.name.toLowerCase().startsWith(prefix));
     if (match) {
+      if (!connectedIds.has(match.id) && disconnectedCollapsed) {
+        setDisconnectedCollapsed(false);
+      }
       setPrefixHighlight(match.id);
       rowRefs.current.get(match.id)?.scrollIntoView?.({ block: 'nearest' });
       rowRefs.current.get(match.id)?.focus();
@@ -144,7 +188,13 @@ export function ConnectionList({
   }
 
   function rowRefSetter(id: string) {
-    return (el: HTMLDivElement | null) => { rowRefs.current.set(id, el); };
+    return (el: HTMLDivElement | null) => {
+      if (el) {
+        rowRefs.current.set(id, el);
+      } else {
+        rowRefs.current.delete(id);
+      }
+    };
   }
 
   return (
@@ -165,7 +215,7 @@ export function ConnectionList({
       )}
       {active.length > 0 && (
         <>
-          <div className={styles.sectionLabel}>Active</div>
+          <div className={styles.sectionLabel}>CONNECTED</div>
           <ul className={styles.list} role="list">
             {active.map((c) => (
               <ConnectionRow
@@ -186,22 +236,34 @@ export function ConnectionList({
       )}
       {available.length > 0 && (
         <>
-          {active.length > 0 && <div className={styles.sectionLabel}>Available</div>}
-          <ul className={styles.list} role="list">
-            {available.map((c) => (
-              <ConnectionRow
-                key={c.id}
-                c={c}
-                isConnected={false}
-                isExpanded={false}
-                highlighted={prefixHighlight === c.id}
-                searching={false}
-                rowRef={rowRefSetter(c.id)}
-                onRowClick={handleRowClick}
-                onContextMenu={onItemContextMenu}
-              />
-            ))}
-          </ul>
+          <button
+            className={styles.sectionHeader}
+            onClick={() => setDisconnectedCollapsed((prev) => !prev)}
+            aria-expanded={!disconnectedCollapsed}
+            data-testid="disconnected-section-header"
+          >
+            <span className={styles.sectionCaret} aria-hidden="true">
+              {disconnectedCollapsed ? '▸' : '▾'}
+            </span>
+            {`DISCONNECTED (${available.length})`}
+          </button>
+          {!disconnectedCollapsed && (
+            <ul className={styles.list} role="list">
+              {available.map((c) => (
+                <ConnectionRow
+                  key={c.id}
+                  c={c}
+                  isConnected={false}
+                  isExpanded={false}
+                  highlighted={prefixHighlight === c.id}
+                  searching={false}
+                  rowRef={rowRefSetter(c.id)}
+                  onRowClick={handleRowClick}
+                  onContextMenu={onItemContextMenu}
+                />
+              ))}
+            </ul>
+          )}
         </>
       )}
     </div>

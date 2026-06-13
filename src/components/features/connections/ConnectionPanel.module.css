@@ -4,80 +4,6 @@
    Panel.Body (which never scrolls) instead of the real scroll port. */
 .body { overflow: visible !important; }
 
-.groupLabel {
-  font-size: var(--fs-xs);
-  letter-spacing: .08em;
-  text-transform: uppercase;
-  color: var(--fg-dim);
-  padding: var(--space-2) var(--space-3) var(--space-1);
-}
-
-.list {
-  list-style: none;
-  margin: 0;
-  padding: 0 var(--space-1);
-}
-
-.item {
-  display: flex;
-  flex-direction: column;
-}
-
-.row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: 6px var(--space-2);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  /* Sticky: the connection header pins just under the (sticky) Connect button
-     while its tree scrolls beneath. Opaque bg masks the scrolled content. */
-  position: sticky;
-  top: var(--connect-btn-h, 56px);
-  z-index: 2;
-  background: var(--bg-panel);
-  min-height: var(--conn-row-h, 30px);
-  box-sizing: border-box;
-  transition: background var(--dur-fast) var(--ease-standard);
-}
-/* Opaque hover (not the translucent --bg-hover) so sticky masking still holds. */
-.row:hover { background: var(--bg-elev-2); }
-
-.caret {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 12px;
-  font-size: 9px;
-  color: var(--fg-dim);
-}
-
-.env {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex: 0 0 auto;
-  background: var(--fg-dim);
-}
-
-.name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-weight: 600;
-}
-
-.live {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  flex: 0 0 auto;
-  background: var(--accent);
-  box-shadow: 0 0 7px var(--accent);
-}
-
 .errorSubtitle {
   margin: 0 0 var(--space-3);
   font-size: var(--fs-sm);
@@ -96,14 +22,4 @@
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-word;
-}
-
-.errorActions {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: var(--space-3);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .row { transition: none; }
 }

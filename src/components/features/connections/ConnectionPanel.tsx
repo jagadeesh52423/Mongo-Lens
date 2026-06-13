@@ -56,7 +56,11 @@ export function ConnectionPanel() {
     let unlisten: (() => void) | undefined;
     onSshSessionLost(({ connectionId }) => {
       markDisconnected(connectionId);
-      actions.setExpanded(new Set([...actions.expandedConns].filter((x) => x !== connectionId)));
+      actions.setExpanded((prev) => {
+        const next = new Set(prev);
+        next.delete(connectionId);
+        return next;
+      });
     })
       .then((fn) => { unlisten = fn; })
       .catch((e) => console.error('ssh_session_lost listener error:', e));
@@ -68,7 +72,9 @@ export function ConnectionPanel() {
   function menuItems(c: Connection): ContextMenuItem[] {
     const live = connectedIds.has(c.id);
     return [
-      ...(live ? [{ label: 'Disconnect', action: () => actions.disconnect(c) }] : []),
+      live
+        ? { label: 'Disconnect', action: () => actions.disconnect(c) }
+        : { label: 'Connect', action: () => actions.connect(c) },
       { label: 'Edit', action: () => setEditing(c) },
       { label: 'Duplicate', action: () => actions.duplicate(c) },
       { label: 'Delete', action: () => actions.remove(c) },

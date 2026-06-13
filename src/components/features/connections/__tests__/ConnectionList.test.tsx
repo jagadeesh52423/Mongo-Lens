@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ConnectionList } from '../ConnectionList';
 import type { Connection } from '../../../../connection/model';
@@ -141,39 +141,39 @@ describe('ConnectionList — skeleton', () => {
   it('activates the row via keyboard Enter', async () => {
     const user = userEvent.setup();
     const { onConnect } = setup();
-    await user.tab(); // focuses search input
-    await user.tab(); // focuses first row
+    screen.getByTestId('cl-row-1').focus();
     await user.keyboard('{Enter}');
     expect(onConnect).toHaveBeenCalledWith(expect.objectContaining({ id: '1' }));
   });
 });
 
 describe('ConnectionList — sections', () => {
-  it('shows an "Active" section label when there are connected items', () => {
+  it('shows a "CONNECTED" section label when there are connected items', () => {
     setup({ connectedIds: new Set(['1']) });
-    expect(screen.getByText('Active')).toBeInTheDocument();
+    expect(screen.getByText('CONNECTED')).toBeInTheDocument();
   });
 
-  it('does not show a section label when nothing is connected', () => {
+  it('does not show a "CONNECTED" section label when nothing is connected', () => {
     setup({ connectedIds: new Set() });
-    expect(screen.queryByText('Active')).not.toBeInTheDocument();
+    expect(screen.queryByText('CONNECTED')).not.toBeInTheDocument();
   });
 
-  it('shows "Available" section label only when both active and available items exist', () => {
+  it('shows "DISCONNECTED (n)" section header when there are available connections', () => {
     setup({
       connections: [conn('1', 'live'), conn('2', 'idle')],
       connectedIds: new Set(['1']),
     });
-    expect(screen.getByText('Active')).toBeInTheDocument();
-    expect(screen.getByText('Available')).toBeInTheDocument();
+    expect(screen.getByText('CONNECTED')).toBeInTheDocument();
+    expect(screen.getByTestId('disconnected-section-header')).toBeInTheDocument();
+    expect(screen.getByTestId('disconnected-section-header').textContent).toContain('DISCONNECTED (1)');
   });
 
-  it('does not show "Available" section label when all connections are available', () => {
+  it('shows "DISCONNECTED (n)" section header even when nothing is connected', () => {
     setup({
       connections: [conn('1', 'alpha'), conn('2', 'beta')],
       connectedIds: new Set(),
     });
-    expect(screen.queryByText('Available')).not.toBeInTheDocument();
+    expect(screen.getByTestId('disconnected-section-header').textContent).toContain('DISCONNECTED (2)');
   });
 
   it('renders a search input', () => {
@@ -220,7 +220,7 @@ describe('ConnectionList — search filter', () => {
     expect(screen.getByText('Production')).toBeInTheDocument();
   });
 
-  it('matches connections in both Active and Available sections', async () => {
+  it('matches connections in both CONNECTED and DISCONNECTED sections', async () => {
     const user = userEvent.setup();
     setup({
       connections: [conn('1', 'prod-live'), conn('2', 'prod-idle')],
@@ -259,6 +259,79 @@ describe('ConnectionList — auto-collapse when searching', () => {
     expect(screen.queryByTestId('tree-1')).not.toBeInTheDocument();
     await user.clear(input);
     expect(screen.getByTestId('tree-1')).toBeInTheDocument();
+  });
+});
+
+describe('ConnectionList — collapsible disconnected section', () => {
+  it('auto-collapses the disconnected section on first connect', async () => {
+    const { rerender } = render(
+      <ConnectionList
+        connections={[conn('1', 'alpha'), conn('2', 'beta')]}
+        connectedIds={new Set()}
+        expandedConns={new Set()}
+        onConnect={vi.fn()}
+        onToggleExpanded={vi.fn()}
+        onItemContextMenu={vi.fn()}
+      />,
+    );
+    // Both rows visible before connection
+    expect(screen.getByTestId('cl-row-1')).toBeInTheDocument();
+    expect(screen.getByTestId('cl-row-2')).toBeInTheDocument();
+
+    // First connection established
+    await act(async () => {
+      rerender(
+        <ConnectionList
+          connections={[conn('1', 'alpha'), conn('2', 'beta')]}
+          connectedIds={new Set(['1'])}
+          expandedConns={new Set()}
+          onConnect={vi.fn()}
+          onToggleExpanded={vi.fn()}
+          onItemContextMenu={vi.fn()}
+        />,
+      );
+    });
+
+    // Disconnected section should now be collapsed — beta row hidden
+    expect(screen.queryByTestId('cl-row-2')).not.toBeInTheDocument();
+    // Section header still visible
+    expect(screen.getByTestId('disconnected-section-header')).toBeInTheDocument();
+  });
+
+  it('toggles the disconnected section open/closed on header click', async () => {
+    const user = userEvent.setup();
+    setup({
+      connections: [conn('1', 'alpha'), conn('2', 'beta')],
+      connectedIds: new Set(['1']),
+    });
+    // Section starts expanded by default (no prior connect)
+    expect(screen.getByTestId('cl-row-2')).toBeInTheDocument();
+
+    // Click header to collapse
+    await user.click(screen.getByTestId('disconnected-section-header'));
+    expect(screen.queryByTestId('cl-row-2')).not.toBeInTheDocument();
+
+    // Click header again to expand
+    await user.click(screen.getByTestId('disconnected-section-header'));
+    expect(screen.getByTestId('cl-row-2')).toBeInTheDocument();
+  });
+
+  it('shows ▸ caret when disconnected section is collapsed', async () => {
+    const user = userEvent.setup();
+    setup({
+      connections: [conn('1', 'alpha'), conn('2', 'beta')],
+      connectedIds: new Set(['1']),
+    });
+    await user.click(screen.getByTestId('disconnected-section-header'));
+    expect(screen.getByTestId('disconnected-section-header').textContent).toContain('▸');
+  });
+
+  it('shows ▾ caret when disconnected section is expanded', () => {
+    setup({
+      connections: [conn('1', 'alpha'), conn('2', 'beta')],
+      connectedIds: new Set(['1']),
+    });
+    expect(screen.getByTestId('disconnected-section-header').textContent).toContain('▾');
   });
 });
 
@@ -326,5 +399,99 @@ describe('ConnectionList — keyboard prefix navigation', () => {
     expect(screen.getByTestId('cl-row-2')).toHaveAttribute('data-highlighted');
     await user.keyboard('{Escape}');
     expect(screen.getByTestId('cl-row-2')).not.toHaveAttribute('data-highlighted');
+  });
+
+  it('auto-expands the disconnected section when prefix matches a disconnected connection', async () => {
+    const user = userEvent.setup();
+    setup({
+      connections: [conn('1', 'alpha'), conn('2', 'beta')],
+      connectedIds: new Set(['1']),
+    });
+    // Collapse the disconnected section first
+    await user.click(screen.getByTestId('disconnected-section-header'));
+    expect(screen.queryByTestId('cl-row-2')).not.toBeInTheDocument();
+
+    // Type prefix that matches the disconnected connection
+    screen.getByTestId('cl-row-1').focus();
+    await user.keyboard('b');
+
+    // Section should auto-expand
+    expect(screen.getByTestId('cl-row-2')).toBeInTheDocument();
+    expect(screen.getByTestId('cl-row-2')).toHaveAttribute('data-highlighted');
+  });
+});
+
+describe('ConnectionList — ⋯ menu button', () => {
+  it('renders a ⋯ button for each connection row', () => {
+    setup({
+      connections: [conn('1', 'alpha'), conn('2', 'beta')],
+    });
+    expect(screen.getByTestId('cl-menu-1')).toBeInTheDocument();
+    expect(screen.getByTestId('cl-menu-2')).toBeInTheDocument();
+  });
+
+  it('clicking the ⋯ button triggers onItemContextMenu with connection and coords', async () => {
+    const user = userEvent.setup();
+    const { onItemContextMenu } = setup({
+      connections: [conn('1', 'alpha')],
+    });
+    await user.click(screen.getByTestId('cl-menu-1'));
+    expect(onItemContextMenu).toHaveBeenCalledWith(
+      expect.objectContaining({ id: '1' }),
+      expect.any(Number),
+      expect.any(Number),
+    );
+  });
+});
+
+describe('ConnectionList — arrow-key navigation', () => {
+  it('ArrowDown moves highlight to the next visible row', async () => {
+    const user = userEvent.setup();
+    setup({
+      connections: [conn('1', 'alpha'), conn('2', 'beta'), conn('3', 'gamma')],
+    });
+    screen.getByTestId('cl-row-1').focus();
+    // Highlight alpha first via prefix
+    await user.keyboard('a');
+    expect(screen.getByTestId('cl-row-1')).toHaveAttribute('data-highlighted');
+
+    // ArrowDown to next
+    await user.keyboard('{ArrowDown}');
+    expect(screen.getByTestId('cl-row-1')).not.toHaveAttribute('data-highlighted');
+    expect(screen.getByTestId('cl-row-2')).toHaveAttribute('data-highlighted');
+  });
+
+  it('ArrowUp moves highlight to the previous visible row', async () => {
+    const user = userEvent.setup();
+    setup({
+      connections: [conn('1', 'alpha'), conn('2', 'beta'), conn('3', 'gamma')],
+    });
+    screen.getByTestId('cl-row-1').focus();
+    // Highlight beta
+    await user.keyboard('b');
+    expect(screen.getByTestId('cl-row-2')).toHaveAttribute('data-highlighted');
+
+    // ArrowUp to previous
+    await user.keyboard('{ArrowUp}');
+    expect(screen.getByTestId('cl-row-2')).not.toHaveAttribute('data-highlighted');
+    expect(screen.getByTestId('cl-row-1')).toHaveAttribute('data-highlighted');
+  });
+
+  it('ArrowDown skips rows in the collapsed disconnected section', async () => {
+    const user = userEvent.setup();
+    setup({
+      connections: [conn('1', 'alpha'), conn('2', 'beta'), conn('3', 'gamma')],
+      connectedIds: new Set(['1']),
+    });
+    // Collapse the disconnected section
+    await user.click(screen.getByTestId('disconnected-section-header'));
+
+    screen.getByTestId('cl-row-1').focus();
+    await user.keyboard('a');
+    expect(screen.getByTestId('cl-row-1')).toHaveAttribute('data-highlighted');
+
+    // ArrowDown — only alpha is visible (disconnected collapsed), wraps to alpha
+    await user.keyboard('{ArrowDown}');
+    expect(screen.getByTestId('cl-row-1')).toHaveAttribute('data-highlighted');
   });
 });
