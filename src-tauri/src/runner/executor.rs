@@ -3,24 +3,49 @@ use crate::logger::Logger;
 use crate::runner::{harness_path, node_modules_dir, runner_dir};
 use serde::Serialize;
 use std::fs;
-use std::path::PathBuf;
+use std::io;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
 
 static NODE_PATH: OnceLock<String> = OnceLock::new();
 
-/// Bundled runner harness source, embedded at build time. The deploy-by-copy
-/// guard compares this against the installed `~/.mongomacapp/runner/harness.js`
-/// so a stale install (edited source never redeployed, or stale binary) is
-/// detected instead of silently running divergent code.
+/// Runtime JS modules the harness `require`s, each paired with its bundled
+/// (compile-time) source embedded via `include_str!`. The bundle and the binary
+/// are versioned together, so writing bundled → installed is always correct;
+/// the deploy-by-copy guard relies on that to self-heal a stale or partial
+/// `~/.mongomacapp/runner` left behind by an earlier build.
+///
+/// require graph: harness.js → logger.js → redact.js; harness.js → query-classifier.js.
+///
+/// To add a new runtime sibling: add an `include_str!` const below and one entry
+/// to `bundled_runtime_files()`. Both the clean install (`write_runner_files`)
+/// and the self-heal (`verify_runner_integrity`) iterate that list — no other edits.
 const BUNDLED_HARNESS: &str = include_str!("../../../runner/harness.js");
+const BUNDLED_LOGGER: &str = include_str!("../../../runner/logger.js");
+const BUNDLED_REDACT: &str = include_str!("../../../runner/redact.js");
+const BUNDLED_QUERY_CLASSIFIER: &str = include_str!("../../../runner/query-classifier.js");
+
+const RUNNER_PACKAGE_JSON: &str =
+    r#"{"name":"mongomacapp-runner","version":"1.0.0","dependencies":{"mongodb":"^6.8.0"}}"#;
+
+/// Single source of truth for the bundled runtime JS set. See the module-level
+/// docs above to add a file.
+fn bundled_runtime_files() -> [(&'static str, &'static str); 4] {
+    [
+        ("harness.js", BUNDLED_HARNESS),
+        ("logger.js", BUNDLED_LOGGER),
+        ("redact.js", BUNDLED_REDACT),
+        ("query-classifier.js", BUNDLED_QUERY_CLASSIFIER),
+    ]
+}
 
 // Run the integrity check at most once per process.
 static INTEGRITY_CHECKED: OnceLock<()> = OnceLock::new();
 
 /// Deploy-by-copy guard, run at most once per process. Public to the crate so
 /// the persistent-harness spawn path (`runner::harness`) triggers the same
-/// stale-install warning the legacy per-child spawn did.
+/// self-heal the legacy per-child spawn relied on.
 pub(crate) fn ensure_integrity_checked(logger: &dyn Logger) {
     INTEGRITY_CHECKED.get_or_init(|| verify_runner_integrity(logger));
 }
@@ -75,40 +100,21 @@ pub fn check_runner() -> RunnerStatus {
     }
 }
 
-/// Write the harness and its sibling runtime modules to `dir`, plus a fresh
-/// `package.json` describing the runner's npm deps. Pure file-system work so
-/// it can be unit-tested against a tempdir without invoking npm.
-///
-/// Bundles every JS file the harness `require`s at runtime:
-///   - `harness.js`  — entry point spawned by `runner::harness::HarnessHandle`
-///   - `logger.js`   — required by harness.js
-///   - `redact.js`   — required by logger.js
-///
-/// To add a new runtime sibling: drop it as a new `&str` arg, write it
-/// alongside the existing files, and pass the corresponding `include_str!`
-/// from `install_node_runner`. No other code changes needed.
-fn write_runner_files(
-    dir: &std::path::Path,
-    harness: &str,
-    logger_js: &str,
-    redact_js: &str,
-) -> Result<(), String> {
+/// Write every bundled runtime JS module plus a fresh `package.json` into `dir`.
+/// Pure file-system work (no npm), so it can be unit-tested against a tempdir.
+/// Does not touch `node_modules` — that is npm-managed by `install_runner`.
+fn write_runner_files(dir: &Path) -> Result<(), String> {
     fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-    fs::write(dir.join("harness.js"), harness).map_err(|e| e.to_string())?;
-    fs::write(dir.join("logger.js"), logger_js).map_err(|e| e.to_string())?;
-    fs::write(dir.join("redact.js"), redact_js).map_err(|e| e.to_string())?;
-    let pkg = r#"{"name":"mongomacapp-runner","version":"1.0.0","dependencies":{"mongodb":"^6.8.0"}}"#;
-    fs::write(dir.join("package.json"), pkg).map_err(|e| e.to_string())?;
+    for (name, content) in bundled_runtime_files() {
+        fs::write(dir.join(name), content).map_err(|e| e.to_string())?;
+    }
+    fs::write(dir.join("package.json"), RUNNER_PACKAGE_JSON).map_err(|e| e.to_string())?;
     Ok(())
 }
 
-pub fn install_runner(
-    bundled_harness: &str,
-    bundled_logger: &str,
-    bundled_redact: &str,
-) -> Result<(), String> {
+pub fn install_runner() -> Result<(), String> {
     let dir = runner_dir();
-    write_runner_files(&dir, bundled_harness, bundled_logger, bundled_redact)?;
+    write_runner_files(&dir)?;
     // Resolve npm next to node binary
     let node = resolve_node().ok_or("Node.js not found")?;
     let npm = PathBuf::from(node).parent().unwrap().join("npm");
@@ -133,28 +139,32 @@ pub fn check_node_runner() -> RunnerStatus {
 
 #[tauri::command]
 pub fn install_node_runner() -> Result<(), String> {
-    const LOGGER_JS: &str = include_str!("../../../runner/logger.js");
-    const REDACT_JS: &str = include_str!("../../../runner/redact.js");
-    install_runner(BUNDLED_HARNESS, LOGGER_JS, REDACT_JS)
+    install_runner()
 }
 
 #[derive(PartialEq, Debug)]
-enum HarnessIntegrity {
+enum FileIntegrity {
     Match,
     Drift,
+    Missing,
     Unreadable,
 }
 
-fn check_harness_integrity(installed: Option<&str>) -> HarnessIntegrity {
-    match installed {
-        Some(content) if content == BUNDLED_HARNESS => HarnessIntegrity::Match,
-        Some(_) => HarnessIntegrity::Drift,
-        None => HarnessIntegrity::Unreadable,
+/// Classify an installed runtime file against its bundled source. `Missing` (the
+/// file simply isn't there) is self-healable; `Unreadable` (a genuine I/O error
+/// — permission denied, a directory where the file should be) is not, so it is
+/// warned and left untouched rather than silently "healed".
+fn classify_file(read: &io::Result<String>, bundled: &str) -> FileIntegrity {
+    match read {
+        Ok(content) if content == bundled => FileIntegrity::Match,
+        Ok(_) => FileIntegrity::Drift,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => FileIntegrity::Missing,
+        Err(_) => FileIntegrity::Unreadable,
     }
 }
 
 // FNV-1a 64-bit — dependency-free short content fingerprint for log lines, so a
-// drift warning carries a comparable id without dumping whole files.
+// heal log carries a comparable id without dumping whole files.
 fn fingerprint(content: &str) -> String {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for byte in content.as_bytes() {
@@ -164,28 +174,82 @@ fn fingerprint(content: &str) -> String {
     format!("{hash:016x}")
 }
 
-/// Deploy-by-copy guard: warn loudly when the installed harness diverges from
-/// the bundled source. Run once per process (subsequent calls are no-ops).
-fn verify_runner_integrity(logger: &dyn Logger) {
-    let path = harness_path();
-    let installed = fs::read_to_string(&path).ok();
-    match check_harness_integrity(installed.as_deref()) {
-        HarnessIntegrity::Match => logger.debug("runner integrity ok", logctx! {
-            "fingerprint" => fingerprint(BUNDLED_HARNESS),
-        }),
-        HarnessIntegrity::Drift => logger.warn(
-            "RUNNER OUT OF DATE — installed harness.js differs from the bundled source. \
-             Run install_node_runner or `cp runner/harness.js ~/.mongomacapp/runner/harness.js`.",
-            logctx! {
-                "installed" => path.display().to_string(),
-                "installedFingerprint" => fingerprint(installed.as_deref().unwrap_or("")),
-                "bundledFingerprint" => fingerprint(BUNDLED_HARNESS),
+struct HealReport {
+    healed: Vec<&'static str>,
+    unreadable: Vec<&'static str>,
+}
+
+/// Rewrite each drifted or missing runtime file in `dir` from its bundled
+/// source; leave genuinely unreadable files untouched. `dir` must already exist
+/// (callers guard on the runner being installed). Pure file-system work so it is
+/// unit-testable against a tempdir.
+fn heal_runner_files(dir: &Path) -> HealReport {
+    let mut healed = Vec::new();
+    let mut unreadable = Vec::new();
+    for (name, bundled) in bundled_runtime_files() {
+        let path = dir.join(name);
+        match classify_file(&fs::read_to_string(&path), bundled) {
+            FileIntegrity::Match => {}
+            FileIntegrity::Drift | FileIntegrity::Missing => match fs::write(&path, bundled) {
+                Ok(()) => healed.push(name),
+                Err(_) => unreadable.push(name),
             },
-        ),
-        HarnessIntegrity::Unreadable => logger.warn(
-            "runner integrity check skipped — installed harness.js is unreadable",
-            logctx! { "installed" => path.display().to_string() },
-        ),
+            FileIntegrity::Unreadable => unreadable.push(name),
+        }
+    }
+    HealReport { healed, unreadable }
+}
+
+/// Deploy-by-copy guard, run once per process: self-heal any installed runtime
+/// JS that has drifted from — or gone missing relative to — the bundled source,
+/// so a stale `~/.mongomacapp/runner` from an earlier build cannot make the new
+/// binary spawn divergent code (the cause of "harness did not become ready"
+/// timeouts). Genuine read errors are warned, never overwritten.
+fn verify_runner_integrity(logger: &dyn Logger) {
+    let dir = runner_dir();
+    match dir.try_exists() {
+        Ok(true) => {}
+        Ok(false) => {
+            logger.debug(
+                "runner integrity check skipped — runner not installed",
+                logctx! { "dir" => dir.display().to_string() },
+            );
+            return;
+        }
+        Err(e) => {
+            logger.warn(
+                "runner integrity check skipped — runner dir unreadable",
+                logctx! { "dir" => dir.display().to_string(), "error" => e.to_string() },
+            );
+            return;
+        }
+    }
+
+    let report = heal_runner_files(&dir);
+    if !report.healed.is_empty() {
+        logger.info(
+            "runner self-healed — rewrote stale/missing harness files from the bundled source",
+            logctx! {
+                "healed" => report.healed.join(","),
+                "dir" => dir.display().to_string(),
+                "bundledHarnessFingerprint" => fingerprint(BUNDLED_HARNESS),
+            },
+        );
+    }
+    if !report.unreadable.is_empty() {
+        logger.warn(
+            "runner integrity — harness files unreadable, left as-is (check permissions)",
+            logctx! {
+                "unreadable" => report.unreadable.join(","),
+                "dir" => dir.display().to_string(),
+            },
+        );
+    }
+    if report.healed.is_empty() && report.unreadable.is_empty() {
+        logger.debug(
+            "runner integrity ok",
+            logctx! { "fingerprint" => fingerprint(BUNDLED_HARNESS) },
+        );
     }
 }
 
@@ -195,44 +259,113 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn write_runner_files_creates_required_runtime_files() {
-        // Regression test for B-1: a clean install must produce every JS file
-        // the harness requires at runtime, not just harness.js.
-        let d = tempdir().unwrap();
-        write_runner_files(d.path(), "/* harness */", "/* logger */", "/* redact */")
-            .unwrap();
-        for required in ["harness.js", "logger.js", "redact.js", "package.json"] {
+    fn write_runner_files_creates_every_runtime_file() {
+        // Regression for B-1: a clean install must produce every JS file the
+        // harness requires at runtime — including query-classifier.js, which was
+        // previously omitted — not just harness.js.
+        let dir = tempdir().unwrap();
+        write_runner_files(dir.path()).unwrap();
+        for required in [
+            "harness.js",
+            "logger.js",
+            "redact.js",
+            "query-classifier.js",
+            "package.json",
+        ] {
             assert!(
-                d.path().join(required).is_file(),
+                dir.path().join(required).is_file(),
                 "expected {required} to be written into runner dir"
             );
         }
     }
 
     #[test]
-    fn write_runner_files_writes_exact_content() {
-        let d = tempdir().unwrap();
-        write_runner_files(d.path(), "H", "L", "R").unwrap();
-        assert_eq!(fs::read_to_string(d.path().join("harness.js")).unwrap(), "H");
-        assert_eq!(fs::read_to_string(d.path().join("logger.js")).unwrap(), "L");
-        assert_eq!(fs::read_to_string(d.path().join("redact.js")).unwrap(), "R");
+    fn write_runner_files_writes_exact_bundled_content() {
+        let dir = tempdir().unwrap();
+        write_runner_files(dir.path()).unwrap();
+        for (name, bundled) in bundled_runtime_files() {
+            assert_eq!(
+                fs::read_to_string(dir.path().join(name)).unwrap(),
+                bundled,
+                "{name} content must match the bundled source"
+            );
+        }
     }
 
     #[test]
-    fn integrity_matches_when_installed_equals_bundled() {
+    fn classify_file_matches_when_installed_equals_bundled() {
+        let read: io::Result<String> = Ok(BUNDLED_HARNESS.to_string());
+        assert_eq!(classify_file(&read, BUNDLED_HARNESS), FileIntegrity::Match);
+    }
+
+    #[test]
+    fn classify_file_reports_drift_for_differing_content() {
+        let read: io::Result<String> = Ok("stale harness".to_string());
+        assert_eq!(classify_file(&read, BUNDLED_HARNESS), FileIntegrity::Drift);
+    }
+
+    #[test]
+    fn classify_file_distinguishes_missing_from_unreadable() {
+        let missing: io::Result<String> = Err(io::Error::from(io::ErrorKind::NotFound));
+        assert_eq!(classify_file(&missing, "x"), FileIntegrity::Missing);
+
+        let unreadable: io::Result<String> = Err(io::Error::from(io::ErrorKind::PermissionDenied));
+        assert_eq!(classify_file(&unreadable, "x"), FileIntegrity::Unreadable);
+    }
+
+    #[test]
+    fn heal_rewrites_drifted_file_to_bundled_content() {
+        let dir = tempdir().unwrap();
+        // Seed every file with bundled content, then drift one.
+        write_runner_files(dir.path()).unwrap();
+        fs::write(dir.path().join("query-classifier.js"), "// STALE").unwrap();
+
+        let report = heal_runner_files(dir.path());
+
+        assert!(report.healed.contains(&"query-classifier.js"));
+        assert!(report.unreadable.is_empty());
         assert_eq!(
-            check_harness_integrity(Some(BUNDLED_HARNESS)),
-            HarnessIntegrity::Match
+            fs::read_to_string(dir.path().join("query-classifier.js")).unwrap(),
+            BUNDLED_QUERY_CLASSIFIER
         );
     }
 
     #[test]
-    fn integrity_reports_drift_and_unreadable() {
-        assert_eq!(
-            check_harness_integrity(Some("stale harness")),
-            HarnessIntegrity::Drift
-        );
-        assert_eq!(check_harness_integrity(None), HarnessIntegrity::Unreadable);
+    fn heal_writes_missing_file() {
+        let dir = tempdir().unwrap();
+        // Empty existing dir: every runtime file is missing and must be installed.
+        let report = heal_runner_files(dir.path());
+
+        for (name, bundled) in bundled_runtime_files() {
+            assert!(report.healed.contains(&name), "{name} should have been healed");
+            assert_eq!(fs::read_to_string(dir.path().join(name)).unwrap(), bundled);
+        }
+        assert!(report.unreadable.is_empty());
+    }
+
+    #[test]
+    fn heal_is_noop_when_all_files_match() {
+        let dir = tempdir().unwrap();
+        write_runner_files(dir.path()).unwrap();
+
+        let report = heal_runner_files(dir.path());
+
+        assert!(report.healed.is_empty(), "nothing should be rewritten when in sync");
+        assert!(report.unreadable.is_empty());
+    }
+
+    #[test]
+    fn heal_warns_on_unreadable_file_without_panicking() {
+        let dir = tempdir().unwrap();
+        // A directory where redact.js should be makes read_to_string fail with a
+        // non-NotFound error (and fs::write fail too) — must be left untouched.
+        fs::create_dir(dir.path().join("redact.js")).unwrap();
+
+        let report = heal_runner_files(dir.path());
+
+        assert!(report.unreadable.contains(&"redact.js"));
+        assert!(!report.healed.contains(&"redact.js"));
+        assert!(dir.path().join("redact.js").is_dir(), "unreadable path must be left as-is");
     }
 
     #[test]
