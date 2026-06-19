@@ -251,6 +251,22 @@ pub struct ResolvedConnection<'a> {
     pub aws_secret_key: Option<String>,
 }
 
+#[cfg(test)]
+impl<'a> ResolvedConnection<'a> {
+    /// A resolved connection carrying no secrets — for tests that exercise URI
+    /// / options synthesis on connections that need none.
+    pub fn bare(conn: &'a Connection) -> Self {
+        ResolvedConnection {
+            conn,
+            auth_password: None,
+            ssh_password: None,
+            ssh_key_passphrase: None,
+            proxy_password: None,
+            aws_secret_key: None,
+        }
+    }
+}
+
 
 // ──────────────────────────────────────────────────────────────────────────
 // Entry point

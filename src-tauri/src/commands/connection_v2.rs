@@ -32,6 +32,7 @@ use crate::connection::store;
 use crate::logctx;
 use crate::logger::Logger;
 use crate::prefs;
+use crate::runner::{HarnessHandle, RunnerCredential};
 use crate::ssh::TunnelHandle;
 use crate::state::AppState;
 use mongodb::bson::doc;
@@ -595,8 +596,14 @@ async fn handle_session_loss_v2(
     let client: Option<Client> = state.mongo_clients.lock().unwrap().remove(&connection_id);
     state.mongo_uris.lock().unwrap().remove(&connection_id);
     state.mongo_runner_creds.lock().unwrap().remove(&connection_id);
+    let harness = state.harness_procs.lock().unwrap().remove(&connection_id);
     let tunnel: Option<TunnelHandle> = state.ssh_tunnels.lock().unwrap().remove(&connection_id);
 
+    // The tunnel is already dead, so the harness can't reach Mongo — tear it
+    // down with the rest of the connection's state.
+    if let Some(handle) = harness {
+        shutdown_harness_blocking(handle, log.clone()).await;
+    }
     if let Some(c) = client {
         let _ = tokio::time::timeout(std::time::Duration::from_secs(3), c.shutdown()).await;
     }
@@ -702,6 +709,75 @@ impl SecretBag {
             aws_secret_key: self.aws_secret_key,
         }
     }
+}
+
+/// Fallback database the harness's persistent MongoClient targets via
+/// `client.db()` when a run request somehow omits its own `db`. Every
+/// `run_script` request DOES carry an explicit db, so this is only the
+/// harness's idle default — `admin` is always reachable. Prefer the auth db
+/// when the connection has one (matches `default_db_for_unauthorized`).
+fn default_query_db(connection: &Connection) -> String {
+    use crate::connection::model::AuthMode;
+    match &connection.auth {
+        AuthMode::Scram { auth_db, .. } | AuthMode::LegacyCr { auth_db, .. }
+            if !auth_db.is_empty() =>
+        {
+            auth_db.clone()
+        }
+        _ => "admin".to_string(),
+    }
+}
+
+/// Spawn the persistent harness off the async executor. `HarnessHandle::spawn`
+/// blocks on the child's `__ready` reply (synchronous stdin/stdout + a bounded
+/// wait), so it must run on a blocking thread — never on a tokio worker.
+async fn spawn_harness_blocking(
+    uri: &str,
+    default_db: &str,
+    logs_dir: &std::path::Path,
+    level: &str,
+    run_id: &str,
+    cred: Option<&RunnerCredential>,
+    logger: Arc<dyn Logger>,
+) -> Result<HarnessHandle, String> {
+    let node = crate::runner::executor::resolve_node()
+        .ok_or("Node.js not found — check node installation")?;
+    let (uri, default_db, logs_dir, level, run_id) = (
+        uri.to_string(),
+        default_db.to_string(),
+        logs_dir.to_path_buf(),
+        level.to_string(),
+        run_id.to_string(),
+    );
+    let cred = cred.cloned();
+    tokio::task::spawn_blocking(move || {
+        HarnessHandle::spawn(
+            node,
+            &uri,
+            &default_db,
+            &logs_dir,
+            &level,
+            &run_id,
+            cred.as_ref(),
+            logger,
+        )
+    })
+    .await
+    .map_err(|e| format!("harness spawn task panicked: {e}"))?
+}
+
+/// Grace window between the harness `shutdown` frame and a SIGKILL when
+/// tearing one down on disconnect / session loss.
+const HARNESS_SHUTDOWN_GRACE: std::time::Duration = std::time::Duration::from_millis(750);
+
+/// Tear a harness down off the async executor. `HarnessHandle::shutdown` does
+/// synchronous I/O + a bounded wait, so it must not run on a tokio worker.
+/// Drops the last `Arc` once the child is reaped.
+async fn shutdown_harness_blocking(handle: Arc<HarnessHandle>, logger: Arc<dyn Logger>) {
+    let _ = tokio::task::spawn_blocking(move || {
+        handle.shutdown(HARNESS_SHUTDOWN_GRACE, logger.as_ref());
+    })
+    .await;
 }
 
 /// Connect to a MongoDB instance configured by the v2 model, optionally
@@ -897,7 +973,11 @@ pub async fn connections_v2_connect(
     //    then insert the new pair. Holding the Mutex across `.shutdown()`
     //    / `.close()` would block the executor — release before awaiting.
     let prior_client = state.mongo_clients.lock().unwrap().remove(&id);
+    let prior_harness = state.harness_procs.lock().unwrap().remove(&id);
     let prior_tunnel = state.ssh_tunnels.lock().unwrap().remove(&id);
+    if let Some(handle) = prior_harness {
+        shutdown_harness_blocking(handle, log.clone()).await;
+    }
     if let Some(c) = prior_client {
         let _ = tokio::time::timeout(std::time::Duration::from_secs(3), c.shutdown()).await;
     }
@@ -920,12 +1000,71 @@ pub async fn connections_v2_connect(
 
     // Store the runner credential alongside the URI so the Node child process
     // can authenticate. Only present for password-based modes; None is a no-op.
-    if let Some(cred) = crate::connection::builder::runner_credential(&resolved) {
+    let runner_cred = crate::connection::builder::runner_credential(&resolved);
+    if let Some(cred) = runner_cred.clone() {
         state
             .mongo_runner_creds
             .lock()
             .unwrap()
             .insert(id.clone(), cred);
+    }
+
+    // Spawn the long-lived harness for this connection. One process, reused by
+    // every run_script until disconnect. A spawn/ready failure is a real
+    // connect failure: the user picked "Connect", and a connection that can't
+    // run queries isn't usable. Tear down the driver client + tunnel we just
+    // brought up (pool before tunnel) and surface the error, rather than
+    // leaving a half-live connection whose first query mysteriously fails.
+    {
+        let default_db = default_query_db(&connection);
+        let level = std::env::var("MONGOMACAPP_LOG_LEVEL").unwrap_or_else(|_| "info".into());
+        let run_id = Uuid::new_v4().to_string();
+        let spawn_uri = state
+            .mongo_uris
+            .lock()
+            .unwrap()
+            .get(&id)
+            .cloned()
+            .unwrap_or_default();
+        match spawn_harness_blocking(
+            &spawn_uri,
+            &default_db,
+            &state.logs_dir,
+            &level,
+            &run_id,
+            runner_cred.as_ref(),
+            log.clone(),
+        )
+        .await
+        {
+            Ok(handle) => {
+                state
+                    .harness_procs
+                    .lock()
+                    .unwrap()
+                    .insert(id.clone(), Arc::new(handle));
+            }
+            Err(e) => {
+                log.warn(
+                    "connections_v2_connect: harness spawn failed",
+                    logctx! { "err" => e.clone() },
+                );
+                let client = state.mongo_clients.lock().unwrap().remove(&id);
+                state.mongo_uris.lock().unwrap().remove(&id);
+                state.mongo_runner_creds.lock().unwrap().remove(&id);
+                if let Some(c) = client {
+                    let _ = tokio::time::timeout(
+                        std::time::Duration::from_secs(3),
+                        c.shutdown(),
+                    )
+                    .await;
+                }
+                if let Some(t) = tunnel {
+                    t.close().await;
+                }
+                return Err(format!("query runner failed to start: {e}"));
+            }
+        }
     }
 
     if let Some(t) = tunnel {
@@ -965,11 +1104,20 @@ pub async fn connections_v2_disconnect(
     });
     log.info("connections_v2_disconnect", logctx! {});
 
-    // Drain the client + uri + runner-cred entries first (I-2: pool before tunnel).
-    // Drop the Mutex before awaiting shutdown — never hold across await.
+    // Drain the client + uri + runner-cred + harness entries first
+    // (I-2: pool before tunnel). Drop the Mutex before awaiting shutdown —
+    // never hold across await.
     let client = state.mongo_clients.lock().unwrap().remove(&id);
     state.mongo_uris.lock().unwrap().remove(&id);
     state.mongo_runner_creds.lock().unwrap().remove(&id);
+    let harness = state.harness_procs.lock().unwrap().remove(&id);
+
+    // Tear the harness down (shutdown frame + grace, then SIGKILL). Synchronous
+    // I/O, so it runs on a blocking thread. Before the driver pool so the
+    // harness's own MongoClient closes first.
+    if let Some(handle) = harness {
+        shutdown_harness_blocking(handle, log.clone()).await;
+    }
 
     if let Some(c) = client {
         let _ = tokio::time::timeout(std::time::Duration::from_secs(3), c.shutdown()).await;
