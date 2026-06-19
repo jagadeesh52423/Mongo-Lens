@@ -1,15 +1,12 @@
 use crate::connection::store as connection_store;
 use crate::logctx;
 use crate::mongo;
-use crate::runner::executor::spawn_script;
-use crate::state::AppState;
+use crate::runner::HarnessHandle;
+use crate::state::{ActiveRun, AppState};
 use serde::Serialize;
-use std::io::{BufRead, BufReader, Write};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use std::time::Instant;
+use std::sync::mpsc::{Receiver, RecvTimeoutError};
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, State};
-use tokio::time::{timeout, Duration};
 
 const SCRIPT_TIMEOUT_SECS: u64 = 30;
 
@@ -40,6 +37,10 @@ pub struct ScriptEvent {
     pub log: Option<String>,
 }
 
+/// Cancel the in-flight run on `tab_id`. With the persistent harness this sends
+/// a `cancel` frame to the connection's harness (which stops the run and emits
+/// a terminal `__done`) instead of killing a process — the harness and its
+/// Mongo connection are reused across queries.
 #[tauri::command]
 pub fn cancel_script(state: State<'_, AppState>, tab_id: String) -> Result<(), String> {
     let log = state.logger.child(logctx! {
@@ -47,9 +48,16 @@ pub fn cancel_script(state: State<'_, AppState>, tab_id: String) -> Result<(), S
         "tabId" => tab_id.clone(),
     });
     log.info("cancel_script", logctx! {});
-    let mut scripts = state.active_scripts.lock().unwrap();
-    if let Some(flag) = scripts.remove(&tab_id) {
-        flag.store(true, Ordering::Relaxed);
+
+    let active = state.active_scripts.lock().unwrap().get(&tab_id).cloned();
+    let Some(active) = active else {
+        // No in-flight run for this tab — nothing to cancel.
+        return Ok(());
+    };
+    if let Some(handle) = mongo::active_harness(&state, &active.connection_id) {
+        if let Err(e) = handle.send_cancel(&active.request_id) {
+            log.warn("cancel_script: send_cancel failed", logctx! { "err" => e });
+        }
     }
     Ok(())
 }
@@ -86,31 +94,19 @@ pub async fn run_script(
         "script" => script.clone(),          // redacted inside the logger
     });
 
-    // Re-use the URI that the v2 connect path already validated and
-    // stored. That URI has any SSH-tunnel rewrites and fallback params
-    // (directConnection / tls) applied, so the Node runner connects with
-    // the exact same string the Rust driver succeeded with — no extra
-    // SDAM round-trip, no repeat of the legacy 30s fallback.
-    //
-    // If `active_uri` is None, the connection was never connected (or was
-    // disconnected behind our back). The dialog requires Connect before
-    // Run; reaching this path means the UI is out of sync. Error
-    // explicitly rather than re-deriving a URI from scratch — the prior
-    // re-derive path leaked legacy `ConnectionRecord` shape into the v2
-    // world and silently used stale keychain creds.
-    let uri = mongo::active_uri(&state, &connection_id).ok_or_else(|| {
-        log.error("connection not established (no active URI)", logctx! {});
-        "connection not established — connect first".to_string()
-    })?;
-
-    // Fetch the runner credential (if any) for this connection. Only present
-    // for password-based auth modes; None for X509 / no-auth / URI-embedded
-    // creds. Intentionally not logged — password must stay out of log output.
-    let cred = mongo::active_runner_cred(&state, &connection_id);
+    // Get the connection's persistent harness, respawning lazily if it crashed
+    // or was never spawned. `ensure_harness` errors when the connection isn't
+    // active (no cached URI) — the dialog requires Connect before Run, so that
+    // means the UI is out of sync; surface it explicitly.
+    let harness = mongo::ensure_harness(&state, &connection_id, &database, state.logger.clone())
+        .await
+        .map_err(|e| {
+            log.error("harness unavailable", logctx! { "err" => e.clone() });
+            e
+        })?;
 
     // For diagnostics only — derive a one-line "where" string from the v2
-    // model. Failure to look up the connection here is non-fatal (we have
-    // a working URI already); just emit a tag-free debug log.
+    // model. Failure to look up the connection here is non-fatal.
     if let Ok(conn) = state.open_db() {
         if let Ok(Some(c)) = connection_store::get(&conn, &connection_id) {
             log.debug(
@@ -120,300 +116,323 @@ pub async fn run_script(
         }
     }
 
-    // Write the query to a 0600 temp file inside the app data dir (~/.mongomacapp)
-    // rather than world-readable /tmp. NamedTempFile deletes on drop, so the
-    // plaintext query never outlives the command — even on panic/timeout/cancel.
-    // The `tmp_script` guard is held in this outer scope until the child exits.
-    let app_data_dir = state
-        .db_path
-        .parent()
-        .map(std::path::Path::to_path_buf)
-        .unwrap_or_else(std::env::temp_dir);
-    let tmp_script = write_temp_script(&app_data_dir, &script).map_err(|e| {
-        log.error("write tmp script failed", logctx! { "err" => e.to_string() });
-        e.to_string()
-    })?;
-    let script_path = tmp_script.path().to_path_buf();
-    log.debug("script written", logctx! { "path" => script_path.display().to_string() });
+    // tabId is the cancel correlation key; the request id is unique per run so
+    // a stale response from a prior run on the same tab can't collide in the
+    // harness demux map. If a previous run on this tab is still in flight, tell
+    // the harness to cancel it before starting the new one (the harness runs
+    // requests serially, so a lingering prior run would otherwise block ours).
+    let req_id = uuid::Uuid::new_v4().to_string();
+    {
+        let prior = state.active_scripts.lock().unwrap().insert(
+            tab_id.clone(),
+            ActiveRun {
+                connection_id: connection_id.clone(),
+                request_id: req_id.clone(),
+            },
+        );
+        if let Some(prior) = prior {
+            let _ = harness.send_cancel(&prior.request_id);
+        }
+    }
 
-    let run_id_str = run_id.clone().unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-    let tab_id_arc: Arc<String> = Arc::new(tab_id.clone());
-    let run_id_arc: Arc<Option<String>> = Arc::new(Some(run_id_str.clone()));
-    let app_handle = app.clone();
+    let run_id_str = run_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let start = Instant::now();
 
-    // Cancel any previously running script on this tab, then register the new flag.
-    let cancel_flag = Arc::new(AtomicBool::new(false));
-    {
-        let mut scripts = state.active_scripts.lock().unwrap();
-        if let Some(old_flag) = scripts.remove(&*tab_id_arc) {
-            old_flag.store(true, Ordering::Relaxed);
-        }
-        scripts.insert((*tab_id_arc).clone(), cancel_flag.clone());
-    }
-
-    let level = std::env::var("MONGOMACAPP_LOG_LEVEL").unwrap_or_else(|_| "info".into());
-
-    // Body wrapped so the cancel-flag cleanup below always runs, even when
-    // spawn_script or the stdout/stderr taps fail with `?`. The temp script
-    // file is cleaned up by the `tmp_script` RAII guard on scope exit.
-    let result: Result<(), String> = async {
-        let mut child = spawn_script(
-            &uri,
-            &database,
-            &script_path,
-            page,
-            page_size,
-            &run_id_str,
-            &state.logs_dir,
-            &level,
-            state.logger.clone(),
-            cred.as_ref(),
-        )?;
-        log.info("child spawned", logctx! { "pid" => child.id() });
-        let stdout = child.stdout.take().ok_or_else(|| {
-            log.error("no stdout", logctx! {});
-            "no stdout".to_string()
-        })?;
-        let stderr = child.stderr.take().ok_or_else(|| {
-            log.error("no stderr", logctx! {});
-            "no stderr".to_string()
-        })?;
-
-        let stdout_handle = {
-            let ah = app_handle.clone();
-            let tab = tab_id_arc.clone();
-            let rid = run_id_arc.clone();
-            std::thread::spawn(move || {
-                let reader = BufReader::new(stdout);
-                for line in reader.lines().flatten() {
-                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
-                        if let Some(pg) = v.get("__pagination") {
-                            if let (Some(total), Some(page_val), Some(page_size_val)) = (
-                                pg.get("total").and_then(|x| x.as_i64()),
-                                pg.get("page").and_then(|x| x.as_u64()),
-                                pg.get("pageSize").and_then(|x| x.as_u64()),
-                            ) {
-                                let evt = ScriptEvent {
-                                    tab_id: (*tab).clone(),
-                                    kind: "pagination".into(),
-                                    group_index: None,
-                                    docs: None,
-                                    error: None,
-                                    execution_ms: None,
-                                    pagination: Some(PaginationInfo {
-                                        total,
-                                        page: page_val as u32,
-                                        page_size: page_size_val as u32,
-                                    }),
-                                    run_id: (*rid).clone(),
-                                    collection: None,
-                                    category: None,
-                                    log: None,
-                                };
-                                let _ = ah.emit("script-event", evt);
-                            }
-                        } else if let Some(message) = v
-                            .get("__log")
-                            .and_then(|x| x.get("message"))
-                            .and_then(|x| x.as_str())
-                        {
-                            let evt = ScriptEvent {
-                                tab_id: (*tab).clone(),
-                                kind: "log".into(),
-                                group_index: None,
-                                docs: None,
-                                error: None,
-                                execution_ms: None,
-                                pagination: None,
-                                run_id: (*rid).clone(),
-                                collection: None,
-                                category: None,
-                                log: Some(message.to_string()),
-                            };
-                            let _ = ah.emit("script-event", evt);
-                        } else if let (Some(idx), Some(docs)) = (
-                            v.get("__group").and_then(|x| x.as_i64()),
-                            v.get("docs"),
-                        ) {
-                            let collection = v
-                                .get("collection")
-                                .and_then(|x| x.as_str())
-                                .map(|s| s.to_string());
-                            let category = v
-                                .get("category")
-                                .and_then(|x| x.as_str())
-                                .map(|s| s.to_string());
-                            let evt = ScriptEvent {
-                                tab_id: (*tab).clone(),
-                                kind: "group".into(),
-                                group_index: Some(idx),
-                                docs: Some(docs.clone()),
-                                error: None,
-                                execution_ms: None,
-                                pagination: None,
-                                run_id: (*rid).clone(),
-                                collection,
-                                category,
-                                log: None,
-                            };
-                            let _ = ah.emit("script-event", evt);
-                        }
-                    }
-                }
-            })
-        };
-
-        let stderr_handle = {
-            let ah = app_handle.clone();
-            let tab = tab_id_arc.clone();
-            let rid = run_id_arc.clone();
-            let err_log = log.child(logctx! {});
-            std::thread::spawn(move || {
-                let reader = BufReader::new(stderr);
-                for line in reader.lines().flatten() {
-                    let parsed = serde_json::from_str::<serde_json::Value>(&line).ok();
-                    // __debug lines are diagnostic only — log to backend.log, not UI
-                    if let Some(msg) = parsed.as_ref().and_then(|v| v.get("__debug")).and_then(|v| v.as_str()) {
-                        err_log.debug(msg, logctx! {});
-                        continue;
-                    }
-                    let err = parsed
-                        .and_then(|v| v.get("__error").and_then(|e| e.as_str()).map(|s| s.to_string()))
-                        .unwrap_or(line);
-                    let evt = ScriptEvent {
-                        tab_id: (*tab).clone(),
-                        kind: "error".into(),
-                        group_index: None,
-                        docs: None,
-                        error: Some(err),
-                        execution_ms: None,
-                        pagination: None,
-                        run_id: (*rid).clone(),
-                        collection: None,
-                        category: None,
-                        log: None,
-                    };
-                    let _ = ah.emit("script-event", evt);
-                }
-            })
-        };
-
-        let wait_result = timeout(Duration::from_secs(SCRIPT_TIMEOUT_SECS), async {
-            loop {
-                if cancel_flag.load(Ordering::Relaxed) {
-                    // SIGTERM + grace before SIGKILL so the harness can close its
-                    // Mongo connection; terminate_child reaps the child itself.
-                    crate::runner::executor::terminate_child(&mut child);
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::Interrupted,
-                        "cancelled",
-                    ));
-                }
-                match child.try_wait() {
-                    Ok(Some(status)) => return Ok(status),
-                    Ok(None) => tokio::time::sleep(Duration::from_millis(50)).await,
-                    Err(e) => return Err(e),
-                }
-            }
+    // Send the run request and stream responses on a blocking thread (the
+    // harness response channel is a std mpsc, drained synchronously). The
+    // closure owns everything it needs and emits `script-event`s in the exact
+    // shape the per-child model produced, so the frontend is unchanged.
+    let outcome = {
+        let app_handle = app.clone();
+        let tab = tab_id.clone();
+        let run_id_for_thread = run_id_str.clone();
+        let harness_for_thread = harness.clone();
+        let req_for_thread = req_id.clone();
+        let db = database.clone();
+        let script = script.clone();
+        let stream_log = log.child(logctx! {});
+        tokio::task::spawn_blocking(move || {
+            stream_run(
+                &harness_for_thread,
+                &req_for_thread,
+                &db,
+                &script,
+                page,
+                page_size,
+                &app_handle,
+                &tab,
+                &run_id_for_thread,
+                start,
+                &*stream_log,
+            )
         })
-        .await;
+        .await
+        .unwrap_or(RunOutcome::Error("run stream task panicked".to_string()))
+    };
 
-        match wait_result {
-            Ok(Ok(status)) => {
-                let _ = stdout_handle.join();
-                let _ = stderr_handle.join();
-                let elapsed = start.elapsed().as_millis();
-                log.info("run_script done", logctx! {
-                    "ok" => status.success(),
-                    "elapsedMs" => elapsed.to_string(),
-                });
-                let done = ScriptEvent {
-                    tab_id: (*tab_id_arc).clone(),
-                    kind: "done".into(),
-                    group_index: None,
-                    docs: None,
-                    error: if status.success() { None } else { Some("exited with error".into()) },
-                    execution_ms: Some(elapsed),
-                    pagination: None,
-                    run_id: (*run_id_arc).clone(),
-                    collection: None,
-                    category: None,
-                    log: None,
-                };
-                let _ = app_handle.emit("script-event", done);
-                Ok(())
-            }
-            Ok(Err(e)) => {
-                let _ = stdout_handle.join();
-                let _ = stderr_handle.join();
-                if e.kind() == std::io::ErrorKind::Interrupted {
-                    log.info("run_script cancelled", logctx! {});
-                    // Intentional cancel — frontend handles via handleCancel.
-                    Ok(())
-                } else {
-                    log.error("wait failed", logctx! { "err" => e.to_string() });
-                    Err(e.to_string())
-                }
-            }
-            Err(_) => {
-                // SIGTERM + grace before SIGKILL (lets the harness close its Mongo
-                // connection), reaping the child so its stdout/stderr pipes flush EOF
-                // before we join the readers. terminate_child does the reap.
-                crate::runner::executor::terminate_child(&mut child);
-                let _ = stdout_handle.join();
-                let _ = stderr_handle.join();
-                log.warn("run_script timed out", logctx! {
-                    "timeoutSecs" => SCRIPT_TIMEOUT_SECS,
-                });
-                let evt = ScriptEvent {
-                    tab_id: (*tab_id_arc).clone(),
-                    kind: "error".into(),
-                    group_index: None,
-                    docs: None,
-                    error: Some(format!("Script execution timed out ({SCRIPT_TIMEOUT_SECS}s)")),
-                    execution_ms: None,
-                    pagination: None,
-                    run_id: (*run_id_arc).clone(),
-                    collection: None,
-                    category: None,
-                    log: None,
-                };
-                let _ = app_handle.emit("script-event", evt);
-                Ok(())
-            }
-        }
-    }
-    .await;
-
-    // Only remove our flag — a newer run may have already replaced it.
+    // Drop our active-run entry — a newer run may have already replaced it, so
+    // only remove if it's still ours.
     {
         let mut scripts = state.active_scripts.lock().unwrap();
-        if let Some(current) = scripts.get(&*tab_id_arc) {
-            if Arc::ptr_eq(current, &cancel_flag) {
-                scripts.remove(&*tab_id_arc);
-            }
+        if scripts.get(&tab_id).map(|a| a.request_id.as_str()) == Some(req_id.as_str()) {
+            scripts.remove(&tab_id);
         }
     }
 
-    // `tmp_script` (the NamedTempFile guard) drops here, deleting the file.
-    drop(tmp_script);
-    result
+    let elapsed = start.elapsed().as_millis();
+    match outcome {
+        RunOutcome::Done => {
+            log.info("run_script done", logctx! { "elapsedMs" => elapsed.to_string() });
+            Ok(())
+        }
+        RunOutcome::TimedOut => {
+            log.warn("run_script timed out", logctx! { "timeoutSecs" => SCRIPT_TIMEOUT_SECS });
+            emit_error(
+                &app,
+                &tab_id,
+                &run_id_str,
+                format!("Script execution timed out ({SCRIPT_TIMEOUT_SECS}s)"),
+            );
+            // The harness was sent a cancel frame inside stream_run; the run is
+            // abandoned from the UI's perspective regardless of the late __done.
+            Ok(())
+        }
+        RunOutcome::HarnessDied => {
+            // The harness exited mid-stream (channel closed before __done).
+            // Surface it and let the next run respawn lazily.
+            log.error("run_script: harness died mid-run", logctx! {});
+            state.harness_procs.lock().unwrap().remove(&connection_id);
+            emit_error(
+                &app,
+                &tab_id,
+                &run_id_str,
+                "Query runner stopped unexpectedly — retry the query.".to_string(),
+            );
+            Ok(())
+        }
+        RunOutcome::Error(msg) => {
+            log.error("run_script error", logctx! { "err" => msg.clone() });
+            Err(msg)
+        }
+    }
 }
 
-/// Write `contents` to a fresh 0600 temp file in `dir` (tempfile's unix default).
-/// The returned guard deletes the file on drop — keep it alive while the path is in use.
-fn write_temp_script(
-    dir: &std::path::Path,
-    contents: &str,
-) -> std::io::Result<tempfile::NamedTempFile> {
-    let mut file = tempfile::Builder::new()
-        .prefix("mongomacapp-script-")
-        .suffix(".js")
-        .tempfile_in(dir)?;
-    file.write_all(contents.as_bytes())?;
-    file.flush()?;
-    Ok(file)
+/// Terminal result of streaming one run request.
+enum RunOutcome {
+    /// Harness emitted `__done` — the run completed (success, per-statement
+    /// error already surfaced as a `script-event`, or a honoured user cancel).
+    Done,
+    /// 30s budget elapsed without `__done`; a cancel frame was sent.
+    TimedOut,
+    /// The response channel closed before `__done` — the harness process exited.
+    HarnessDied,
+    /// Failed to send the request (dead stdin etc.).
+    Error(String),
+}
+
+/// Send the `run` request, then drain the response channel emitting
+/// `script-event`s until the terminal `__done`. Runs on a blocking thread.
+#[allow(clippy::too_many_arguments)]
+fn stream_run(
+    harness: &HarnessHandle,
+    req_id: &str,
+    db: &str,
+    script: &str,
+    page: u32,
+    page_size: u32,
+    app: &AppHandle,
+    tab_id: &str,
+    run_id: &str,
+    start: Instant,
+    log: &dyn crate::logger::Logger,
+) -> RunOutcome {
+    let rx: Receiver<serde_json::Value> = match harness.send_run(req_id, db, script, page, page_size)
+    {
+        Ok(rx) => rx,
+        Err(e) => return RunOutcome::Error(e),
+    };
+
+    // A user cancel (cancel_script) sends its own cancel frame to the harness;
+    // the harness then ends this run with a terminal `__done`, so from here a
+    // cancel is indistinguishable from normal completion — `Done` covers both.
+    // The frontend drives the cancel UX off cancel_script, not off this event.
+    let deadline = start + Duration::from_secs(SCRIPT_TIMEOUT_SECS);
+    let outcome = loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            // Budget elapsed. Ask the harness to stop; we stop waiting now
+            // rather than block on the late __done.
+            let _ = harness.send_cancel(req_id);
+            break RunOutcome::TimedOut;
+        }
+        match rx.recv_timeout(remaining) {
+            Ok(line) => {
+                if line.get("__done").and_then(|v| v.as_bool()) == Some(true) {
+                    break RunOutcome::Done;
+                }
+                emit_line(&line, app, tab_id, run_id, log);
+            }
+            Err(RecvTimeoutError::Timeout) => {
+                let _ = harness.send_cancel(req_id);
+                break RunOutcome::TimedOut;
+            }
+            Err(RecvTimeoutError::Disconnected) => break RunOutcome::HarnessDied,
+        }
+    };
+
+    harness.finish_request(req_id);
+
+    // Emit the terminal `done` event so the frontend gets the execution time
+    // exactly as before. Timeout/death emit their own error event in the caller.
+    if matches!(outcome, RunOutcome::Done) {
+        let elapsed = start.elapsed().as_millis();
+        let done = ScriptEvent {
+            tab_id: tab_id.to_string(),
+            kind: "done".into(),
+            group_index: None,
+            docs: None,
+            error: None,
+            execution_ms: Some(elapsed),
+            pagination: None,
+            run_id: Some(run_id.to_string()),
+            collection: None,
+            category: None,
+            log: None,
+        };
+        let _ = app.emit("script-event", done);
+    }
+    outcome
+}
+
+/// Map one harness response line to a `script-event` and emit it. Mirrors the
+/// per-child stdout tap exactly so the frontend contract is unchanged: the only
+/// new key on the wire is the request `id`, which is consumed for routing
+/// before this point and never forwarded.
+fn emit_line(
+    line: &serde_json::Value,
+    app: &AppHandle,
+    tab_id: &str,
+    run_id: &str,
+    log: &dyn crate::logger::Logger,
+) {
+    if let Some(pg) = line.get("__pagination") {
+        if let (Some(total), Some(page_val), Some(page_size_val)) = (
+            pg.get("total").and_then(|x| x.as_i64()),
+            pg.get("page").and_then(|x| x.as_u64()),
+            pg.get("pageSize").and_then(|x| x.as_u64()),
+        ) {
+            emit(
+                app,
+                ScriptEvent {
+                    tab_id: tab_id.to_string(),
+                    kind: "pagination".into(),
+                    group_index: None,
+                    docs: None,
+                    error: None,
+                    execution_ms: None,
+                    pagination: Some(PaginationInfo {
+                        total,
+                        page: page_val as u32,
+                        page_size: page_size_val as u32,
+                    }),
+                    run_id: Some(run_id.to_string()),
+                    collection: None,
+                    category: None,
+                    log: None,
+                },
+            );
+        }
+    } else if let Some(message) = line
+        .get("__log")
+        .and_then(|x| x.get("message"))
+        .and_then(|x| x.as_str())
+    {
+        emit(
+            app,
+            ScriptEvent {
+                tab_id: tab_id.to_string(),
+                kind: "log".into(),
+                group_index: None,
+                docs: None,
+                error: None,
+                execution_ms: None,
+                pagination: None,
+                run_id: Some(run_id.to_string()),
+                collection: None,
+                category: None,
+                log: Some(message.to_string()),
+            },
+        );
+    } else if let Some(err) = line.get("__error").and_then(|x| x.as_str()) {
+        emit(
+            app,
+            ScriptEvent {
+                tab_id: tab_id.to_string(),
+                kind: "error".into(),
+                group_index: None,
+                docs: None,
+                error: Some(err.to_string()),
+                execution_ms: None,
+                pagination: None,
+                run_id: Some(run_id.to_string()),
+                collection: None,
+                category: None,
+                log: None,
+            },
+        );
+    } else if let (Some(idx), Some(docs)) =
+        (line.get("__group").and_then(|x| x.as_i64()), line.get("docs"))
+    {
+        let collection = line
+            .get("collection")
+            .and_then(|x| x.as_str())
+            .map(|s| s.to_string());
+        let category = line
+            .get("category")
+            .and_then(|x| x.as_str())
+            .map(|s| s.to_string());
+        emit(
+            app,
+            ScriptEvent {
+                tab_id: tab_id.to_string(),
+                kind: "group".into(),
+                group_index: Some(idx),
+                docs: Some(docs.clone()),
+                error: None,
+                execution_ms: None,
+                pagination: None,
+                run_id: Some(run_id.to_string()),
+                collection,
+                category,
+                log: None,
+            },
+        );
+    } else {
+        log.debug("harness line ignored", logctx! {});
+    }
+}
+
+fn emit(app: &AppHandle, evt: ScriptEvent) {
+    let _ = app.emit("script-event", evt);
+}
+
+fn emit_error(app: &AppHandle, tab_id: &str, run_id: &str, error: String) {
+    emit(
+        app,
+        ScriptEvent {
+            tab_id: tab_id.to_string(),
+            kind: "error".into(),
+            group_index: None,
+            docs: None,
+            error: Some(error),
+            execution_ms: None,
+            pagination: None,
+            run_id: Some(run_id.to_string()),
+            collection: None,
+            category: None,
+            log: None,
+        },
+    );
 }
 
 /// Compact "where" tag for a v2 `ConnectionTarget`, used only in debug
@@ -424,37 +443,5 @@ fn host_tag(target: &crate::connection::model::ConnectionTarget) -> String {
     match target {
         ConnectionTarget::Direct { host, port, .. } => format!("{host}:{port}"),
         ConnectionTarget::Uri { .. } => "uri".to_string(),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::write_temp_script;
-    use std::io::Read;
-
-    #[test]
-    fn temp_script_holds_contents_and_deletes_on_drop() {
-        let dir = std::env::temp_dir();
-        let path;
-        {
-            let guard = write_temp_script(&dir, "db.users.find({})").expect("create temp script");
-            path = guard.path().to_path_buf();
-            assert!(path.starts_with(&dir), "temp file must live in the requested dir");
-
-            let mut contents = String::new();
-            std::fs::File::open(&path)
-                .expect("reopen temp script by path")
-                .read_to_string(&mut contents)
-                .expect("read temp script");
-            assert_eq!(contents, "db.users.find({})");
-
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
-                assert_eq!(mode, 0o600, "temp script must be owner-only (0600)");
-            }
-        }
-        assert!(!path.exists(), "temp script must be deleted when the guard drops");
     }
 }

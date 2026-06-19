@@ -1,12 +1,11 @@
 use crate::logctx;
 use crate::logger::Logger;
-use crate::runner::{harness_path, node_modules_dir, runner_dir, RunnerCredential};
+use crate::runner::{harness_path, node_modules_dir, runner_dir};
 use serde::Serialize;
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::{Child, Command};
-use std::sync::{Arc, OnceLock};
-use std::time::{Duration, Instant};
+use std::path::PathBuf;
+use std::process::Command;
+use std::sync::OnceLock;
 
 static NODE_PATH: OnceLock<String> = OnceLock::new();
 
@@ -19,6 +18,13 @@ const BUNDLED_HARNESS: &str = include_str!("../../../runner/harness.js");
 // Run the integrity check at most once per process.
 static INTEGRITY_CHECKED: OnceLock<()> = OnceLock::new();
 
+/// Deploy-by-copy guard, run at most once per process. Public to the crate so
+/// the persistent-harness spawn path (`runner::harness`) triggers the same
+/// stale-install warning the legacy per-child spawn did.
+pub(crate) fn ensure_integrity_checked(logger: &dyn Logger) {
+    INTEGRITY_CHECKED.get_or_init(|| verify_runner_integrity(logger));
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RunnerStatus {
@@ -28,7 +34,7 @@ pub struct RunnerStatus {
 }
 
 /// Resolve node binary path via login shell once, cache in NODE_PATH.
-fn resolve_node() -> Option<&'static str> {
+pub(crate) fn resolve_node() -> Option<&'static str> {
     let path = NODE_PATH.get_or_init(|| {
         Command::new("/bin/zsh")
             .args(["-l", "-c", "which node"])
@@ -74,7 +80,7 @@ pub fn check_runner() -> RunnerStatus {
 /// it can be unit-tested against a tempdir without invoking npm.
 ///
 /// Bundles every JS file the harness `require`s at runtime:
-///   - `harness.js`  — entry point launched by `spawn_script`
+///   - `harness.js`  — entry point spawned by `runner::harness::HarnessHandle`
 ///   - `logger.js`   — required by harness.js
 ///   - `redact.js`   — required by logger.js
 ///
@@ -118,136 +124,6 @@ pub fn install_runner(
         return Err("npm install failed".into());
     }
     Ok(())
-}
-
-pub fn spawn_script(
-    uri: &str,
-    database: &str,
-    script_path: &Path,
-    page: u32,
-    page_size: u32,
-    run_id: &str,
-    logs_dir: &Path,
-    level: &str,
-    logger: Arc<dyn Logger>,
-    cred: Option<&RunnerCredential>,
-) -> Result<std::process::Child, String> {
-    let node = resolve_node().ok_or("Node.js not found — check node installation")?;
-    // Deploy-by-copy guard: detect a stale installed harness once per process.
-    INTEGRITY_CHECKED.get_or_init(|| verify_runner_integrity(logger.as_ref()));
-    // Credential fields are intentionally excluded from this log line —
-    // passwords must never appear in log output.
-    logger.info("spawn runner", logctx! {
-        "node" => node,
-        "harness" => harness_path().display().to_string(),
-        "db" => database,
-        "page" => page,
-        "pageSize" => page_size,
-        "runId" => run_id,
-    });
-    // Spawn node directly (not via shell) to avoid login-shell startup noise on stderr
-    let mut cmd = Command::new(node);
-    cmd.arg(harness_path())
-        .arg(database)
-        .arg(script_path)
-        .env("MONGO_URI", uri)
-        .env("MONGO_PAGE", page.to_string())
-        .env("MONGO_PAGE_SIZE", page_size.to_string())
-        .env("MONGOMACAPP_RUN_ID", run_id)
-        .env("MONGOMACAPP_LOGS_DIR", logs_dir.display().to_string())
-        .env("MONGOMACAPP_LOG_LEVEL", level)
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
-
-    // Defense-in-depth: credentials now travel over stdin, never env vars (env
-    // is readable by same-user processes via `ps -E` / proc inspection). Strip
-    // any inherited MONGO_* auth vars so a stray shell value can't leak in.
-    cmd.env_remove("MONGO_USER")
-        .env_remove("MONGO_PASS")
-        .env_remove("MONGO_AUTH_SOURCE")
-        .env_remove("MONGO_AUTH_MECHANISM");
-
-    let mut child = cmd.spawn().map_err(|e| {
-        logger.error("spawn failed", logctx! { "err" => e.to_string() });
-        e.to_string()
-    })?;
-
-    // Hand the credential to the harness as one JSON line on stdin, then close
-    // stdin so its blocking read sees EOF. The payload is tiny (well under the
-    // pipe buffer) so write_all cannot deadlock. With no credential we still
-    // close stdin so the harness read returns empty and falls back to the
-    // URI-embedded / no-auth path.
-    if let Some(mut stdin) = child.stdin.take() {
-        if let Some(credential) = cred {
-            use std::io::Write;
-            let line = serde_json::json!({
-                "username": credential.username,
-                "password": credential.password,
-                "authSource": credential.auth_source,
-                "authMechanism": credential.mechanism,
-            })
-            .to_string();
-            if let Err(e) = stdin
-                .write_all(line.as_bytes())
-                .and_then(|_| stdin.write_all(b"\n"))
-            {
-                logger.error("write runner credentials failed", logctx! { "err" => e.to_string() });
-            }
-        }
-        // stdin dropped here -> closed.
-    }
-    Ok(child)
-}
-
-/// Default grace window between SIGTERM and SIGKILL when terminating a runner
-/// child. Overridable via MONGOMACAPP_KILL_GRACE_MS to tune without a rebuild.
-const DEFAULT_KILL_GRACE_MS: u64 = 750;
-
-fn kill_grace() -> Duration {
-    std::env::var("MONGOMACAPP_KILL_GRACE_MS")
-        .ok()
-        .and_then(|v| v.parse::<u64>().ok())
-        .map(Duration::from_millis)
-        .unwrap_or(Duration::from_millis(DEFAULT_KILL_GRACE_MS))
-}
-
-/// Terminate a runner child gracefully. std `Child::kill()` only sends SIGKILL,
-/// which bypasses the harness SIGTERM handler (runner/harness.js) and leaves the
-/// server-side Mongo connection dangling — stale connections then accumulate
-/// across repeated cancels. Instead: send SIGTERM so the harness can close its
-/// client, wait up to the grace window, then SIGKILL + reap if still alive.
-/// Always reaps the child. Returns true when SIGTERM alone was sufficient.
-///
-/// Called by the cancel/timeout paths in `crate::commands::script`.
-pub fn terminate_child(child: &mut Child) -> bool {
-    send_sigterm(child.id());
-    let deadline = Instant::now() + kill_grace();
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => return true,
-            Ok(None) => {
-                if Instant::now() >= deadline {
-                    break;
-                }
-                std::thread::sleep(Duration::from_millis(20));
-            }
-            Err(_) => break,
-        }
-    }
-    let _ = child.kill();
-    let _ = child.wait();
-    false
-}
-
-// std has no portable signal API and the project pulls in no libc/nix crate, so
-// shell out to /bin/kill (always present on macOS, the only supported target)
-// to deliver SIGTERM.
-fn send_sigterm(pid: u32) {
-    let _ = Command::new("/bin/kill")
-        .arg("-TERM")
-        .arg(pid.to_string())
-        .status();
 }
 
 #[tauri::command]
@@ -340,21 +216,6 @@ mod tests {
         assert_eq!(fs::read_to_string(d.path().join("harness.js")).unwrap(), "H");
         assert_eq!(fs::read_to_string(d.path().join("logger.js")).unwrap(), "L");
         assert_eq!(fs::read_to_string(d.path().join("redact.js")).unwrap(), "R");
-    }
-
-    #[test]
-    fn terminate_child_sigterms_a_running_process_within_grace() {
-        // /bin/sleep terminates on SIGTERM's default action, so terminate_child
-        // should reap it via the graceful path (no SIGKILL needed).
-        let mut child = Command::new("/bin/sleep").arg("30").spawn().unwrap();
-        let graceful = terminate_child(&mut child);
-        assert!(graceful, "sleep should exit from SIGTERM within the grace window");
-    }
-
-    #[test]
-    fn kill_grace_falls_back_to_default_when_env_unset() {
-        std::env::remove_var("MONGOMACAPP_KILL_GRACE_MS");
-        assert_eq!(kill_grace(), Duration::from_millis(DEFAULT_KILL_GRACE_MS));
     }
 
     #[test]

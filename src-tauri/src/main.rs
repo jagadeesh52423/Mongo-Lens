@@ -146,8 +146,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 let state = window.state::<AppState>();
                 let clients: Vec<_> = state.mongo_clients.lock_recovered().drain().collect();
+                let harnesses: Vec<_> = state.harness_procs.lock_recovered().drain().collect();
                 let tunnels: Vec<_> = state.ssh_tunnels.lock_recovered().drain().collect();
-                if clients.is_empty() && tunnels.is_empty() {
+                let shutdown_logger = state.logger.clone();
+                if clients.is_empty() && harnesses.is_empty() && tunnels.is_empty() {
                     return; // nothing to tear down — let the window close immediately
                 }
                 api.prevent_close();
@@ -164,7 +166,18 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 });
 
                 tauri::async_runtime::spawn(async move {
-                    // Pools first (so no in-flight query hits a dead tunnel), each bounded.
+                    // Harnesses first: each owns its own MongoClient + child process.
+                    // Tear them down (shutdown frame + grace, then SIGKILL) on a
+                    // blocking thread before the driver pools and tunnels go, so a
+                    // harness never queries through a dead tunnel during exit.
+                    futures_util::future::join_all(harnesses.into_iter().map(|(_, h)| {
+                        let logger = shutdown_logger.clone();
+                        tokio::task::spawn_blocking(move || {
+                            h.shutdown(std::time::Duration::from_millis(750), logger.as_ref())
+                        })
+                    }))
+                    .await;
+                    // Pools next (so no in-flight query hits a dead tunnel), each bounded.
                     futures_util::future::join_all(clients.into_iter().map(|(_, c)| {
                         tokio::time::timeout(std::time::Duration::from_secs(1), c.shutdown())
                     }))

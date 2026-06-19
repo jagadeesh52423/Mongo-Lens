@@ -1,13 +1,20 @@
 use crate::connection::secrets::SecretStore;
 use crate::logger::tracing_impl::TracingLogger;
 use crate::logger::Logger;
-use crate::runner::RunnerCredential;
+use crate::runner::{HarnessHandle, RunnerCredential};
 use crate::ssh::TunnelHandle;
 use mongodb::Client;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex, MutexGuard};
+
+/// Identifies an in-flight script run for cancellation. Stored in
+/// `AppState::active_scripts` keyed by tab id.
+#[derive(Clone)]
+pub struct ActiveRun {
+    pub connection_id: String,
+    pub request_id: String,
+}
 
 /// Lock helper that survives a poisoned mutex.
 ///
@@ -44,11 +51,22 @@ pub struct AppState {
     /// `None` entry means the connection uses no password-based auth (e.g.
     /// X509, no-auth, or a URI target with inline creds).
     pub mongo_runner_creds: Mutex<HashMap<String, RunnerCredential>>,
+    /// One long-lived harness child process per connection id. Spawned on
+    /// connect, reused by every `run_script` for that connection, and torn
+    /// down on disconnect / SSH session loss / app exit. Mirrors the
+    /// `mongo_clients` lifecycle: a connection that has a live driver client
+    /// also has a live harness. `Arc` so a query can clone the handle out and
+    /// run without holding the map lock across the (long) stdout stream.
+    pub harness_procs: Mutex<HashMap<String, Arc<HarnessHandle>>>,
     /// Active SSH tunnel handles, keyed by connection id.
     /// The Mutex is held only across insert/remove — never across an .await.
     pub ssh_tunnels: Mutex<HashMap<String, TunnelHandle>>,
-    /// Per-tab cancel flag. Set to true to signal the running script to abort.
-    pub active_scripts: Mutex<HashMap<String, Arc<AtomicBool>>>,
+    /// Per-tab in-flight run, keyed by tab id. Holds what `cancel_script`
+    /// needs to send a cancel frame to the right harness: the connection id
+    /// (to look up the harness process) and the request id (so the harness
+    /// cancels the correct in-flight run). Inserted when a run starts, removed
+    /// when it finishes. A tab has at most one in-flight run.
+    pub active_scripts: Mutex<HashMap<String, ActiveRun>>,
     /// Generic logger handle used by commands and the runner executor.
     pub logger: Arc<dyn Logger>,
     /// Concrete TracingLogger kept so the `log_write` handler can write frontend
@@ -70,6 +88,7 @@ impl AppState {
             mongo_clients: Mutex::new(HashMap::new()),
             mongo_uris: Mutex::new(HashMap::new()),
             mongo_runner_creds: Mutex::new(HashMap::new()),
+            harness_procs: Mutex::new(HashMap::new()),
             ssh_tunnels: Mutex::new(HashMap::new()),
             active_scripts: Mutex::new(HashMap::new()),
             logger,
