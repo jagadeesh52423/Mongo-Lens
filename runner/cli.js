@@ -91,6 +91,7 @@ class HarnessClient {
     if (msg.__group !== undefined) entry.acc.groups.push(msg);
     else if (msg.__pagination) entry.acc.pagination = msg.__pagination;
     else if (msg.__log) entry.acc.logs.push(msg.__log.message);
+    else if (msg.__data !== undefined) entry.acc.data = msg.__data;
     else if (msg.__error !== undefined) entry.acc.error = msg.__error;
     if (msg.__done) { this.pending.delete(msg.id); entry.resolve(entry.acc); }
   }
@@ -104,13 +105,19 @@ class HarnessClient {
   // request lines into a single stdin write (needed to deterministically queue
   // a second run behind the first before cancelling it).
   expect(id) {
-    const acc = { id, groups: [], logs: [], pagination: null, error: null };
+    const acc = { id, groups: [], logs: [], pagination: null, data: undefined, error: null };
     return new Promise((resolve) => this.pending.set(id, { resolve, acc }));
   }
 
   run(req) {
     const p = this.expect(req.id);
     this._send({ ...req, action: 'run' });
+    return p;
+  }
+
+  data(req) {
+    const p = this.expect(req.id);
+    this._send({ ...req, action: 'data' });
     return p;
   }
 
@@ -221,7 +228,57 @@ async function runSelftest(args) {
   assert.strictEqual(resCancel.error, 'cancelled', `expected cancelled terminal, got error=${resCancel.error}`);
   assert.strictEqual(client.readyCount, 1, 'cancel smoke must not have triggered a reconnect (__ready seen once)');
 
-  process.stdout.write('SELFTEST PASS: 1 process, 1 connect, 2 runs reused it, cancel framed correctly\n');
+  // ── Data-op path (#2): browse-style + mutate round-trip through the SAME
+  // process. listCollections (browse-style), then insert (seed via run) →
+  // updateOne → find (verify) → deleteOne → find (verify gone), all `data` ops.
+  const DATA_COLL = 'mongolens_selftest_data';
+  const docId = `selftest-${process.pid}`;
+
+  const cols = await client.data({ id: 'd-cols', op: 'listCollections', db: SELFTEST_DB });
+  assert.strictEqual(cols.error, null, `listCollections errored: ${cols.error}`);
+  assert.ok(Array.isArray(cols.data), 'listCollections must return an array');
+
+  // Seed one doc via the run path (insertOne), so update/delete have a target.
+  const seed = await client.run({
+    id: 'd-seed', db: SELFTEST_DB, page: 0, pageSize: 5,
+    // One statement per line so the harness awaits BOTH (it adds await per line).
+    script: `db.${DATA_COLL}.deleteMany({_id:'${docId}'})\ndb.${DATA_COLL}.insertOne({_id:'${docId}', v:1})`,
+  });
+  assert.strictEqual(seed.error, null, `seed insert errored: ${seed.error}`);
+
+  const upd = await client.data({
+    id: 'd-upd', op: 'updateOne', db: SELFTEST_DB, collection: DATA_COLL,
+    filter: { _id: docId }, update: { $set: { v: 2 } },
+  });
+  assert.strictEqual(upd.error, null, `updateOne errored: ${upd.error}`);
+  assert.strictEqual(upd.data.matchedCount, 1, `updateOne matchedCount expected 1, got ${upd.data.matchedCount}`);
+
+  const found = await client.data({
+    id: 'd-find', op: 'find', db: SELFTEST_DB, collection: DATA_COLL,
+    filter: { _id: docId }, page: 0, pageSize: 5,
+  });
+  assert.strictEqual(found.error, null, `find errored: ${found.error}`);
+  assert.strictEqual(found.data.total, 1, `find total expected 1, got ${found.data.total}`);
+  assert.strictEqual(found.data.docs.length, 1, 'find must return the updated doc');
+
+  const del = await client.data({
+    id: 'd-del', op: 'deleteOne', db: SELFTEST_DB, collection: DATA_COLL,
+    filter: { _id: docId },
+  });
+  assert.strictEqual(del.error, null, `deleteOne errored: ${del.error}`);
+  assert.strictEqual(del.data.deletedCount, 1, `deleteOne deletedCount expected 1, got ${del.data.deletedCount}`);
+
+  const gone = await client.data({
+    id: 'd-gone', op: 'find', db: SELFTEST_DB, collection: DATA_COLL,
+    filter: { _id: docId }, page: 0, pageSize: 5,
+  });
+  assert.strictEqual(gone.data.total, 0, `doc must be gone after delete, total=${gone.data.total}`);
+  assert.strictEqual(client.readyCount, 1, 'data ops must not have triggered a reconnect (__ready seen once)');
+
+  process.stdout.write(
+    'SELFTEST PASS: 1 process, 1 connect, 2 runs reused it, cancel framed correctly, ' +
+    'data ops (listCollections + update/find/delete round-trip) shared the process\n',
+  );
   client.shutdown();
   child.on('close', () => process.exit(0));
   setTimeout(() => process.exit(0), 3000).unref();

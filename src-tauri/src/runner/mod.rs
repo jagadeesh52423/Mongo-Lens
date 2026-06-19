@@ -2,7 +2,7 @@ pub mod credential;
 pub mod executor;
 pub mod harness;
 
-pub use credential::RunnerCredential;
+pub use credential::{RunnerCredential, RunnerTls};
 pub use harness::HarnessHandle;
 
 use std::path::PathBuf;

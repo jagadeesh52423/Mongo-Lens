@@ -3,8 +3,6 @@ use crate::connection::store as connection_store;
 use crate::logctx;
 use crate::mongo;
 use crate::state::AppState;
-use futures_util::TryStreamExt;
-use mongodb::bson::{doc, Document};
 use serde::Serialize;
 use tauri::State;
 
@@ -30,6 +28,17 @@ pub struct BrowsePage {
     pub page_size: i64,
 }
 
+/// Pull a `[String]` array out of a harness `__data` value.
+fn data_strings(data: &serde_json::Value) -> Vec<String> {
+    data.as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 #[tauri::command]
 pub async fn list_databases(
     state: State<'_, AppState>,
@@ -40,18 +49,23 @@ pub async fn list_databases(
         "connId" => connection_id.clone(),
     });
     log.info("list_databases", logctx! {});
-    let client = mongo::active_client(&state, &connection_id)?;
 
-    match client.list_database_names().await {
-        Ok(names) => Ok(names.into_iter().filter(|n| n != "local").collect()),
-        Err(e) if mongo::authz::is_unauthorized(&e) => {
+    match mongo::harness_data(
+        &state,
+        &connection_id,
+        "admin",
+        mongo::data_op::LIST_DATABASES,
+        serde_json::json!({}),
+        state.logger.clone(),
+    )
+    .await
+    {
+        Ok(data) => Ok(data_strings(&data)),
+        Err(e) if e.is_unauthorized() => {
             log.warn("list_databases unauthorized, falling back to default db",
-                logctx! { "err" => e.to_string() });
-            // Look up the v2 connection model for its auth_db. Only
-            // SCRAM and Legacy-CR carry an explicit auth_db; other auth
-            // modes don't have a client-side default to fall back to,
-            // so we surface an empty list (the UI then shows nothing,
-            // matching the no-default-db case).
+                logctx! { "err" => e.message.clone() });
+            // Restricted user: fall back to the connection's auth_db (SCRAM /
+            // Legacy-CR only); other modes have no client-side hint → empty list.
             let sql = state.open_db().map_err(|e| e.to_string())?;
             let connection = connection_store::get(&sql, &connection_id)
                 .map_err(|e| e.to_string())?
@@ -62,8 +76,8 @@ pub async fn list_databases(
             }
         }
         Err(e) => {
-            log.error("list_database_names failed", logctx! { "err" => e.to_string() });
-            Err(e.to_string())
+            log.error("list_databases failed", logctx! { "err" => e.message.clone() });
+            Err(e.into())
         }
     }
 }
@@ -80,18 +94,23 @@ pub async fn list_collections(
         "db" => database.clone(),
     });
     log.info("list_collections", logctx! {});
-    let client = mongo::active_client(&state, &connection_id)?;
-    let mut names = client
-        .database(&database)
-        .list_collection_names()
-        .authorized_collections(true)
-        .await
-        .map_err(|e| {
-            log.error("list_collection_names failed", logctx! { "err" => e.to_string() });
-            e.to_string()
-        })?;
-    names.sort();
-    Ok(names.into_iter().map(|name| CollectionNode { name }).collect())
+    let data = mongo::harness_data(
+        &state,
+        &connection_id,
+        &database,
+        mongo::data_op::LIST_COLLECTIONS,
+        serde_json::json!({}),
+        state.logger.clone(),
+    )
+    .await
+    .map_err(|e| {
+        log.error("list_collections failed", logctx! { "err" => e.message.clone() });
+        String::from(e)
+    })?;
+    Ok(data_strings(&data)
+        .into_iter()
+        .map(|name| CollectionNode { name })
+        .collect())
 }
 
 #[tauri::command]
@@ -108,23 +127,32 @@ pub async fn list_indexes(
         "coll" => collection.clone(),
     });
     log.info("list_indexes", logctx! {});
-    let client = mongo::active_client(&state, &connection_id)?;
-    let coll = client.database(&database).collection::<Document>(&collection);
-    let mut cursor = coll.list_indexes().await.map_err(|e| {
-        log.error("list_indexes failed", logctx! { "err" => e.to_string() });
-        e.to_string()
+    let data = mongo::harness_data(
+        &state,
+        &connection_id,
+        &database,
+        mongo::data_op::LIST_INDEXES,
+        serde_json::json!({ "collection": collection }),
+        state.logger.clone(),
+    )
+    .await
+    .map_err(|e| {
+        log.error("list_indexes failed", logctx! { "err" => e.message.clone() });
+        String::from(e)
     })?;
+
     let mut out = Vec::new();
-    while let Some(idx) = cursor.try_next().await.map_err(|e| {
-        log.error("index cursor failed", logctx! { "err" => e.to_string() });
-        e.to_string()
-    })? {
+    for idx in data.as_array().cloned().unwrap_or_default() {
         let name = idx
-            .options
-            .and_then(|o| o.name)
-            .unwrap_or_else(|| "(unnamed)".into());
-        let keys_json = serde_json::to_value(&idx.keys).unwrap_or(serde_json::Value::Null);
-        out.push(IndexInfo { name, keys: keys_json });
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("(unnamed)")
+            .to_string();
+        let keys = match idx.get("key") {
+            Some(key) => mongo::ejson_to_value(key.clone()).unwrap_or(serde_json::Value::Null),
+            None => serde_json::Value::Null,
+        };
+        out.push(IndexInfo { name, keys });
     }
     Ok(out)
 }
@@ -148,49 +176,45 @@ pub async fn browse_collection(
         "page" => page,
         "pageSize" => page_size,
     });
-    let client = mongo::active_client(&state, &connection_id)?;
-    let coll = client.database(&database).collection::<Document>(&collection);
-    let total = coll
-        .count_documents(doc! {})
-        .await
-        .map_err(|e| {
-            log.error("count_documents failed", logctx! { "err" => e.to_string() });
-            e.to_string()
-        })? as i64;
-    let skip = (page.max(0)) * page_size;
-    let find_opts = mongodb::options::FindOptions::builder()
-        .skip(skip as u64)
-        .limit(page_size)
-        .build();
-    let mut cursor = coll
-        .find(doc! {})
-        .with_options(find_opts)
-        .await
-        .map_err(|e| {
-            log.error("find failed", logctx! { "err" => e.to_string() });
-            e.to_string()
-        })?;
+    let data = mongo::harness_data(
+        &state,
+        &connection_id,
+        &database,
+        mongo::data_op::FIND,
+        serde_json::json!({
+            "collection": collection,
+            "filter": {},
+            "page": page.max(0),
+            "pageSize": page_size,
+        }),
+        state.logger.clone(),
+    )
+    .await
+    .map_err(|e| {
+        log.error("browse_collection failed", logctx! { "err" => e.message.clone() });
+        String::from(e)
+    })?;
+
+    let total = data.get("total").and_then(|v| v.as_i64()).unwrap_or(0);
     let mut docs = Vec::new();
-    while let Some(d) = cursor.try_next().await.map_err(|e| {
-        log.error("doc cursor failed", logctx! { "err" => e.to_string() });
-        e.to_string()
-    })? {
-        let json: serde_json::Value =
-            mongodb::bson::to_bson(&d).map_err(|e| e.to_string())?.into();
-        docs.push(json);
+    for doc in data
+        .get("docs")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default()
+    {
+        docs.push(mongo::ejson_to_value(doc).map_err(|e| {
+            log.error("browse doc decode failed", logctx! { "err" => e.clone() });
+            e
+        })?);
     }
     Ok(BrowsePage { docs, total, page, page_size })
 }
 
 /// Best-effort default-database name for the Unauthorized fallback in
-/// `list_databases`. Only SCRAM and Legacy-CR auth modes carry an
-/// explicit `auth_db` in the v2 model — that's the right fallback target.
-/// All other modes (X.509, LDAP, Kerberos, AWS IAM, OIDC, None) don't
-/// have a comparable client-side hint; returning `None` yields an empty
-/// DB list (caller's responsibility to render that gracefully).
-///
-/// `admin` is filtered out because it's never a useful "show me my data"
-/// default — it's the auth realm, not a user DB.
+/// `list_databases`. Only SCRAM and Legacy-CR auth modes carry an explicit
+/// `auth_db`; other modes have no comparable client-side hint. `admin` is
+/// filtered out because it's the auth realm, not a user DB.
 fn default_db_for_unauthorized(c: &Connection) -> Option<String> {
     let candidate = match &c.auth {
         AuthMode::Scram { auth_db, .. } | AuthMode::LegacyCr { auth_db, .. } => auth_db.clone(),

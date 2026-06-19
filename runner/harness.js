@@ -20,6 +20,11 @@
 // error) replaces "process exit = done".
 // ───────────────────────────────────────────────────────────────────────────
 const { MongoClient } = require('mongodb');
+// EJSON ships with the mongodb driver's bson dependency (resolved via NODE_PATH).
+// Used by the `data` action to round-trip BSON types (ObjectId, Date, ...) to the
+// Rust side losslessly, so browse/document ops keep the same typed shape the Rust
+// driver produced before these ops moved to the harness.
+const { EJSON } = require('bson');
 const readline = require('readline');
 const { createLogger } = require('./logger');
 const { classify, splitStatements } = require('./query-classifier');
@@ -198,20 +203,37 @@ function extractLine(err) {
 // from a genuine script error.
 class CancelledError extends Error {}
 
-// Build MongoClient options from the structured credential supplied in __init.
-// Only present for password-based auth modes (SCRAM, LDAP); when absent the
-// URI-embedded credentials (if any) or the no-auth path applies, so existing
+// Build MongoClient options from the structured `__init` payload the Rust
+// builder resolves (the single auth/TLS seam). Mirrors src-tauri's
+// connection::builder so every auth mode that connects through the Rust driver
+// also connects through Node:
+//   * password modes (SCRAM/LDAP) → auth {username,password} + authSource +
+//     authMechanism (PLAIN for LDAP).
+//   * X509 → authMechanism MONGODB-X509, authSource $external, NO username
+//     (the driver lifts the DN from the TLS-presented client cert).
+//   * tls block → tls + tlsCertificateKeyFile (client cert), tlsCAFile,
+//     tlsAllowInvalid{Certificates,Hostnames}.
+// Secrets (password) arrive only here via __init/stdin, never argv/env. When a
+// field is absent the URI-embedded / no-auth path applies, so existing
 // URI-target connections keep working unchanged.
-function buildClientOptions(auth) {
+function buildClientOptions(init) {
   const clientOptions = {};
-  if (auth && auth.username) {
-    clientOptions.auth = {
-      username: auth.username,
-      password: auth.password || '',
-    };
+  const auth = init && init.auth;
+  if (auth) {
+    if (auth.username) {
+      clientOptions.auth = { username: auth.username, password: auth.password || '' };
+    }
+    if (auth.authSource) clientOptions.authSource = auth.authSource;
+    if (auth.authMechanism) clientOptions.authMechanism = auth.authMechanism;
   }
-  if (auth && auth.authSource) clientOptions.authSource = auth.authSource;
-  if (auth && auth.authMechanism) clientOptions.authMechanism = auth.authMechanism;
+  const tls = init && init.tls;
+  if (tls && tls.enabled) {
+    clientOptions.tls = true;
+    if (tls.certKeyFile) clientOptions.tlsCertificateKeyFile = tls.certKeyFile;
+    if (tls.caFile) clientOptions.tlsCAFile = tls.caFile;
+    if (tls.allowInvalidCertificates) clientOptions.tlsAllowInvalidCertificates = true;
+    if (tls.allowInvalidHostnames) clientOptions.tlsAllowInvalidHostnames = true;
+  }
   return clientOptions;
 }
 
@@ -507,10 +529,9 @@ let processing = false;
 let current = null;
 
 async function doInit(init) {
-  const auth = init && init.auth ? init.auth : null;
   logger.info('mongo connect start');
   try {
-    client = new MongoClient(uri, buildClientOptions(auth));
+    client = new MongoClient(uri, buildClientOptions(init));
     activeClient = client;
     await client.connect();
   } catch (err) {
@@ -554,6 +575,86 @@ async function runScript(req) {
       reqLog.error('run failure', { err: String(err), stack: err && err.stack, line: extractLine(err) });
       writeLine({ id, __error: err.message, line: extractLine(err) });
     }
+    writeLine({ id, __done: true });
+  }
+}
+
+// ─── Data ops ─────────────────────────────────────────────────────────────
+// Control-plane / document operations the Rust commands used to run via the
+// mongodb Rust driver (list databases/collections/indexes, browse, update,
+// delete). They now share this connection's one MongoClient so the harness is
+// the SINGLE Mongo data path. Each op returns a structured result the Rust side
+// reshapes into the unchanged typed command return. Filters/updates and result
+// documents cross the wire as canonical Extended JSON so BSON types (ObjectId,
+// Date, ...) survive losslessly — the Rust driver-shaped output is preserved.
+//
+// Implement a new op by adding an entry here; the Rust caller and the serve
+// loop need no change (registry keyed by op name — open/closed).
+const DATA_OPS = {
+  async listDatabases() {
+    const res = await client.db().admin().listDatabases({ nameOnly: true });
+    // Match the Rust command: hide the internal `local` database.
+    return res.databases.map((d) => d.name).filter((n) => n !== 'local');
+  },
+  async listCollections(db) {
+    const cols = await db
+      .listCollections({}, { nameOnly: true, authorizedCollections: true })
+      .toArray();
+    return cols.map((c) => c.name).sort();
+  },
+  async listIndexes(db, req) {
+    const idx = await db.collection(req.collection).listIndexes().toArray();
+    return EJSON.serialize(idx, { relaxed: false });
+  },
+  async find(db, req) {
+    const coll = db.collection(req.collection);
+    const filter = EJSON.deserialize(req.filter || {});
+    const page = Number.isInteger(req.page) ? req.page : 0;
+    const pageSize =
+      Number.isInteger(req.pageSize) && req.pageSize > 0 ? req.pageSize : DEFAULT_PAGE_SIZE;
+    // Exact count (matches the prior browse_collection behaviour); browse always
+    // passes an empty filter, the same query the Rust command issued.
+    const total = await coll.countDocuments(filter, COUNT_OPTIONS);
+    const cursor = applyMaxTime(coll.find(filter).skip(page * pageSize).limit(pageSize));
+    const docs = await cursor.toArray();
+    return { docs: EJSON.serialize(docs, { relaxed: false }), total, page, pageSize };
+  },
+  async updateOne(db, req) {
+    const result = await db
+      .collection(req.collection)
+      .updateOne(EJSON.deserialize(req.filter || {}), EJSON.deserialize(req.update || {}));
+    return { matchedCount: result.matchedCount, modifiedCount: result.modifiedCount };
+  },
+  async deleteOne(db, req) {
+    const result = await db
+      .collection(req.collection)
+      .deleteOne(EJSON.deserialize(req.filter || {}));
+    return { deletedCount: result.deletedCount };
+  },
+};
+
+async function runData(req) {
+  const id = req.id;
+  const op = DATA_OPS[req.op];
+  if (!op) {
+    writeLine({ id, __error: `unknown data op: ${req.op}` });
+    writeLine({ id, __done: true });
+    return;
+  }
+  const reqLog = logger.child({ reqId: id });
+  reqLog.info('data start', { op: req.op, db: req.db });
+  try {
+    const data = await op(client.db(req.db || defaultDb), req);
+    writeLine({ id, __data: data });
+    writeLine({ id, __done: true });
+    reqLog.info('data complete', { op: req.op });
+  } catch (err) {
+    reqLog.error('data failure', { op: req.op, err: String(err), code: err && err.code });
+    // `code` lets the Rust side replay driver-specific fallbacks (e.g. the
+    // Unauthorized=13 degrade in list_databases) instead of string-matching.
+    const frame = { id, __error: err.message };
+    if (err && err.code !== undefined) frame.code = err.code;
+    writeLine(frame);
     writeLine({ id, __done: true });
   }
 }
@@ -623,6 +724,9 @@ function onLine(line) {
   if (msg.action === 'shutdown') { handleShutdown(); return; }
   if (msg.action === 'cancel') { handleCancel(msg.id); return; }
   if (msg.action === 'run') { queue.push(msg); pump(); return; }
+  // Data ops are fast control-plane calls; run them directly (off the serial
+  // run queue) — the driver multiplexes them safely on the shared client.
+  if (msg.action === 'data') { runData(msg); return; }
   // Unknown action: ignore (forward-compat with newer request types).
 }
 

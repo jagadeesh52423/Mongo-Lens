@@ -852,57 +852,88 @@ fn oidc_credential(principal: Option<&str>, provider_name: Option<&str>) -> Cred
 // Runner credential mapping
 // ──────────────────────────────────────────────────────────────────────────
 
-/// Derive the credential the Node query runner needs from the connection's
-/// auth config + resolved password. Only password-based mechanisms are
-/// expressible as runner env vars today; cert/GSSAPI/IAM/OIDC return `None`.
+/// Derive the init payload the Node query runner needs to connect with the SAME
+/// auth + TLS the Rust driver resolves, so every mode that browses/queries via
+/// the harness reaches parity with the Rust driver. Returns `None` only when
+/// there is nothing the harness needs beyond the bare URI (no-auth + no-TLS, or
+/// a mode the Node driver cannot serve).
 ///
-/// The mapping mirrors `apply_auth` — add a new arm here when a new
-/// password-based `AuthMode` variant lands (look for "EXTENSION POINT" arms).
+/// Parity notes (mirrors `apply_auth` / `apply_tls`):
+///   * SCRAM/LDAP → username+password (+ mechanism; PLAIN for LDAP).
+///   * X509 → mechanism `MONGODB-X509`, source `$external`, no username (the
+///     driver lifts the DN from the client cert); the cert itself travels in
+///     the `tls` block — the same `tls.client_cert_file` the Rust driver uses
+///     (`AuthMode::X509`'s own cert fields are ignored here exactly as
+///     `apply_tls` ignores them).
+///   * TLS (any mode) → cert/CA/allow-invalid flags, so a custom-CA or
+///     client-cert cluster connects through Node, not just through Rust.
+///   * LegacyCr/Kerberos/AwsIam/Oidc → no auth part (Node can't serve them);
+///     a TLS-only payload may still be produced so transport matches.
 ///
 /// # Extension contract
-/// To add a new mode: implement `RunnerCredential` construction in the
-/// matching arm. No other code needs to change.
+/// To add a new mode: add an arm to `auth_part` below. No other code changes.
 pub fn runner_credential(
     resolved: &ResolvedConnection<'_>,
 ) -> Option<crate::runner::RunnerCredential> {
     use crate::runner::RunnerCredential;
+
+    let tls = runner_tls(resolved.conn.tls.as_ref());
+
+    // (username, password, auth_source, mechanism) for the mode, or None when
+    // the Node driver can't authenticate this mode.
     // EXTENSION POINT: add a new arm here when a new AuthMode variant lands.
-    match &resolved.conn.auth {
-        AuthMode::None => None,
-        AuthMode::Scram { username, auth_db, mechanism } => Some(RunnerCredential {
-            username: username.clone(),
-            password: resolved.auth_password.clone(),
-            auth_source: Some(auth_db.clone()),
-            mechanism: scram_runner_mechanism_token(mechanism.as_ref()),
-        }),
-        AuthMode::LegacyCr { .. } => {
-            // EXTENSION POINT: add runner support for LegacyCr
-            // (MONGODB-CR is not supported by the Node driver; return None)
-            None
-        }
-        AuthMode::Ldap { username } => Some(RunnerCredential {
-            username: username.clone(),
-            password: resolved.auth_password.clone(),
-            auth_source: Some("$external".into()),
-            mechanism: Some("PLAIN".into()),
-        }),
-        AuthMode::X509 { .. } => {
-            // EXTENSION POINT: add runner support for X509 (cert-based auth)
-            None
-        }
-        AuthMode::Kerberos { .. } => {
-            // EXTENSION POINT: add runner support for Kerberos (GSSAPI)
-            None
-        }
-        AuthMode::AwsIam { .. } => {
-            // EXTENSION POINT: add runner support for AwsIam (MONGODB-AWS)
-            None
-        }
-        AuthMode::Oidc { .. } => {
-            // EXTENSION POINT: add runner support for Oidc (MONGODB-OIDC)
-            None
+    let auth_part: Option<(String, Option<String>, Option<String>, Option<String>)> =
+        match &resolved.conn.auth {
+            AuthMode::None => None,
+            AuthMode::Scram { username, auth_db, mechanism } => Some((
+                username.clone(),
+                resolved.auth_password.clone(),
+                Some(auth_db.clone()),
+                scram_runner_mechanism_token(mechanism.as_ref()),
+            )),
+            AuthMode::Ldap { username } => Some((
+                username.clone(),
+                resolved.auth_password.clone(),
+                Some("$external".into()),
+                Some("PLAIN".into()),
+            )),
+            AuthMode::X509 { .. } => Some((
+                String::new(),
+                None,
+                Some("$external".into()),
+                Some("MONGODB-X509".into()),
+            )),
+            // MONGODB-CR / GSSAPI / MONGODB-AWS / MONGODB-OIDC: not served by the
+            // Node runner path. A TLS-only payload may still be produced below.
+            AuthMode::LegacyCr { .. }
+            | AuthMode::Kerberos { .. }
+            | AuthMode::AwsIam { .. }
+            | AuthMode::Oidc { .. } => None,
+        };
+
+    match (auth_part, tls) {
+        (None, None) => None,
+        (auth_part, tls) => {
+            let (username, password, auth_source, mechanism) =
+                auth_part.unwrap_or_else(|| (String::new(), None, None, None));
+            Some(RunnerCredential { username, password, auth_source, mechanism, tls })
         }
     }
+}
+
+/// Project `connection::model::Tls` to the runner's TLS view (paths + flags the
+/// Node driver accepts). `None` when TLS is absent or explicitly disabled.
+fn runner_tls(tls: Option<&ModelTls>) -> Option<crate::runner::RunnerTls> {
+    let tls = tls?;
+    if !tls.enabled {
+        return None;
+    }
+    Some(crate::runner::RunnerTls {
+        cert_key_file: tls.client_cert_file.clone(),
+        ca_file: tls.ca_file.clone(),
+        allow_invalid_certs: tls.allow_invalid_certs.unwrap_or(false),
+        allow_invalid_hostnames: tls.allow_invalid_hostnames.unwrap_or(false),
+    })
 }
 
 /// Map a SCRAM `ScramMechanism` variant to the wire token the Node driver
@@ -1777,22 +1808,93 @@ mod tests {
     }
 
     #[test]
-    fn runner_credential_none_auth_returns_none() {
+    fn runner_credential_none_auth_no_tls_returns_none() {
         let conn = base_conn(direct_target(), AuthMode::None);
         let resolved = ResolvedConnection::bare(&conn);
         assert!(runner_credential(&resolved).is_none());
     }
 
+    fn tls_with_cert() -> ModelTls {
+        ModelTls {
+            enabled: true,
+            allow_invalid_certs: Some(true),
+            allow_invalid_hostnames: None,
+            ca_file: Some("/tmp/ca.pem".into()),
+            client_cert_file: Some("/tmp/client.pem".into()),
+        }
+    }
+
     #[test]
-    fn runner_credential_x509_returns_none() {
-        // X509 is cert-based; no password env-var support yet.
-        let conn = base_conn(
+    fn runner_credential_x509_maps_mechanism_external_and_tls_cert() {
+        // X509 now reaches the harness: MONGODB-X509 + $external + no username
+        // (DN lifted from the cert), and the cert/CA travel in the tls block —
+        // the same tls.client_cert_file the Rust driver uses.
+        let mut conn = base_conn(
             direct_target(),
             AuthMode::X509 {
                 cert_file: "/tmp/client.pem".into(),
                 cert_key_file: None,
             },
         );
+        conn.tls = Some(tls_with_cert());
+        let resolved = ResolvedConnection::bare(&conn);
+        let cred = runner_credential(&resolved).expect("X509 should produce a runner credential");
+        assert_eq!(cred.username, "");
+        assert!(cred.password.is_none());
+        assert_eq!(cred.auth_source.as_deref(), Some("$external"));
+        assert_eq!(cred.mechanism.as_deref(), Some("MONGODB-X509"));
+        let tls = cred.tls.as_ref().expect("X509 must carry tls material");
+        assert_eq!(tls.cert_key_file.as_deref(), Some("/tmp/client.pem"));
+        assert_eq!(tls.ca_file.as_deref(), Some("/tmp/ca.pem"));
+        assert!(tls.allow_invalid_certs);
+        assert!(!tls.allow_invalid_hostnames);
+    }
+
+    #[test]
+    fn runner_credential_scram_carries_tls_when_present() {
+        // A SCRAM-over-TLS (custom CA) connection must pass TLS to the harness,
+        // not just the password — else moving browse to the harness would fail
+        // to verify the server cert.
+        let mut conn = base_conn(
+            direct_target(),
+            AuthMode::Scram {
+                username: "alice".into(),
+                auth_db: "admin".into(),
+                mechanism: None,
+            },
+        );
+        conn.tls = Some(tls_with_cert());
+        let mut resolved = ResolvedConnection::bare(&conn);
+        resolved.auth_password = Some("pw".into());
+        let cred = runner_credential(&resolved).expect("credential");
+        assert_eq!(cred.username, "alice");
+        assert_eq!(cred.password.as_deref(), Some("pw"));
+        assert_eq!(cred.tls.as_ref().expect("tls").ca_file.as_deref(), Some("/tmp/ca.pem"));
+    }
+
+    #[test]
+    fn runner_credential_none_auth_with_tls_returns_tls_only() {
+        // No-auth + TLS: the harness still needs the TLS block to connect.
+        let mut conn = base_conn(direct_target(), AuthMode::None);
+        conn.tls = Some(tls_with_cert());
+        let resolved = ResolvedConnection::bare(&conn);
+        let cred = runner_credential(&resolved).expect("tls-only credential");
+        assert_eq!(cred.username, "");
+        assert!(cred.password.is_none());
+        assert!(cred.mechanism.is_none());
+        assert!(cred.tls.is_some());
+    }
+
+    #[test]
+    fn runner_credential_disabled_tls_is_dropped() {
+        let mut conn = base_conn(direct_target(), AuthMode::None);
+        conn.tls = Some(ModelTls {
+            enabled: false,
+            allow_invalid_certs: None,
+            allow_invalid_hostnames: None,
+            ca_file: None,
+            client_cert_file: None,
+        });
         let resolved = ResolvedConnection::bare(&conn);
         assert!(runner_credential(&resolved).is_none());
     }

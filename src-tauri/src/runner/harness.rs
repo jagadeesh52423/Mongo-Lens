@@ -71,6 +71,22 @@ struct InitAuth {
     auth_mechanism: Option<String>,
 }
 
+/// TLS half of the `__init` payload. Mirrors the Node `buildClientOptions` tls
+/// keys; only sent when the connection has TLS (X509 client cert, custom CA,
+/// allow-invalid flags) so the harness connects exactly like the Rust driver.
+#[derive(Serialize)]
+struct InitTls {
+    enabled: bool,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "certKeyFile")]
+    cert_key_file: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "caFile")]
+    ca_file: Option<String>,
+    #[serde(rename = "allowInvalidCertificates")]
+    allow_invalid_certificates: bool,
+    #[serde(rename = "allowInvalidHostnames")]
+    allow_invalid_hostnames: bool,
+}
+
 impl HarnessHandle {
     /// Spawn `node harness.js --serve <db>`, send the init line, and block
     /// (up to `READY_TIMEOUT`) for the harness to confirm its MongoClient is
@@ -201,20 +217,32 @@ impl HarnessHandle {
     /// `{"__init":{}}` so the harness proceeds on the URI-embedded / no-auth
     /// path rather than blocking on a never-arriving line.
     fn write_init(&self, cred: Option<&RunnerCredential>) -> std::io::Result<()> {
-        let payload = match cred {
-            Some(c) => serde_json::json!({
-                "__init": {
+        let init = match cred {
+            None => serde_json::json!({}),
+            Some(c) => {
+                let mut init = serde_json::json!({
                     "auth": InitAuth {
                         username: c.username.clone(),
                         password: c.password.clone(),
                         auth_source: c.auth_source.clone(),
                         auth_mechanism: c.mechanism.clone(),
                     }
+                });
+                if let Some(tls) = &c.tls {
+                    if let Ok(tls_value) = serde_json::to_value(InitTls {
+                        enabled: true,
+                        cert_key_file: tls.cert_key_file.clone(),
+                        ca_file: tls.ca_file.clone(),
+                        allow_invalid_certificates: tls.allow_invalid_certs,
+                        allow_invalid_hostnames: tls.allow_invalid_hostnames,
+                    }) {
+                        init["tls"] = tls_value;
+                    }
                 }
-            }),
-            None => serde_json::json!({ "__init": {} }),
+                init
+            }
         };
-        self.write_line(&payload.to_string())
+        self.write_line(&serde_json::json!({ "__init": init }).to_string())
     }
 
     /// Register a response channel for `req_id`, write the `run` request, and
@@ -246,6 +274,45 @@ impl HarnessHandle {
         if let Err(e) = self.write_line(&req.to_string()) {
             self.inflight.lock().unwrap().remove(req_id);
             return Err(format!("harness write failed: {e}"));
+        }
+        Ok(rx)
+    }
+
+    /// Register a response channel for `req_id`, write a `data` request (a
+    /// control-plane / document op routed through this connection's one
+    /// MongoClient), and return the receiver the caller drains until `__done`.
+    /// `args` is a JSON object whose fields (collection, filter, update, page,
+    /// pageSize, ...) are merged into the request the op reads. As with
+    /// `send_run`, the demux entry is dropped by `finish_request`, not here.
+    pub fn send_data(
+        &self,
+        req_id: &str,
+        op: &str,
+        db: &str,
+        args: &serde_json::Value,
+    ) -> Result<Receiver<HarnessResponse>, String> {
+        if !self.is_alive() {
+            return Err("harness process is not running".to_string());
+        }
+        let (tx, rx) = std::sync::mpsc::channel::<HarnessResponse>();
+        self.inflight.lock().unwrap().insert(req_id.to_string(), tx);
+
+        let mut req = serde_json::json!({
+            "id": req_id,
+            "action": "data",
+            "op": op,
+            "db": db,
+        });
+        if let Some(obj) = args.as_object() {
+            // SAFETY: req was just built as a JSON object literal above.
+            let map = req.as_object_mut().unwrap();
+            for (key, value) in obj {
+                map.insert(key.clone(), value.clone());
+            }
+        }
+        if let Err(e) = self.write_line(&req.to_string()) {
+            self.inflight.lock().unwrap().remove(req_id);
+            return Err(format!("harness data write failed: {e}"));
         }
         Ok(rx)
     }

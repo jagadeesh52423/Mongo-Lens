@@ -1,21 +1,49 @@
 use crate::runner::HarnessHandle;
 use crate::state::AppState;
+use std::sync::mpsc::RecvTimeoutError;
 use std::sync::Arc;
+use std::time::Duration;
 use tauri::State;
 
-pub mod authz;
+/// Harness `data`-action op names — the wire contract with `DATA_OPS` in
+/// runner/harness.js. Single source of truth on the Rust side; a typo otherwise
+/// surfaces only at runtime as "unknown data op".
+pub mod data_op {
+    pub const LIST_DATABASES: &str = "listDatabases";
+    pub const LIST_COLLECTIONS: &str = "listCollections";
+    pub const LIST_INDEXES: &str = "listIndexes";
+    pub const FIND: &str = "find";
+    pub const UPDATE_ONE: &str = "updateOne";
+    pub const DELETE_ONE: &str = "deleteOne";
+}
 
-/// Look up the live `mongodb::Client` for an active connection. Returns
-/// an error if `connections_v2_connect` has not registered a client for
-/// this id (i.e. the connection isn't currently open).
-pub fn active_client(state: &State<'_, AppState>, id: &str) -> Result<mongodb::Client, String> {
-    state
-        .mongo_clients
-        .lock()
-        .unwrap()
-        .get(id)
-        .cloned()
-        .ok_or_else(|| "connection not active — connect first".to_string())
+/// Wall-clock budget for one harness `data` op. Matches the script run budget so
+/// a wedged control-plane op fails fast instead of hanging the command.
+const DATA_TIMEOUT_SECS: u64 = 30;
+
+/// Error from a harness `data` op. Carries the MongoDB error `code` when the
+/// harness surfaced one, so callers can replay driver-specific fallbacks (e.g.
+/// the Unauthorized=13 degrade in `list_databases`) without string-matching.
+pub struct DataError {
+    pub message: String,
+    pub code: Option<i64>,
+}
+
+impl DataError {
+    fn other(message: impl Into<String>) -> Self {
+        DataError { message: message.into(), code: None }
+    }
+    /// True for an `Unauthorized` (code 13) failure, so callers can degrade
+    /// gracefully (e.g. the `list_databases` default-db fallback).
+    pub fn is_unauthorized(&self) -> bool {
+        self.code == Some(13) || self.message.to_lowercase().contains("not authorized")
+    }
+}
+
+impl From<DataError> for String {
+    fn from(e: DataError) -> String {
+        e.message
+    }
 }
 
 /// Returns the URI that the v2 builder used to instantiate the cached
@@ -103,4 +131,90 @@ pub async fn ensure_harness(
         .unwrap()
         .insert(id.to_string(), handle.clone());
     Ok(handle)
+}
+
+/// Run a single harness `data` op (the harness is the one Mongo data path) and
+/// return its `__data` value. Ensures/respawns the harness, then drains the
+/// response on a blocking thread (the harness channel is a std mpsc). `args`
+/// carries the op's fields (collection, filter, update, page, pageSize).
+pub async fn harness_data(
+    state: &State<'_, AppState>,
+    id: &str,
+    db: &str,
+    op: &str,
+    args: serde_json::Value,
+    logger: Arc<dyn crate::logger::Logger>,
+) -> Result<serde_json::Value, DataError> {
+    let harness = ensure_harness(state, id, db, logger)
+        .await
+        .map_err(DataError::other)?;
+    let req_id = uuid::Uuid::new_v4().to_string();
+    let op = op.to_string();
+    let db = db.to_string();
+    tokio::task::spawn_blocking(move || collect_data(&harness, &req_id, &op, &db, &args))
+        .await
+        .map_err(|e| DataError::other(format!("harness data task panicked: {e}")))?
+}
+
+/// Send the `data` request and drain the response channel until `__done`,
+/// returning the `__data` value or a [`DataError`]. Runs on a blocking thread.
+fn collect_data(
+    harness: &HarnessHandle,
+    req_id: &str,
+    op: &str,
+    db: &str,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, DataError> {
+    let rx = harness
+        .send_data(req_id, op, db, args)
+        .map_err(DataError::other)?;
+
+    let mut data: Option<serde_json::Value> = None;
+    let mut error: Option<DataError> = None;
+    let outcome = loop {
+        match rx.recv_timeout(Duration::from_secs(DATA_TIMEOUT_SECS)) {
+            Ok(line) => {
+                if let Some(d) = line.get("__data") {
+                    data = Some(d.clone());
+                } else if let Some(msg) = line.get("__error").and_then(|v| v.as_str()) {
+                    error = Some(DataError {
+                        message: msg.to_string(),
+                        code: line.get("code").and_then(|v| v.as_i64()),
+                    });
+                }
+                if line.get("__done").and_then(|v| v.as_bool()) == Some(true) {
+                    break Ok(());
+                }
+            }
+            Err(RecvTimeoutError::Timeout) => {
+                let _ = harness.send_cancel(req_id);
+                break Err(DataError::other(format!(
+                    "query runner timed out ({DATA_TIMEOUT_SECS}s)"
+                )));
+            }
+            Err(RecvTimeoutError::Disconnected) => {
+                break Err(DataError::other(
+                    "query runner stopped unexpectedly — reconnect and retry".to_string(),
+                ));
+            }
+        }
+    };
+    harness.finish_request(req_id);
+    outcome?;
+
+    if let Some(e) = error {
+        return Err(e);
+    }
+    data.ok_or_else(|| DataError::other("query runner returned no data".to_string()))
+}
+
+/// Convert one Extended-JSON value the harness emitted (canonical EJSON, so BSON
+/// types survive) back into the `serde_json::Value` shape the Rust mongodb
+/// driver produced before these ops moved to the harness: parse to `Bson`, then
+/// emit relaxed Extended JSON — byte-identical to the old `to_bson(&doc).into()`
+/// path, keeping the frontend document shape unchanged.
+pub fn ejson_to_value(value: serde_json::Value) -> Result<serde_json::Value, String> {
+    let bson = mongodb::bson::Bson::try_from(value)
+        .map_err(|e| format!("decode harness document: {e}"))?;
+    Ok(bson.into())
 }
