@@ -58,6 +58,7 @@ export function AIChatPanel({ onSendMessage, onOpenSettings, onClearContext }: P
   });
 
   const [input, setInput] = useState('');
+  const [activeTab, setActiveTab] = useState<'chat' | 'agent'>('chat');
   const inputRef = useRef<AIChatInputHandle>(null);
 
   const messages = useMemo<ChatMessage[]>(
@@ -109,24 +110,52 @@ export function AIChatPanel({ onSendMessage, onOpenSettings, onClearContext }: P
         {...resizeHandlers}
       />
       <AIChatHeader onClose={() => setPanelOpen(false)} />
-      <AIChatMessageList
-        messages={messages}
-        loading={loading}
-        isConfigured={isConfigured}
-        onOpenSettings={onOpenSettings}
-        onRetry={handleRetry}
-      />
-      <AIChatInput
-        ref={inputRef}
-        value={input}
-        onChange={setInput}
-        onSend={handleSend}
-        isConfigured={isConfigured}
-        loading={loading}
-        hasActiveTab={!!activeTabId}
-        hasHistory={messages.length > 0}
-        onClearContext={handleClearContext}
-      />
+      <div className={styles.tabBar} role="tablist">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'chat'}
+          className={activeTab === 'chat' ? styles.tabActive : styles.tab}
+          onClick={() => setActiveTab('chat')}
+        >
+          Chat
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'agent'}
+          className={activeTab === 'agent' ? styles.tabActive : styles.tab}
+          onClick={() => setActiveTab('agent')}
+        >
+          Agent
+        </button>
+      </div>
+      {activeTab === 'chat' ? (
+        <>
+          <AIChatMessageList
+            messages={messages}
+            loading={loading}
+            isConfigured={isConfigured}
+            onOpenSettings={onOpenSettings}
+            onRetry={handleRetry}
+          />
+          <AIChatInput
+            ref={inputRef}
+            value={input}
+            onChange={setInput}
+            onSend={handleSend}
+            isConfigured={isConfigured}
+            loading={loading}
+            hasActiveTab={!!activeTabId}
+            hasHistory={messages.length > 0}
+            onClearContext={handleClearContext}
+          />
+        </>
+      ) : (
+        <div className={styles.agentPlaceholder}>
+          <p>Agent mode coming soon — it will run queries and explains for you to converge on a pipeline.</p>
+        </div>
+      )}
     </div>
   );
 }

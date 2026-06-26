@@ -4,6 +4,7 @@ import type {
   SavedScript,
   CollectionNode,
   IndexInfo,
+  BrowsePage,
 } from './types';
 
 // The 7 legacy connection CRUD/connect wrappers (listConnections,
@@ -26,6 +27,16 @@ export async function listIndexes(
   collection: string,
 ): Promise<IndexInfo[]> {
   return invoke('list_indexes', { connectionId, database, collection });
+}
+
+export async function browseCollection(
+  connectionId: string,
+  database: string,
+  collection: string,
+  page = 0,
+  pageSize = 25,
+): Promise<BrowsePage> {
+  return invoke('browse_collection', { connectionId, database, collection, page, pageSize });
 }
 
 export async function updateDocument(

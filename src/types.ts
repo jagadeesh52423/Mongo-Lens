@@ -98,6 +98,13 @@ export interface IndexInfo {
   keys: Record<string, number>;
 }
 
+export interface BrowsePage {
+  docs: unknown[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
 export interface PaginationState {
   total: number;   // -1 means count unavailable
   page: number;    // 0-indexed

@@ -1,6 +1,11 @@
 import { useConnectionsV2 } from '../../components/features/connections/useConnectionsV2';
 import { useEditorStore } from '../../store/editor';
 import { useResultsStore } from '../../store/results';
+import { getActiveTarget } from './activeTarget';
+import { inferType, safeStringify } from './schemaUtils';
+import { LiveSchemaContextCollector } from './collectors/LiveSchemaContextCollector';
+import { IndexContextCollector } from './collectors/IndexContextCollector';
+import { CollectionSampleContextCollector } from './collectors/CollectionSampleContextCollector';
 
 /**
  * Number of result documents included in the context preview.
@@ -77,15 +82,8 @@ export class ResultsContextCollector implements ContextCollectorInterface {
 /** Collects active connection name + database + (optional) collection. */
 export class ConnectionContextCollector implements ContextCollectorInterface {
   async collect(): Promise<string> {
-    const { tabs, activeTabId } = useEditorStore.getState();
-    const { connections, activeConnectionId, activeDatabase } = useConnectionsV2.getState();
-
-    const activeTab = tabs.find((t) => t.id === activeTabId);
-
-    // Tab-specific values override the globally active ones when available.
-    const connectionId = activeTab?.connectionId ?? activeConnectionId;
-    const database = activeTab?.database ?? activeDatabase;
-    const collection = activeTab?.collection;
+    const { connectionId, database, collection } = getActiveTarget();
+    const { connections } = useConnectionsV2.getState();
 
     if (!connectionId && !database) return '';
 
@@ -135,6 +133,9 @@ export class ContextCollector {
       new SelectionContextCollector(),
       new ResultsContextCollector(),
       new SchemaContextCollector(),
+      new LiveSchemaContextCollector(),
+      new IndexContextCollector(),
+      new CollectionSampleContextCollector(),
     ];
   }
 
@@ -151,35 +152,4 @@ export class ContextCollector {
     );
     return parts.map((p) => p.trim()).filter((p) => p.length > 0).join('\n\n');
   }
-}
-
-/** Best-effort JSON stringify that survives BSON-ish values (ObjectId, Date). */
-function safeStringify(value: unknown): string {
-  try {
-    return JSON.stringify(value, jsonReplacer, 2);
-  } catch {
-    return String(value);
-  }
-}
-
-function jsonReplacer(_key: string, value: unknown): unknown {
-  if (value instanceof Date) return value.toISOString();
-  // BigInt is not JSON-serializable by default; downcast to string for the prompt.
-  if (typeof value === 'bigint') return value.toString();
-  return value;
-}
-
-function inferType(value: unknown): string {
-  if (value === null) return 'null';
-  if (Array.isArray(value)) return 'array';
-  if (value instanceof Date) return 'Date';
-  const t = typeof value;
-  if (t === 'object') {
-    // Common BSON-ish hint: plain objects with $oid look like ObjectIds.
-    const obj = value as Record<string, unknown>;
-    if ('$oid' in obj) return 'ObjectId';
-    if ('$date' in obj) return 'Date';
-    return 'object';
-  }
-  return t;
 }

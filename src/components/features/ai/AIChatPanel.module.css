@@ -36,3 +36,30 @@
 }
 .loadingDots span:nth-child(2) { animation-delay: 0.2s; }
 .loadingDots span:nth-child(3) { animation-delay: 0.4s; }
+
+.tabBar {
+  display: flex;
+  gap: 4px;
+  padding: 4px 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.tab,
+.tabActive {
+  appearance: none;
+  background: transparent;
+  border: none;
+  padding: 6px 10px;
+  font: inherit;
+  color: var(--fg-dim);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+.tabActive {
+  color: var(--fg);
+  border-bottom-color: var(--accent);
+}
+.agentPlaceholder {
+  padding: 24px 16px;
+  color: var(--fg-dim);
+  font-size: 13px;
+}
