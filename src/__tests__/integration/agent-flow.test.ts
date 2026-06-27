@@ -38,9 +38,9 @@ describe('agent flow (real classifier + policy + store)', () => {
       emit: () => {},
     });
 
-    const final = await svc.run('goal', { connectionId: 'c', database: 'd', collections: ['users'] });
+    const { answer } = await svc.run('goal', { connectionId: 'c', database: 'd', collections: ['users'] });
 
-    expect(final).toContain('final answer');
+    expect(answer).toContain('final answer');
     // The real classifier marks find as non-destructive (runs) and deleteMany as
     // destructive (blockWrites prevents execution).
     expect(runStatement).toHaveBeenCalledTimes(1);

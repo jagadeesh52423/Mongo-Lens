@@ -19,8 +19,8 @@ it('auto-runs a read tool then returns the final answer', async () => {
     onDestructive: blockWrites,
     emit: (e) => emitted.push(e),
   });
-  const final = await svc.run('show users', { connectionId: 'c', database: 'd', collections: ['u'] });
-  expect(final).toContain('Here is your answer');
+  const { answer } = await svc.run('show users', { connectionId: 'c', database: 'd', collections: ['u'] });
+  expect(answer).toContain('Here is your answer');
   expect(emitted.some((e) => e.kind === 'tool-call')).toBe(true);
   expect(emitted.some((e) => e.kind === 'final')).toBe(true);
 });
@@ -50,8 +50,8 @@ it('stops at the iteration cap', async () => {
     emit: () => {},
     maxIter: 3,
   });
-  const final = await svc.run('loop', { connectionId: 'c', database: 'd', collections: ['u'] });
-  expect(final).toMatch(/stopped|iteration/i);
+  const { answer } = await svc.run('loop', { connectionId: 'c', database: 'd', collections: ['u'] });
+  expect(answer).toMatch(/stopped|iteration/i);
 });
 
 it('runs a destructive statement only after the policy approves', async () => {
@@ -70,4 +70,31 @@ it('runs a destructive statement only after the policy approves', async () => {
   await svc.run('delete', { connectionId: 'c', database: 'd', collections: ['u'] });
   expect(approve).toHaveBeenCalled();
   expect(run).toHaveBeenCalledOnce();
+});
+
+it('carries prior conversation into a follow-up run (keeps context)', async () => {
+  const prov = provider([
+    { content: 'first answer', toolCalls: [] },
+    { content: 'second answer', toolCalls: [] },
+  ]);
+  const svc = new AgentService({
+    provider: prov,
+    runStatement: vi.fn(),
+    classify: () => ({ destructive: false, category: 'query', collection: 'u' }),
+    onDestructive: blockWrites,
+    emit: () => {},
+  });
+  const target = { connectionId: 'c', database: 'd', collections: ['u'] };
+
+  const first = await svc.run('how many users?', target);
+  // Returned messages include system + user + assistant(final).
+  expect(first.messages[0]).toMatchObject({ role: 'system' });
+  expect(first.messages.some((m) => m.role === 'user' && m.content === 'how many users?')).toBe(true);
+
+  // Follow-up seeded with prior messages: NO new system message, prior user goal retained.
+  await svc.run('and how many active?', target, first.messages);
+  const secondCallMessages = prov.chatWithTools.mock.calls[1][0].messages;
+  expect(secondCallMessages.filter((m: { role: string }) => m.role === 'system')).toHaveLength(1);
+  expect(secondCallMessages.some((m: { content?: string }) => m.content === 'how many users?')).toBe(true);
+  expect(secondCallMessages.some((m: { content?: string }) => m.content === 'and how many active?')).toBe(true);
 });

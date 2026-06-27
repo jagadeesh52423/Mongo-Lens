@@ -1,10 +1,15 @@
-import styles from './AgentPanel.module.css';
+import { CodeBlock } from './CodeBlock';
 
-/** Renders a single agent tool call (the MongoDB statement) as a code block. */
-export function AgentToolCard({ statement }: { statement: string }) {
-  return (
-    <pre className={styles.toolCard}>
-      <code>{statement}</code>
-    </pre>
-  );
+/**
+ * Renders a statement the agent executed as an extractable `CodeBlock` — so the
+ * user can Insert/Append it into the editor or Explain it, same as Chat code.
+ */
+export function AgentToolCard({
+  statement,
+  onSendToAI,
+}: {
+  statement: string;
+  onSendToAI?: (content: string) => void;
+}) {
+  return <CodeBlock lang="javascript" code={statement} onSendToAI={onSendToAI} />;
 }

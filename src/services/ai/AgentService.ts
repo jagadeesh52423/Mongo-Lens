@@ -27,22 +27,34 @@ const SYSTEM = (db: string, collections: string[]) =>
 export class AgentService {
   constructor(private readonly deps: AgentDeps) {}
 
-  async run(goal: string, target: AgentTarget): Promise<string> {
+  /**
+   * Run one agent turn. Pass `history` (the messages a prior run on the same tab
+   * returned) to continue the conversation so follow-ups keep context; omit it
+   * (or pass []) to start fresh. Returns the answer plus the full message list
+   * to persist for the next turn.
+   */
+  async run(
+    goal: string,
+    target: AgentTarget,
+    history: AgentMessage[] = [],
+  ): Promise<{ answer: string; messages: AgentMessage[] }> {
     const { provider, runStatement, classify, onDestructive, emit, signal } = this.deps;
     const maxIter = this.deps.maxIter ?? 8;
     const model = this.deps.model ?? 'gpt-4o';
-    const messages: AgentMessage[] = [
-      { role: 'system', content: SYSTEM(target.database, target.collections) },
-      { role: 'user', content: goal },
-    ];
+    const messages: AgentMessage[] = history.length
+      ? [...history, { role: 'user', content: goal }]
+      : [
+          { role: 'system', content: SYSTEM(target.database, target.collections) },
+          { role: 'user', content: goal },
+        ];
 
     for (let i = 0; i < maxIter; i++) {
-      if (signal?.aborted) return 'Agent stopped.';
+      if (signal?.aborted) return { answer: 'Agent stopped.', messages };
       const { content, toolCalls } = await provider.chatWithTools({ messages, model }, [RUN_MONGO_TOOL], signal);
 
       if (!toolCalls.length) {
         if (content) emit({ kind: 'final', text: content });
-        return content;
+        return { answer: content, messages };
       }
       if (content) emit({ kind: 'model-text', text: content });
       messages.push({ role: 'assistant', content: content || null, toolCalls });
@@ -79,6 +91,6 @@ export class AgentService {
     }
     const msg = 'Agent stopped after reaching the iteration limit.';
     emit({ kind: 'error', text: msg });
-    return msg;
+    return { answer: msg, messages };
   }
 }

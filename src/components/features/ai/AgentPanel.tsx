@@ -2,15 +2,17 @@ import { useState } from 'react';
 import { useAgentStore, type AgentEntry } from '../../../store/agent';
 import { getActiveTarget } from '../../../services/ai/activeTarget';
 import { startAgentRun } from '../../../services/ai/agentRunner';
+import { AssistantContent } from './AssistantContent';
 import { AgentToolCard } from './AgentToolCard';
 import { AgentConfirmCard } from './AgentConfirmCard';
 import styles from './AgentPanel.module.css';
 
 /**
- * Read-only Agent panel (phase 2a). Renders the per-tab agent transcript and
- * lets the user kick off an agent run against the active connection/database.
- * Writes are blocked at the policy layer; the `confirm` entry kind is rendered
- * in a later task once the approval UI exists.
+ * Agent panel. Renders the per-tab agent transcript and runs the agent against
+ * the active connection/database. Each submit continues the prior conversation
+ * (history is carried in the agent store), so follow-up questions keep context.
+ * Model text, the final answer, and each executed statement render through the
+ * shared CodeBlock pipeline, so their code is extractable into the editor.
  */
 export function AgentPanel({ tabId }: { tabId: string }) {
   const [goal, setGoal] = useState('');
@@ -20,21 +22,26 @@ export function AgentPanel({ tabId }: { tabId: string }) {
   const target = getActiveTarget();
   const ready = !!target.connectionId && !!target.database;
 
-  const submit = () => {
-    const g = goal.trim();
+  const run = (text: string) => {
+    const g = text.trim();
     if (!g || !ready || running) return;
-    setGoal('');
     void startAgentRun(tabId, g, {
       connectionId: target.connectionId!,
       database: target.database!,
     });
   };
 
+  const submit = () => {
+    if (!goal.trim()) return;
+    run(goal);
+    setGoal('');
+  };
+
   return (
     <div className={styles.panel}>
       <div className={styles.transcript}>
         {entries.map((e, i) => (
-          <Entry key={i} e={e} tabId={tabId} />
+          <Entry key={i} e={e} tabId={tabId} onSendToAI={run} />
         ))}
         {running && <div className={styles.thinking}>Working…</div>}
       </div>
@@ -62,13 +69,22 @@ export function AgentPanel({ tabId }: { tabId: string }) {
   );
 }
 
-function Entry({ e, tabId }: { e: AgentEntry; tabId: string }) {
-  if (e.kind === 'tool-call') return <AgentToolCard statement={e.statement} />;
+function Entry({
+  e,
+  tabId,
+  onSendToAI,
+}: {
+  e: AgentEntry;
+  tabId: string;
+  onSendToAI: (content: string) => void;
+}) {
+  if (e.kind === 'user') return <div className={styles.userText}>{e.text}</div>;
+  if (e.kind === 'tool-call') return <AgentToolCard statement={e.statement} onSendToAI={onSendToAI} />;
   if (e.kind === 'tool-result')
     return <div className={e.ok ? styles.toolOk : styles.toolErr}>{e.summary}</div>;
-  if (e.kind === 'final') return <div className={styles.final}>{e.text}</div>;
+  if (e.kind === 'final') return <AssistantContent content={e.text} onSendToAI={onSendToAI} />;
+  if (e.kind === 'model-text') return <AssistantContent content={e.text} onSendToAI={onSendToAI} />;
   if (e.kind === 'error') return <div className={styles.error}>{e.text}</div>;
-  if (e.kind === 'model-text') return <div className={styles.modelText}>{e.text}</div>;
   if (e.kind === 'confirm')
     return (
       <AgentConfirmCard

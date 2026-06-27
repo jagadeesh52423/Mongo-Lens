@@ -15,7 +15,7 @@ export async function startAgentRun(
   target: { connectionId: string; database: string },
 ): Promise<void> {
   const store = useAgentStore.getState();
-  store.append(tabId, { kind: 'model-text', text: goal });
+  store.append(tabId, { kind: 'user', text: goal });
   store.setRunning(tabId, true);
   try {
     const cfg = useSettingsStore.getState().aiConfig;
@@ -33,7 +33,10 @@ export async function startAgentRun(
       model: cfg.model,
     });
     const full: AgentTarget = { ...target, collections };
-    await svc.run(goal, full);
+    // Continue the prior conversation so follow-ups keep context.
+    const history = useAgentStore.getState().convoByTab[tabId] ?? [];
+    const { messages } = await svc.run(goal, full, history);
+    useAgentStore.getState().setConvo(tabId, messages);
   } catch (err) {
     useAgentStore.getState().append(tabId, {
       kind: 'error',
