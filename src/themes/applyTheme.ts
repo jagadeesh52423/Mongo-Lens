@@ -43,15 +43,21 @@ export function buildMonacoSyntaxRules(
   ];
 }
 
-export function applyMonacoTheme(themeId: string): void {
+/**
+ * Define + activate the app's Monaco theme. Returns a promise that resolves once
+ * the theme is set, so callers that colorize (e.g. CodeBlock) can AWAIT it first
+ * — otherwise a colorize that wins the race against this runs under Monaco's
+ * default light `vs` theme and emits near-black tokens, invisible on the dark UI.
+ */
+export function applyMonacoTheme(themeId: string): Promise<void> {
   const merged = mergedVariables(themeId);
-  if (!merged) return;
+  if (!merged) return Promise.resolve();
   const panel = merged['--bg-elev-1'] ?? merged['--bg-panel'] ?? merged['--bg'] ?? '#0a0b0d';
   const base = isLightColor(panel) ? 'vs' : 'vs-dark';
   const read = (name: string) => merged[name] ?? '';
   const rules = buildMonacoSyntaxRules(read).filter((r) => /^[0-9a-fA-F]{6}$/.test(r.foreground));
 
-  loader.init().then((monaco) => {
+  return loader.init().then((monaco) => {
     monaco.editor.defineTheme(MONACO_THEME_ID, {
       base,
       inherit: true,

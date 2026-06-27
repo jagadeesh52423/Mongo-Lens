@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { loader } from '@monaco-editor/react';
 import { useEditorBridgeStore } from '../../../store/editorBridge';
+import { useSettingsStore } from '../../../store/settings';
+import { applyMonacoTheme } from '../../../themes/applyTheme';
 import { getActiveTarget } from '../../../services/ai/activeTarget';
 import { isExplainable, runExplain, summarizeExplain, formatExplainSummary } from '../../../services/ai/explain';
 import styles from './CodeBlock.module.css';
@@ -21,6 +23,7 @@ type ExplainState =
 export function CodeBlock({ lang, code, onSendToAI }: Props) {
   const controller = useEditorBridgeStore((s) => s.controller);
   const hasSelection = useEditorBridgeStore((s) => s.hasSelection);
+  const themeId = useSettingsStore((s) => s.themeId);
   const [html, setHtml] = useState<string | null>(null);
   const [explain, setExplain] = useState<ExplainState>({ status: 'idle' });
   const cancelledRef = useRef(false);
@@ -49,11 +52,15 @@ export function CodeBlock({ lang, code, onSendToAI }: Props) {
   useEffect(() => {
     cancelledRef.current = false;
     const language = lang || 'plaintext';
-    loader
-      .init()
+    // Apply the app's Monaco theme BEFORE colorizing. Without this, a colorize
+    // that wins the boot race runs under Monaco's default light `vs` theme and
+    // emits near-black tokens (invisible on the dark UI) — and the result is
+    // cached, so the code stays black. Re-runs on theme change via the dep.
+    applyMonacoTheme(themeId)
+      .then(() => loader.init())
       .then((monaco) => monaco.editor.colorize(code, language, { tabSize: 2 }))
       .then((result) => {
-        if (!cancelledRef.current) setHtml(result);
+        if (!cancelledRef.current) setHtml(result || null);
       })
       .catch(() => {
         if (!cancelledRef.current) setHtml(null);
@@ -61,7 +68,7 @@ export function CodeBlock({ lang, code, onSendToAI }: Props) {
     return () => {
       cancelledRef.current = true;
     };
-  }, [lang, code]);
+  }, [lang, code, themeId]);
 
   const disabled = controller === null;
   const primaryLabel = hasSelection ? 'Update' : 'Insert at';
