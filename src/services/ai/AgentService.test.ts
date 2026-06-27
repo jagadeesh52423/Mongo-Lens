@@ -98,3 +98,29 @@ it('carries prior conversation into a follow-up run (keeps context)', async () =
   expect(secondCallMessages.some((m: { content?: string }) => m.content === 'how many users?')).toBe(true);
   expect(secondCallMessages.some((m: { content?: string }) => m.content === 'and how many active?')).toBe(true);
 });
+
+it('injects grounding into the first-turn system prompt, not follow-ups', async () => {
+  const prov = provider([
+    { content: 'a1', toolCalls: [] },
+    { content: 'a2', toolCalls: [] },
+  ]);
+  const svc = new AgentService({
+    provider: prov,
+    runStatement: vi.fn(),
+    classify: () => ({ destructive: false, category: 'query', collection: 'u' }),
+    onDestructive: blockWrites,
+    emit: () => {},
+  });
+  const target = { connectionId: 'c', database: 'd', collections: ['u'] };
+  const grounding = 'Indexes on users:\n- email_1';
+
+  const first = await svc.run('q1', target, [], grounding);
+  const sys = first.messages.find((m) => m.role === 'system');
+  expect(sys?.content).toContain('Indexes on users');
+
+  // Follow-up reuses history; grounding lives in the carried system message,
+  // never re-injected as a second system message.
+  await svc.run('q2', target, first.messages, grounding);
+  const secondCall = prov.chatWithTools.mock.calls[1][0].messages;
+  expect(secondCall.filter((m: { role: string }) => m.role === 'system')).toHaveLength(1);
+});

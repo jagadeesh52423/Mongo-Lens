@@ -37,14 +37,20 @@ export class AgentService {
     goal: string,
     target: AgentTarget,
     history: AgentMessage[] = [],
+    grounding = '',
   ): Promise<{ answer: string; messages: AgentMessage[] }> {
     const { provider, runStatement, classify, onDestructive, emit, signal } = this.deps;
     const maxIter = this.deps.maxIter ?? 25;
     const model = this.deps.model ?? 'gpt-4o';
+    // First turn seeds the system prompt (incl. the same live grounding Chat
+    // injects); follow-ups reuse the carried history, which already has it.
+    const system = grounding
+      ? `${SYSTEM(target.database, target.collections)}\n\n${grounding}`
+      : SYSTEM(target.database, target.collections);
     const messages: AgentMessage[] = history.length
       ? [...history, { role: 'user', content: goal }]
       : [
-          { role: 'system', content: SYSTEM(target.database, target.collections) },
+          { role: 'system', content: system },
           { role: 'user', content: goal },
         ];
 

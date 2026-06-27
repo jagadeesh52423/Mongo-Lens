@@ -3,6 +3,7 @@ import type { AgentTarget } from './AgentService';
 import { runStatement } from './runStatement';
 import { classifyStatement } from './agentTools';
 import { confirmViaStore } from './destructivePolicy';
+import { ContextCollector } from './ContextCollector';
 import { providerRegistry, OPENAI_COMPATIBLE } from './providers/ProviderRegistry';
 import { useSettingsStore } from '../../store/settings';
 import { getAiToken, listCollections } from '../../ipc';
@@ -35,7 +36,10 @@ export async function startAgentRun(
     const full: AgentTarget = { ...target, collections };
     // Continue the prior conversation so follow-ups keep context.
     const history = useAgentStore.getState().convoByTab[tabId] ?? [];
-    const { messages } = await svc.run(goal, full, history);
+    // Seed the first turn with the same live grounding Chat uses (schema,
+    // indexes, sample of the active collection). Reused, not duplicated.
+    const grounding = history.length ? '' : await new ContextCollector().collectAll().catch(() => '');
+    const { messages } = await svc.run(goal, full, history, grounding);
     useAgentStore.getState().setConvo(tabId, messages);
   } catch (err) {
     useAgentStore.getState().append(tabId, {
