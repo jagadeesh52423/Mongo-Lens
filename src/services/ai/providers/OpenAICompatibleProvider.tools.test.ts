@@ -51,10 +51,40 @@ describe('chatWithTools', () => {
     expect(sent[2]).toEqual({ role: 'tool', tool_call_id: 'c1', content: 'result' });
   });
 
-  it('throws ToolsUnsupportedError on a tool-related 400', async () => {
+  it('sends tools and tool_choice when a ToolDef[] is provided', async () => {
+    create.mockResolvedValue({ choices: [{ message: { content: 'ok' } }] });
+    const p = new OpenAICompatibleProvider(cfg);
+    const tools = [{ name: 'runMongo', description: 'run', parameters: { type: 'object' } }];
+    await p.chatWithTools({ messages: [{ role: 'user', content: 'go' }], model: 'm' }, tools);
+    const sent = create.mock.calls[0][0];
+    expect(sent.tools).toEqual([{ type: 'function', function: tools[0] }]);
+    expect(sent.tool_choice).toBe('auto');
+  });
+
+  it('falls back to {} when tool_call arguments are invalid JSON', async () => {
+    create.mockResolvedValue({
+      choices: [{ message: { content: '', tool_calls: [
+        { id: 'c1', type: 'function', function: { name: 'runMongo', arguments: '{not json' } },
+      ] } }],
+    });
+    const p = new OpenAICompatibleProvider(cfg);
+    const res = await p.chatWithTools({ messages: [{ role: 'user', content: 'hi' }], model: 'm' }, []);
+    expect(res.toolCalls).toEqual([{ id: 'c1', name: 'runMongo', arguments: {} }]);
+  });
+
+  it('throws ToolsUnsupportedError on a tool-related 400 (only when tools were sent)', async () => {
     create.mockRejectedValue(Object.assign(new Error('tools not supported'), { status: 400 }));
     const p = new OpenAICompatibleProvider(cfg);
-    await expect(p.chatWithTools({ messages: [{ role: 'user', content: 'x' }], model: 'm' }, []))
+    const tools = [{ name: 'runMongo', description: 'run', parameters: { type: 'object' } }];
+    await expect(p.chatWithTools({ messages: [{ role: 'user', content: 'x' }], model: 'm' }, tools))
       .rejects.toBeInstanceOf(ToolsUnsupportedError);
+  });
+
+  it('re-throws a generic 400 unchanged when no tools were requested', async () => {
+    const err = Object.assign(new Error('bad function argument'), { status: 400 });
+    create.mockRejectedValue(err);
+    const p = new OpenAICompatibleProvider(cfg);
+    await expect(p.chatWithTools({ messages: [{ role: 'user', content: 'x' }], model: 'm' }, []))
+      .rejects.toBe(err);
   });
 });

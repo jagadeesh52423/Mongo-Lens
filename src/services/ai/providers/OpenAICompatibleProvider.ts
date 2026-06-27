@@ -104,7 +104,7 @@ export class OpenAICompatibleProvider implements AIProvider {
       response = await this.client.chat.completions.create(
         {
           model: request.model,
-          messages: messages as never,
+          messages: messages as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
           temperature: request.temperature ?? DEFAULT_TEMPERATURE,
           stream: false,
           ...(tools.length
@@ -116,17 +116,23 @@ export class OpenAICompatibleProvider implements AIProvider {
     } catch (err) {
       const status = (err as { status?: number }).status;
       const msg = err instanceof Error ? err.message : String(err);
-      if (status === 400 && /tool|function/i.test(msg)) throw new ToolsUnsupportedError();
+      // Best-effort detection: only when we actually requested tools and the
+      // backend rejects with a tool/function-related 400 do we surface the
+      // typed error, so callers can degrade gracefully to plain chat.
+      if (tools.length && status === 400 && /tool|function/i.test(msg)) throw new ToolsUnsupportedError();
       throw err;
     }
 
     const choice = response.choices[0];
-    const rawCalls = (choice?.message as { tool_calls?: any[] })?.tool_calls ?? [];
-    const toolCalls: ToolCall[] = rawCalls.map((c) => {
-      let args: Record<string, unknown> = {};
-      try { args = JSON.parse(c.function.arguments || '{}'); } catch { args = {}; }
-      return { id: c.id, name: c.function.name, arguments: args };
-    });
+    const rawCalls = choice?.message?.tool_calls ?? [];
+    const toolCalls: ToolCall[] = rawCalls
+      // The SDK types tool_calls as function | custom; we only handle function calls.
+      .filter((c): c is Extract<typeof c, { type: 'function' }> => c.type === 'function')
+      .map((c) => {
+        let args: Record<string, unknown> = {};
+        try { args = JSON.parse(c.function.arguments || '{}'); } catch { args = {}; }
+        return { id: c.id, name: c.function.name, arguments: args };
+      });
     return { content: choice?.message?.content ?? '', toolCalls };
   }
 
