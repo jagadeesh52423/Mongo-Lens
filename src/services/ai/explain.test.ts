@@ -93,6 +93,11 @@ describe('runExplain', () => {
     expect(plan).toEqual(planDoc);
     expect(mockRun).toHaveBeenCalledOnce();
     expect(unsub).toHaveBeenCalled();
+    // The script must be awaited and NOT paren-wrapped — the harness only
+    // auto-awaits lines starting with `db.`, so a wrapped expr would never run.
+    const script = mockRun.mock.calls[0][3];
+    expect(script).toBe("await db.users.find({}).explain('executionStats')");
+    expect(script.startsWith('(')).toBe(false);
   });
 
   it('rejects on an error event', async () => {

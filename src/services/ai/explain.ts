@@ -25,7 +25,12 @@ export async function runExplain(
   snippet: string,
 ): Promise<unknown> {
   const expr = snippet.trim().replace(/;+\s*$/, '');
-  const res = await runStatement(connectionId, database, `(${expr}).explain('executionStats')`, {
+  // Prepend `await` explicitly. The harness only auto-awaits lines starting with
+  // `db.`; wrapping in parens (or bracket-notation snippets) would skip that, so
+  // the .explain() promise wouldn't be awaited and the run would finish before
+  // the plan group is emitted ("Explain returned no plan").
+  const script = `await ${expr}.explain('executionStats')`;
+  const res = await runStatement(connectionId, database, script, {
     tabId: '__ai_explain__',
     maxDocsPerGroup: 1,
   });
