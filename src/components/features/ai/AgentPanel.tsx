@@ -17,6 +17,7 @@ import styles from './AgentPanel.module.css';
 export function AgentPanel({ tabId }: { tabId: string }) {
   const [goal, setGoal] = useState('');
   const tab = useAgentStore((s) => s.byTab[tabId]);
+  const clear = useAgentStore((s) => s.clear);
   const entries = tab?.entries ?? [];
   const running = tab?.running ?? false;
   const target = getActiveTarget();
@@ -46,6 +47,17 @@ export function AgentPanel({ tabId }: { tabId: string }) {
         {running && <div className={styles.thinking}>Working…</div>}
       </div>
       <div className={styles.inputRow}>
+        {entries.length > 0 && (
+          <button
+            type="button"
+            className={styles.clear}
+            onClick={() => clear(tabId)}
+            disabled={running}
+            title="Clear the agent conversation and start fresh"
+          >
+            Clear
+          </button>
+        )}
         <input
           className={styles.input}
           placeholder={ready ? 'Ask the agent…' : 'Connect to a database first'}

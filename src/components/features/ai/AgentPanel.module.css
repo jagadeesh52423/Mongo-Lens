@@ -187,3 +187,14 @@
 .transcript > * {
   flex-shrink: 0;
 }
+
+.clear {
+  padding: 6px 10px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--fg-dim);
+  font-size: 13px;
+  cursor: pointer;
+}
+.clear:disabled { opacity: 0.5; cursor: default; }
