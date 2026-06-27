@@ -54,4 +54,48 @@ export interface AIProvider {
   chat(request: ChatRequest, signal?: AbortSignal): Promise<ChatResponse>;
   /** Streaming chat completion. Yields content chunks as they arrive. */
   streamChat(request: ChatRequest, signal?: AbortSignal): AsyncGenerator<string>;
+  /**
+   * Tool-calling completion for the agent loop. Returns the model's text and
+   * any tool calls. Throws ToolsUnsupportedError when the backend rejects tools.
+   */
+  chatWithTools(request: ToolChatRequest, tools: ToolDef[], signal?: AbortSignal): Promise<ToolChatResponse>;
+}
+
+/** JSON-schema tool definition passed to the model. */
+export interface ToolDef {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+}
+
+/** A tool invocation the model requested. `arguments` is parsed JSON. */
+export interface ToolCall {
+  id: string;
+  name: string;
+  arguments: Record<string, unknown>;
+}
+
+/** Superset of ChatMessage for the tool loop (adds tool results + tool_calls). */
+export type AgentMessage =
+  | { role: 'system' | 'user'; content: string }
+  | { role: 'assistant'; content: string | null; toolCalls?: ToolCall[] }
+  | { role: 'tool'; toolCallId: string; content: string };
+
+export interface ToolChatRequest {
+  messages: AgentMessage[];
+  model: string;
+  temperature?: number;
+}
+
+export interface ToolChatResponse {
+  content: string;
+  toolCalls: ToolCall[];
+}
+
+/** Thrown when the configured model/endpoint does not support tool calling. */
+export class ToolsUnsupportedError extends Error {
+  constructor(message = 'This model does not support tool calling') {
+    super(message);
+    this.name = 'ToolsUnsupportedError';
+  }
 }

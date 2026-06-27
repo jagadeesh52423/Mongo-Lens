@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
-import type { AIConfig, AIProvider, ChatRequest, ChatResponse } from './AIProvider';
+import type { AIConfig, AIProvider, ChatRequest, ChatResponse, ToolDef, ToolCall, ToolChatRequest, ToolChatResponse } from './AIProvider';
+import { ToolsUnsupportedError } from './AIProvider';
 
 /**
  * Default temperature when the caller doesn't specify one.
@@ -78,6 +79,55 @@ export class OpenAICompatibleProvider implements AIProvider {
       const delta = chunk.choices[0]?.delta?.content;
       if (delta) yield delta;
     }
+  }
+
+  async chatWithTools(request: ToolChatRequest, tools: ToolDef[], signal?: AbortSignal): Promise<ToolChatResponse> {
+    const messages = request.messages.map((m) => {
+      if (m.role === 'tool') return { role: 'tool' as const, tool_call_id: m.toolCallId, content: m.content };
+      if (m.role === 'assistant') {
+        return {
+          role: 'assistant' as const,
+          content: m.content,
+          ...(m.toolCalls?.length
+            ? { tool_calls: m.toolCalls.map((tc) => ({
+                id: tc.id, type: 'function' as const,
+                function: { name: tc.name, arguments: JSON.stringify(tc.arguments) },
+              })) }
+            : {}),
+        };
+      }
+      return { role: m.role, content: m.content };
+    });
+
+    let response;
+    try {
+      response = await this.client.chat.completions.create(
+        {
+          model: request.model,
+          messages: messages as never,
+          temperature: request.temperature ?? DEFAULT_TEMPERATURE,
+          stream: false,
+          ...(tools.length
+            ? { tools: tools.map((t) => ({ type: 'function' as const, function: t })), tool_choice: 'auto' as const }
+            : {}),
+        },
+        { signal },
+      );
+    } catch (err) {
+      const status = (err as { status?: number }).status;
+      const msg = err instanceof Error ? err.message : String(err);
+      if (status === 400 && /tool|function/i.test(msg)) throw new ToolsUnsupportedError();
+      throw err;
+    }
+
+    const choice = response.choices[0];
+    const rawCalls = (choice?.message as { tool_calls?: any[] })?.tool_calls ?? [];
+    const toolCalls: ToolCall[] = rawCalls.map((c) => {
+      let args: Record<string, unknown> = {};
+      try { args = JSON.parse(c.function.arguments || '{}'); } catch { args = {}; }
+      return { id: c.id, name: c.function.name, arguments: args };
+    });
+    return { content: choice?.message?.content ?? '', toolCalls };
   }
 
   /** Expose the config the provider was built with (useful for diagnostics / test-connection). */
