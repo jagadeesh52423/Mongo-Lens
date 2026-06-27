@@ -1,15 +1,4 @@
-import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import { runScript } from '../../ipc';
-import type { ScriptEvent } from '../../types';
-
-/**
- * Dedicated tab id for AI explain runs. The global useScriptEvents listener
- * keys results by `byTab[tabId].runId`; this tab has no results entry, so its
- * runId never matches and those events are ignored there — keeping explain runs
- * out of the editor results panel.
- */
-const EXPLAIN_TAB_ID = '__ai_explain__';
-const EXPLAIN_TIMEOUT_MS = 30_000;
+import { runStatement } from './runStatement';
 
 export interface ExplainSummary {
   stage: string;
@@ -27,64 +16,22 @@ export function isExplainable(code: string): boolean {
 /**
  * Run `(<snippet>).explain('executionStats')` through the existing script path
  * (the harness cursor proxy emits the plan as a group) and resolve with the raw
- * plan doc. One-shot: attaches a scoped script-event listener, fires the run,
- * resolves on `done`, rejects on `error`/timeout, and always unsubscribes.
+ * plan doc. Delegates to runStatement with a dedicated tab so explain runs stay
+ * out of the editor results panel.
  */
 export async function runExplain(
   connectionId: string,
   database: string,
   snippet: string,
 ): Promise<unknown> {
-  const runId =
-    globalThis.crypto?.randomUUID?.() ?? `explain-${Date.now()}-${Math.round(Math.random() * 1e9)}`;
   const expr = snippet.trim().replace(/;+\s*$/, '');
-  const script = `(${expr}).explain('executionStats')`;
-
-  let settleResolve!: (v: unknown) => void;
-  let settleReject!: (e: Error) => void;
-  let plan: unknown;
-  let finished = false;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-
-  const result = new Promise<unknown>((resolve, reject) => {
-    settleResolve = resolve;
-    settleReject = reject;
+  const res = await runStatement(connectionId, database, `(${expr}).explain('executionStats')`, {
+    tabId: '__ai_explain__',
+    maxDocsPerGroup: 1,
   });
-  const finish = (fn: () => void) => {
-    if (finished) return;
-    finished = true;
-    if (timer) clearTimeout(timer);
-    fn();
-  };
-
-  timer = setTimeout(() => finish(() => settleReject(new Error('Explain timed out'))), EXPLAIN_TIMEOUT_MS);
-
-  let unsub: UnlistenFn | null = null;
-  unsub = await listen<ScriptEvent>('script-event', (e) => {
-    const p = e.payload;
-    if (p.tabId !== EXPLAIN_TAB_ID || p.runId !== runId) return;
-    if (p.kind === 'group' && p.docs !== undefined) {
-      plan = Array.isArray(p.docs) ? p.docs[0] : p.docs;
-    } else if (p.kind === 'error') {
-      finish(() => settleReject(new Error(p.error || 'Explain failed')));
-    } else if (p.kind === 'done') {
-      finish(() =>
-        plan !== undefined
-          ? settleResolve(plan)
-          : settleReject(new Error('Explain returned no plan')),
-      );
-    }
-  });
-
-  try {
-    await runScript(EXPLAIN_TAB_ID, connectionId, database, script, 0, 1, runId);
-    return await result;
-  } catch (err) {
-    finish(() => settleReject(err instanceof Error ? err : new Error(String(err))));
-    return await result;
-  } finally {
-    unsub?.();
-  }
+  const plan = res.groups[0]?.docs?.[0];
+  if (plan === undefined) throw new Error('Explain returned no plan');
+  return plan;
 }
 
 /** Recursively find the first indexName in a winning-plan tree. */
