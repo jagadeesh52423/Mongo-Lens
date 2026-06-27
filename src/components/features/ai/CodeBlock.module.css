@@ -53,3 +53,30 @@
   overflow-x: auto;
   color: var(--fg);
 }
+
+.explainSummary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  font-size: 12px;
+  color: var(--fg-dim);
+  border-bottom: 1px solid var(--border);
+}
+.explainSend {
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font: inherit;
+  font-size: 11px;
+  color: var(--fg);
+  cursor: pointer;
+}
+.explainError {
+  padding: 4px 8px;
+  font-size: 12px;
+  color: var(--accent-red);
+  border-bottom: 1px solid var(--border);
+}

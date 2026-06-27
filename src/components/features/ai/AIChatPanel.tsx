@@ -87,6 +87,11 @@ export function AIChatPanel({ onSendMessage, onOpenSettings, onClearContext }: P
     inputRef.current?.focus();
   }, []);
 
+  const handleSendToAI = useCallback((content: string) => {
+    if (!activeTabId || loading) return;
+    onSendMessage(activeTabId, content);
+  }, [activeTabId, loading, onSendMessage]);
+
   const handleClearContext = useCallback(() => {
     if (!activeTabId) return;
     if (onClearContext) {
@@ -138,6 +143,7 @@ export function AIChatPanel({ onSendMessage, onOpenSettings, onClearContext }: P
             isConfigured={isConfigured}
             onOpenSettings={onOpenSettings}
             onRetry={handleRetry}
+            onSendToAI={handleSendToAI}
           />
           <AIChatInput
             ref={inputRef}

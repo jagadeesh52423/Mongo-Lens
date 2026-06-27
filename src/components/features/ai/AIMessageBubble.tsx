@@ -6,6 +6,7 @@ import styles from './AIMessageBubble.module.css';
 interface Props {
   message: ChatMessage;
   onRetry?: (content: string) => void;
+  onSendToAI?: (content: string) => void;
 }
 
 function cx(...parts: Array<string | false | undefined>): string {
@@ -19,7 +20,7 @@ function formatTimestamp(ts: number): string {
   return `${hh}:${mm}`;
 }
 
-export function AIMessageBubble({ message, onRetry }: Props) {
+export function AIMessageBubble({ message, onRetry, onSendToAI }: Props) {
   const isUser = message.role === 'user';
   const hasError = !!message.error;
 
@@ -29,7 +30,7 @@ export function AIMessageBubble({ message, onRetry }: Props) {
         {isUser ? (
           <div className={styles.content}>{message.content}</div>
         ) : (
-          <AssistantContent content={message.content} />
+          <AssistantContent content={message.content} onSendToAI={onSendToAI} />
         )}
         {hasError && (
           <div className={styles.errorBlock}>
@@ -53,15 +54,15 @@ export function AIMessageBubble({ message, onRetry }: Props) {
   );
 }
 
-function AssistantContent({ content }: { content: string }) {
+function AssistantContent({ content, onSendToAI }: { content: string; onSendToAI?: (content: string) => void }) {
   const segments = parseAIContent(content);
   if (segments.length === 0) return null;
-  return <>{segments.map((seg, i) => renderSegment(seg, i))}</>;
+  return <>{segments.map((seg, i) => renderSegment(seg, i, onSendToAI))}</>;
 }
 
-function renderSegment(seg: AISegment, key: number) {
+function renderSegment(seg: AISegment, key: number, onSendToAI?: (content: string) => void) {
   if (seg.kind === 'text') {
     return <div key={key} className={styles.content}>{seg.text}</div>;
   }
-  return <CodeBlock key={key} lang={seg.lang} code={seg.code} />;
+  return <CodeBlock key={key} lang={seg.lang} code={seg.code} onSendToAI={onSendToAI} />;
 }

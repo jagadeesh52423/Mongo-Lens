@@ -1,18 +1,50 @@
 import { useEffect, useRef, useState } from 'react';
 import { loader } from '@monaco-editor/react';
 import { useEditorBridgeStore } from '../../../store/editorBridge';
+import { getActiveTarget } from '../../../services/ai/activeTarget';
+import { isExplainable, runExplain, summarizeExplain, formatExplainSummary } from '../../../services/ai/explain';
 import styles from './CodeBlock.module.css';
 
 interface Props {
   lang: string;
   code: string;
+  /** When provided, an "Explain" plan summary can be sent back to the chat. */
+  onSendToAI?: (content: string) => void;
 }
 
-export function CodeBlock({ lang, code }: Props) {
+type ExplainState =
+  | { status: 'idle' }
+  | { status: 'running' }
+  | { status: 'done'; summary: string }
+  | { status: 'error'; message: string };
+
+export function CodeBlock({ lang, code, onSendToAI }: Props) {
   const controller = useEditorBridgeStore((s) => s.controller);
   const hasSelection = useEditorBridgeStore((s) => s.hasSelection);
   const [html, setHtml] = useState<string | null>(null);
+  const [explain, setExplain] = useState<ExplainState>({ status: 'idle' });
   const cancelledRef = useRef(false);
+
+  const canExplain = isExplainable(code);
+  const target = getActiveTarget();
+  const explainDisabled = !target.connectionId || !target.database;
+
+  const handleExplain = async () => {
+    const t = getActiveTarget();
+    if (!t.connectionId || !t.database) return;
+    setExplain({ status: 'running' });
+    try {
+      const plan = await runExplain(t.connectionId, t.database, code);
+      setExplain({ status: 'done', summary: formatExplainSummary(summarizeExplain(plan)) });
+    } catch (err) {
+      setExplain({ status: 'error', message: err instanceof Error ? err.message : String(err) });
+    }
+  };
+
+  const handleSendExplain = () => {
+    if (explain.status !== 'done' || !onSendToAI) return;
+    onSendToAI(`Optimize this query. Explain summary:\n${explain.summary}\n\nQuery:\n\`\`\`js\n${code}\n\`\`\``);
+  };
 
   useEffect(() => {
     cancelledRef.current = false;
@@ -78,8 +110,32 @@ export function CodeBlock({ lang, code }: Props) {
           >
             Append
           </button>
+          {canExplain && (
+            <button
+              type="button"
+              onClick={handleExplain}
+              disabled={explainDisabled || explain.status === 'running'}
+              title={explainDisabled ? 'Connect to a database to explain' : 'Run explain() and summarize the plan'}
+              className={styles.button}
+            >
+              {explain.status === 'running' ? 'Explaining…' : 'Explain'}
+            </button>
+          )}
         </div>
       </div>
+      {explain.status === 'done' && (
+        <div className={styles.explainSummary}>
+          <span>{explain.summary}</span>
+          {onSendToAI && (
+            <button type="button" onClick={handleSendExplain} className={styles.explainSend}>
+              Send to AI
+            </button>
+          )}
+        </div>
+      )}
+      {explain.status === 'error' && (
+        <div className={styles.explainError}>Explain failed: {explain.message}</div>
+      )}
       {html !== null ? (
         <pre className={styles.pre} dangerouslySetInnerHTML={{ __html: html }} />
       ) : (

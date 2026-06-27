@@ -12,6 +12,8 @@ interface Props {
   onOpenSettings?: () => void;
   /** Click-to-Edit on errored bubbles re-populates the input with the failed message. */
   onRetry: (content: string) => void;
+  /** Lets a code block's Explain result be sent back into the chat as a follow-up. */
+  onSendToAI?: (content: string) => void;
 }
 
 /**
@@ -22,7 +24,7 @@ interface Props {
  * Virtualization is intentionally NOT used: chat histories are small (<1000
  * messages per tab) and CSS overflow scroll handles the case naturally.
  */
-export function AIChatMessageList({ messages, loading, isConfigured, onOpenSettings, onRetry }: Props) {
+export function AIChatMessageList({ messages, loading, isConfigured, onOpenSettings, onRetry, onSendToAI }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useLayoutEffect(() => {
@@ -52,6 +54,7 @@ export function AIChatMessageList({ messages, loading, isConfigured, onOpenSetti
             key={`${m.timestamp}-${idx}`}
             message={m}
             onRetry={m.error ? onRetry : undefined}
+            onSendToAI={onSendToAI}
           />
         ))
       )}
