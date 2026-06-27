@@ -25,6 +25,7 @@
 
 .bubbleUser {
   background: var(--accent-soft);
+  border-color: var(--accent);
   color: var(--fg);
 }
 
