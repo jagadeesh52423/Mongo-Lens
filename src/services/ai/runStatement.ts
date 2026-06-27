@@ -27,10 +27,13 @@ export async function runStatement(
   statement: string,
   opts: RunStatementOptions = {},
 ): Promise<StatementResult> {
-  const tabId = opts.tabId ?? DEFAULT_TAB_ID;
   const cap = opts.maxDocsPerGroup ?? DEFAULT_MAX_DOCS;
   const runId =
     globalThis.crypto?.randomUUID?.() ?? `stmt-${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+  // Default the backend tab id to a per-run unique value so concurrent agent
+  // runs (different editor tabs) never alias the run_script cancel key and
+  // cancel each other. These paths never call cancelScript, so uniqueness is free.
+  const tabId = opts.tabId ?? `${DEFAULT_TAB_ID}-${runId}`;
 
   const groups: StatementGroup[] = [];
   let settleResolve!: (v: StatementResult) => void;
