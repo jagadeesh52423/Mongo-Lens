@@ -1,8 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { loader } from '@monaco-editor/react';
+import { useState } from 'react';
 import { useEditorBridgeStore } from '../../../store/editorBridge';
-import { useSettingsStore } from '../../../store/settings';
-import { applyMonacoTheme } from '../../../themes/applyTheme';
 import { getActiveTarget } from '../../../services/ai/activeTarget';
 import { isExplainable, runExplain, summarizeExplain, formatExplainSummary } from '../../../services/ai/explain';
 import styles from './CodeBlock.module.css';
@@ -20,17 +17,41 @@ type ExplainState =
   | { status: 'done'; summary: string }
   | { status: 'error'; message: string };
 
+// ponytail: render code as plain monospace text (explicit --fg color) rather than
+// Monaco's colorize(). The class-based colorize output depends on Monaco's global
+// .mtkN theme stylesheet being present/correct in this webview, which it isn't
+// reliably for transcript code blocks — the text rendered invisible. Plain text
+// is always legible; syntax highlighting can return via an inline-color renderer.
 export function CodeBlock({ lang, code, onSendToAI }: Props) {
   const controller = useEditorBridgeStore((s) => s.controller);
   const hasSelection = useEditorBridgeStore((s) => s.hasSelection);
-  const themeId = useSettingsStore((s) => s.themeId);
-  const [html, setHtml] = useState<string | null>(null);
   const [explain, setExplain] = useState<ExplainState>({ status: 'idle' });
-  const cancelledRef = useRef(false);
+
+  const disabled = controller === null;
+  const primaryLabel = hasSelection ? 'Update' : 'Insert at';
+  const primaryTitle = disabled
+    ? 'Open a script to apply'
+    : hasSelection
+      ? 'Replace the selected text in the active script'
+      : 'Insert at the cursor in the active script';
+  const appendTitle = disabled ? 'Open a script to apply' : 'Append to the end of the active script';
 
   const canExplain = isExplainable(code);
   const target = getActiveTarget();
   const explainDisabled = !target.connectionId || !target.database;
+
+  const handlePrimary = () => {
+    if (!controller) return;
+    if (hasSelection) controller.replaceSelection(code);
+    else controller.insertAtCursor(code);
+    controller.focus();
+  };
+
+  const handleAppend = () => {
+    if (!controller) return;
+    controller.appendToEnd(code);
+    controller.focus();
+  };
 
   const handleExplain = async () => {
     const t = getActiveTarget();
@@ -49,72 +70,15 @@ export function CodeBlock({ lang, code, onSendToAI }: Props) {
     onSendToAI(`Optimize this query. Explain summary:\n${explain.summary}\n\nQuery:\n\`\`\`js\n${code}\n\`\`\``);
   };
 
-  useEffect(() => {
-    cancelledRef.current = false;
-    const language = lang || 'plaintext';
-    // Apply the app's Monaco theme BEFORE colorizing. Without this, a colorize
-    // that wins the boot race runs under Monaco's default light `vs` theme and
-    // emits near-black tokens (invisible on the dark UI) — and the result is
-    // cached, so the code stays black. Re-runs on theme change via the dep.
-    applyMonacoTheme(themeId)
-      .then(() => loader.init())
-      .then((monaco) => monaco.editor.colorize(code, language, { tabSize: 2 }))
-      .then((result) => {
-        if (!cancelledRef.current) setHtml(result || null);
-      })
-      .catch(() => {
-        if (!cancelledRef.current) setHtml(null);
-      });
-    return () => {
-      cancelledRef.current = true;
-    };
-  }, [lang, code, themeId]);
-
-  const disabled = controller === null;
-  const primaryLabel = hasSelection ? 'Update' : 'Insert at';
-  const primaryTitle = disabled
-    ? 'Open a script to apply'
-    : hasSelection
-      ? 'Replace the selected text in the active script'
-      : 'Insert at the cursor in the active script';
-  const appendTitle = disabled
-    ? 'Open a script to apply'
-    : 'Append to the end of the active script';
-
-  const handlePrimary = () => {
-    if (!controller) return;
-    if (hasSelection) controller.replaceSelection(code);
-    else controller.insertAtCursor(code);
-    controller.focus();
-  };
-
-  const handleAppend = () => {
-    if (!controller) return;
-    controller.appendToEnd(code);
-    controller.focus();
-  };
-
   return (
     <div className={styles.wrapper}>
       <div className={styles.header}>
         <span className={styles.lang}>{lang || 'code'}</span>
         <div className={styles.buttonRow}>
-          <button
-            type="button"
-            onClick={handlePrimary}
-            disabled={disabled}
-            title={primaryTitle}
-            className={styles.button}
-          >
+          <button type="button" onClick={handlePrimary} disabled={disabled} title={primaryTitle} className={styles.button}>
             {primaryLabel}
           </button>
-          <button
-            type="button"
-            onClick={handleAppend}
-            disabled={disabled}
-            title={appendTitle}
-            className={styles.button}
-          >
+          <button type="button" onClick={handleAppend} disabled={disabled} title={appendTitle} className={styles.button}>
             Append
           </button>
           {canExplain && (
@@ -143,11 +107,7 @@ export function CodeBlock({ lang, code, onSendToAI }: Props) {
       {explain.status === 'error' && (
         <div className={styles.explainError}>Explain failed: {explain.message}</div>
       )}
-      {html !== null ? (
-        <pre className={styles.pre} dangerouslySetInnerHTML={{ __html: html }} />
-      ) : (
-        <pre className={styles.pre}>{code}</pre>
-      )}
+      <pre className={styles.pre}>{code}</pre>
     </div>
   );
 }
