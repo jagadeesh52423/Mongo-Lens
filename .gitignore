@@ -18,3 +18,7 @@ CODE_REVIEW*.md
 TEST_REPORT*.md
 DESIGN_*.md
 docs/superpowers/
+
+# Playwright
+test-results/
+playwright-report/
