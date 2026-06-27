@@ -20,6 +20,11 @@ interface AgentStore {
 
 const empty = (): AgentTabState => ({ entries: [], running: false });
 
+const pendingResolvers = new Map<string, (d: 'approved' | 'denied') => void>();
+export function registerConfirm(key: string, resolve: (d: 'approved' | 'denied') => void) {
+  pendingResolvers.set(key, resolve);
+}
+
 export const useAgentStore = create<AgentStore>((set) => ({
   byTab: {},
   append: (tabId, entry) => set((s) => {
@@ -31,6 +36,12 @@ export const useAgentStore = create<AgentStore>((set) => ({
     return { byTab: { ...s.byTab, [tabId]: { ...tab, running } } };
   }),
   resolveConfirm: (tabId, id, decision) => set((s) => {
+    const key = `${tabId}:${id}`;
+    const fire = pendingResolvers.get(key);
+    if (fire) {
+      pendingResolvers.delete(key);
+      fire(decision);
+    }
     const tab = s.byTab[tabId] ?? empty();
     return {
       byTab: {

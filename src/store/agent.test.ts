@@ -1,5 +1,5 @@
-import { it, expect, beforeEach } from 'vitest';
-import { useAgentStore } from './agent';
+import { it, expect, beforeEach, vi } from 'vitest';
+import { useAgentStore, registerConfirm } from './agent';
 
 beforeEach(() => useAgentStore.setState({ byTab: {} }));
 
@@ -22,4 +22,14 @@ it('marks a confirm entry resolved', () => {
   useAgentStore.getState().resolveConfirm('t1', 'x', 'denied');
   const e = useAgentStore.getState().byTab['t1'].entries[0];
   expect(e.kind === 'confirm' && e.resolved).toBe('denied');
+});
+
+it('fires a registered resolver once and deletes it', () => {
+  const fn = vi.fn();
+  registerConfirm('t1:x', fn);
+  useAgentStore.getState().resolveConfirm('t1', 'x', 'approved');
+  expect(fn).toHaveBeenCalledTimes(1);
+  expect(fn).toHaveBeenCalledWith('approved');
+  useAgentStore.getState().resolveConfirm('t1', 'x', 'approved');
+  expect(fn).toHaveBeenCalledTimes(1);
 });

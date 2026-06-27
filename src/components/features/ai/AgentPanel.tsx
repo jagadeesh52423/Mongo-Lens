@@ -3,6 +3,7 @@ import { useAgentStore, type AgentEntry } from '../../../store/agent';
 import { getActiveTarget } from '../../../services/ai/activeTarget';
 import { startAgentRun } from '../../../services/ai/agentRunner';
 import { AgentToolCard } from './AgentToolCard';
+import { AgentConfirmCard } from './AgentConfirmCard';
 import styles from './AgentPanel.module.css';
 
 /**
@@ -33,7 +34,7 @@ export function AgentPanel({ tabId }: { tabId: string }) {
     <div className={styles.panel}>
       <div className={styles.transcript}>
         {entries.map((e, i) => (
-          <Entry key={i} e={e} />
+          <Entry key={i} e={e} tabId={tabId} />
         ))}
         {running && <div className={styles.thinking}>Working…</div>}
       </div>
@@ -61,12 +62,23 @@ export function AgentPanel({ tabId }: { tabId: string }) {
   );
 }
 
-function Entry({ e }: { e: AgentEntry }) {
+function Entry({ e, tabId }: { e: AgentEntry; tabId: string }) {
   if (e.kind === 'tool-call') return <AgentToolCard statement={e.statement} />;
   if (e.kind === 'tool-result')
     return <div className={e.ok ? styles.toolOk : styles.toolErr}>{e.summary}</div>;
   if (e.kind === 'final') return <div className={styles.final}>{e.text}</div>;
   if (e.kind === 'error') return <div className={styles.error}>{e.text}</div>;
   if (e.kind === 'model-text') return <div className={styles.modelText}>{e.text}</div>;
-  return null; // 'confirm' handled in Task 7
+  if (e.kind === 'confirm')
+    return (
+      <AgentConfirmCard
+        tabId={tabId}
+        id={e.id}
+        statement={e.statement}
+        category={e.category}
+        collection={e.collection}
+        resolved={e.resolved}
+      />
+    );
+  return null;
 }

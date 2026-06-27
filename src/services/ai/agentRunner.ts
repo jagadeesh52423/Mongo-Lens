@@ -2,13 +2,13 @@ import { AgentService } from './AgentService';
 import type { AgentTarget } from './AgentService';
 import { runStatement } from './runStatement';
 import { classifyStatement } from './agentTools';
-import { blockWrites } from './destructivePolicy';
+import { confirmViaStore } from './destructivePolicy';
 import { providerRegistry, OPENAI_COMPATIBLE } from './providers/ProviderRegistry';
 import { useSettingsStore } from '../../store/settings';
 import { getAiToken, listCollections } from '../../ipc';
 import { useAgentStore } from '../../store/agent';
 
-/** Wire and run a real agent turn for a tab. Read-only (writes blocked). */
+/** Wire and run a real agent turn for a tab. Destructive statements require user approval. */
 export async function startAgentRun(
   tabId: string,
   goal: string,
@@ -28,7 +28,7 @@ export async function startAgentRun(
       provider,
       runStatement,
       classify: classifyStatement,
-      onDestructive: blockWrites,
+      onDestructive: confirmViaStore(tabId),
       emit: (e) => useAgentStore.getState().append(tabId, e),
       model: cfg.model,
     });
