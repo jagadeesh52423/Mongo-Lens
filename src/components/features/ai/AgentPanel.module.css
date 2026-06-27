@@ -1,0 +1,111 @@
+.panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.transcript {
+  flex: 1;
+  overflow: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.modelText {
+  color: var(--fg);
+  white-space: pre-wrap;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.toolCard {
+  margin: 0;
+  padding: 8px 10px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow-x: auto;
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  color: var(--fg);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.toolOk {
+  color: var(--fg-dim);
+  font-size: 12px;
+  padding-left: 4px;
+}
+
+.toolErr {
+  color: var(--accent-red);
+  font-size: 12px;
+  padding-left: 4px;
+}
+
+.final {
+  color: var(--fg);
+  white-space: pre-wrap;
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 8px 10px;
+  border-left: 2px solid var(--accent);
+}
+
+.error {
+  color: var(--accent-red);
+  font-size: 13px;
+  white-space: pre-wrap;
+}
+
+.thinking {
+  color: var(--fg-dim);
+  font-size: 12px;
+  font-style: italic;
+}
+
+.inputRow {
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+}
+
+.input {
+  flex: 1;
+  padding: 6px 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--fg);
+  font-size: 13px;
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.input:disabled {
+  opacity: 0.6;
+}
+
+.run {
+  padding: 6px 14px;
+  background: var(--accent);
+  border: none;
+  border-radius: 6px;
+  color: var(--bg);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.run:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

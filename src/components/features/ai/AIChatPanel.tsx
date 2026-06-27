@@ -6,6 +6,7 @@ import { useResizable } from '../../ui';
 import { AIChatHeader } from './AIChatHeader';
 import { AIChatMessageList } from './AIChatMessageList';
 import { AIChatInput, type AIChatInputHandle } from './AIChatInput';
+import { AgentPanel } from './AgentPanel';
 import styles from './AIChatPanel.module.css';
 
 const DEFAULT_WIDTH = 380;
@@ -158,9 +159,7 @@ export function AIChatPanel({ onSendMessage, onOpenSettings, onClearContext }: P
           />
         </>
       ) : (
-        <div className={styles.agentPlaceholder}>
-          <p>Agent mode coming soon — it will run queries and explains for you to converge on a pipeline.</p>
-        </div>
+        <AgentPanel tabId={activeTabId ?? '__notab__'} />
       )}
     </div>
   );
