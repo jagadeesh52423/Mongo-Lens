@@ -179,3 +179,11 @@
   font-size: 13px;
   white-space: pre-wrap;
 }
+
+/* Transcript children must keep their natural height. Without this, flexbox
+   shrinks them as the transcript fills during a run — and since code blocks use
+   overflow:hidden, a multi-line script gets clipped down to a single line and
+   then to nothing. Pinning flex-shrink:0 makes the transcript scroll instead. */
+.transcript > * {
+  flex-shrink: 0;
+}
