@@ -39,7 +39,7 @@ export class AgentService {
     history: AgentMessage[] = [],
   ): Promise<{ answer: string; messages: AgentMessage[] }> {
     const { provider, runStatement, classify, onDestructive, emit, signal } = this.deps;
-    const maxIter = this.deps.maxIter ?? 8;
+    const maxIter = this.deps.maxIter ?? 25;
     const model = this.deps.model ?? 'gpt-4o';
     const messages: AgentMessage[] = history.length
       ? [...history, { role: 'user', content: goal }]
