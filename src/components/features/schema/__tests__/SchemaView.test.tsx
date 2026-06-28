@@ -30,7 +30,7 @@ describe('SchemaView', () => {
     expect(screen.getByText('age')).toBeInTheDocument();
     expect(screen.getByText('100%')).toBeInTheDocument(); // name presence
     expect(screen.getByText('50%')).toBeInTheDocument();  // age presence
-    expect(screen.getByText('String')).toBeInTheDocument();
+    expect(screen.getByText(/String/)).toBeInTheDocument();
     expect(screen.getByText(/sampled 2/i)).toBeInTheDocument();
   });
 });

@@ -11,7 +11,7 @@ function TypeBadges({ types }: { types: SchemaType[] }) {
   return (
     <span className={styles.badges}>
       {types.map((t) => (
-        <span key={t.name} className={styles.badge}>{t.name}</span>
+        <span key={t.name} className={styles.badge}>{t.name} {pct(t.probability)}</span>
       ))}
     </span>
   );
