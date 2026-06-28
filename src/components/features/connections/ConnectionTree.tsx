@@ -57,9 +57,10 @@ function DbIcon() {
 interface Props {
   connectionId: string;
   onOpenCollection: (database: string, collection: string) => void;
+  onOpenSchema: (database: string, collection: string) => void;
 }
 
-export function ConnectionTree({ connectionId, onOpenCollection }: Props) {
+export function ConnectionTree({ connectionId, onOpenCollection, onOpenSchema }: Props) {
   const [dbs, setDbs] = useState<string[]>([]);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [collections, setCollections] = useState<Record<string, CollectionNode[]>>({});
@@ -205,6 +206,17 @@ export function ConnectionTree({ connectionId, onOpenCollection }: Props) {
                   <span className={styles.content}>
                     <span className={styles.colIcon}><DbIcon /></span>
                     <span className={styles.label}>{c.name}</span>
+                    <button
+                      type="button"
+                      className={styles.schemaIcon}
+                      aria-label={`Analyze schema for ${c.name}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onOpenSchema(db, c.name);
+                      }}
+                    >
+                      ⚛
+                    </button>
                   </span>
                 </div>
               );

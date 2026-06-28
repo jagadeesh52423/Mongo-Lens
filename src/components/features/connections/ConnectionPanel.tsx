@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { onSshSessionLost } from '../../../ipc';
+import { newSchemaTab } from '../schema/schemaTab';
 import { useConnectionsV2 } from './useConnectionsV2';
 import { useEditorStore } from '../../../store/editor';
 import { ConnectionDialogV2 } from './dialog-v2/ConnectionDialogV2';
@@ -42,6 +43,10 @@ export function ConnectionPanel() {
       database: db,
       collection: col,
     });
+  }
+
+  function openCollectionSchemaTab(db: string, col: string, cId: string) {
+    openTab(newSchemaTab(cId, db, col));
   }
 
   useEffect(() => {
@@ -107,6 +112,7 @@ export function ConnectionPanel() {
             <ConnectionTree
               connectionId={cId}
               onOpenCollection={(db, col) => openCollectionScriptTab(db, col, cId)}
+              onOpenSchema={(db, col) => openCollectionSchemaTab(db, col, cId)}
             />
           )}
         />
