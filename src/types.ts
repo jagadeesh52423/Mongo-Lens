@@ -53,12 +53,39 @@ export interface EditorTab {
   title: string;
   content: string;
   isDirty: boolean;
-  type: 'script';
+  type: 'script' | 'schema';
   connectionId?: string;
   database?: string;
   collection?: string;
   savedScriptId?: string;
   savedScriptTags?: string[];
+}
+
+/** One BSON type a field exhibits, from mongodb-schema. */
+export interface SchemaType {
+  name: string;                 // 'String' | 'Number' | 'ObjectId' | 'Document' | 'Array' | ...
+  path: string;
+  count: number;
+  probability: number;          // 0..1 share of this type within the field
+  values?: unknown[];           // sample values (primitive types)
+  fields?: SchemaField[];       // present when name === 'Document'
+  types?: SchemaType[];         // present when name === 'Array' (element types)
+  averageLength?: number;       // present when name === 'Array'
+}
+
+export interface SchemaField {
+  name: string;
+  path: string;
+  count: number;
+  probability: number;          // 0..1 presence across sampled docs
+  type: string | string[];
+  types: SchemaType[];
+}
+
+export interface SchemaResult {
+  schema: { count: number; fields: SchemaField[] };
+  sampled: number;              // docs actually sampled
+  sampleSize: number;           // requested $sample size
 }
 
 export type QueryCategory =

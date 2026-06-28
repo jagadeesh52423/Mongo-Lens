@@ -15,6 +15,7 @@ pub mod data_op {
     pub const FIND: &str = "find";
     pub const UPDATE_ONE: &str = "updateOne";
     pub const DELETE_ONE: &str = "deleteOne";
+    pub const ANALYZE_SCHEMA: &str = "analyzeSchema";
 }
 
 /// Wall-clock budget for one harness `data` op. Matches the script run budget so
@@ -206,6 +207,14 @@ fn collect_data(
         return Err(e);
     }
     data.ok_or_else(|| DataError::other("query runner returned no data".to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn analyze_schema_op_name_matches_harness() {
+        assert_eq!(super::data_op::ANALYZE_SCHEMA, "analyzeSchema");
+    }
 }
 
 /// Convert one Extended-JSON value the harness emitted (canonical EJSON, so BSON

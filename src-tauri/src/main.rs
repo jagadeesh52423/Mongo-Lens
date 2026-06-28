@@ -112,6 +112,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         commands::collection::list_collections,
         commands::collection::list_indexes,
         commands::collection::browse_collection,
+        commands::collection::analyze_schema,
         commands::document::update_document,
         commands::document::delete_document,
         commands::script::run_script,

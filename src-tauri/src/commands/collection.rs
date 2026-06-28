@@ -211,6 +211,36 @@ pub async fn browse_collection(
     Ok(BrowsePage { docs, total, page, page_size })
 }
 
+#[tauri::command]
+pub async fn analyze_schema(
+    state: State<'_, AppState>,
+    connection_id: String,
+    database: String,
+    collection: String,
+    sample_size: i64,
+) -> Result<serde_json::Value, String> {
+    let log = state.logger.child(logctx! {
+        "logger" => "commands.collection",
+        "connId" => connection_id.clone(),
+        "db" => database.clone(),
+        "coll" => collection.clone(),
+    });
+    log.info("analyze_schema", logctx! { "sampleSize" => sample_size });
+    mongo::harness_data(
+        &state,
+        &connection_id,
+        &database,
+        mongo::data_op::ANALYZE_SCHEMA,
+        serde_json::json!({ "collection": collection, "sampleSize": sample_size }),
+        state.logger.clone(),
+    )
+    .await
+    .map_err(|e| {
+        log.error("analyze_schema failed", logctx! { "err" => e.message.clone() });
+        String::from(e)
+    })
+}
+
 /// Best-effort default-database name for the Unauthorized fallback in
 /// `list_databases`. Only SCRAM and Legacy-CR auth modes carry an explicit
 /// `auth_db`; other modes have no comparable client-side hint. `admin` is

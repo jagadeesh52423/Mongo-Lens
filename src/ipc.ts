@@ -5,6 +5,7 @@ import type {
   CollectionNode,
   IndexInfo,
   BrowsePage,
+  SchemaResult,
 } from './types';
 
 // The 7 legacy connection CRUD/connect wrappers (listConnections,
@@ -27,6 +28,15 @@ export async function listIndexes(
   collection: string,
 ): Promise<IndexInfo[]> {
   return invoke('list_indexes', { connectionId, database, collection });
+}
+
+export async function analyzeSchema(
+  connectionId: string,
+  database: string,
+  collection: string,
+  sampleSize = 1000,
+): Promise<SchemaResult> {
+  return invoke('analyze_schema', { connectionId, database, collection, sampleSize });
 }
 
 export async function browseCollection(

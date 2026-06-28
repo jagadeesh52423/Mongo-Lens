@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { invoke } from '@tauri-apps/api/core';
 import { ConnectionPanel } from '../ConnectionPanel';
+import { ConnectionTree } from '../ConnectionTree';
 import { useConnectionsV2 } from '../useConnectionsV2';
 
 const invokeMock = invoke as unknown as ReturnType<typeof vi.fn>;
@@ -10,6 +11,32 @@ beforeEach(() => {
   invokeMock.mockReset();
   useConnectionsV2.setState({
     connections: [], activeConnectionId: null, activeDatabase: null, connectedIds: new Set(), loading: false,
+  });
+});
+
+describe('ConnectionTree schema icon', () => {
+  it('calls onOpenSchema when the collection schema icon is clicked', async () => {
+    const onOpenSchema = vi.fn();
+    invokeMock
+      .mockResolvedValueOnce(['testdb'])
+      .mockResolvedValueOnce([{ name: 'users' }]);
+
+    render(
+      <ConnectionTree
+        connectionId="c1"
+        onOpenCollection={() => {}}
+        onOpenSchema={onOpenSchema}
+      />
+    );
+
+    await waitFor(() => screen.getByText('testdb'));
+    fireEvent.click(screen.getByText('testdb'));
+    await waitFor(() => screen.getByText('users'));
+
+    const icon = await screen.findByRole('button', { name: /analyze schema for users/i });
+    fireEvent.click(icon);
+
+    expect(onOpenSchema).toHaveBeenCalledWith('testdb', 'users');
   });
 });
 

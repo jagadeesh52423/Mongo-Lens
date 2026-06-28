@@ -27,7 +27,7 @@ const BUNDLED_REDACT: &str = include_str!("../../../runner/redact.js");
 const BUNDLED_QUERY_CLASSIFIER: &str = include_str!("../../../runner/query-classifier.js");
 
 const RUNNER_PACKAGE_JSON: &str =
-    r#"{"name":"mongomacapp-runner","version":"1.0.0","dependencies":{"mongodb":"^6.8.0"}}"#;
+    r#"{"name":"mongomacapp-runner","version":"1.0.0","dependencies":{"mongodb":"^6.8.0","mongodb-schema":"^12.2.0"}}"#;
 
 /// Single source of truth for the bundled runtime JS set. See the module-level
 /// docs above to add a file.
@@ -86,7 +86,10 @@ pub fn check_runner() -> RunnerStatus {
             message: Some("Node.js not found on PATH. Install Node 18+.".into()),
         };
     }
-    let installed = node_modules_dir().join("mongodb").is_dir();
+    // Both deps must be present, so an existing install (which already has
+    // `mongodb`) re-runs `npm install` to pick up `mongodb-schema`.
+    let installed = node_modules_dir().join("mongodb").is_dir()
+        && node_modules_dir().join("mongodb-schema").is_dir();
     let harness_ok = harness_path().is_file();
     let ready = installed && harness_ok;
     RunnerStatus {
@@ -373,5 +376,13 @@ mod tests {
         assert_eq!(fingerprint("abc"), fingerprint("abc"));
         assert_ne!(fingerprint("abc"), fingerprint("abd"));
         assert_eq!(fingerprint("abc").len(), 16);
+    }
+
+    #[test]
+    fn runner_package_json_includes_schema_dep() {
+        assert!(
+            RUNNER_PACKAGE_JSON.contains("mongodb-schema"),
+            "runtime package.json must declare mongodb-schema so npm install pulls it"
+        );
     }
 }

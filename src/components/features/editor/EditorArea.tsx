@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { Panel, PanelGroup } from 'react-resizable-panels';
 import { loader } from '@monaco-editor/react';
 import { modelPathForTab, ScriptEditor } from './ScriptEditor';
@@ -15,8 +15,39 @@ import { getStatementAtCursor } from '../../../utils/statementDetection';
 import { getExecutionModes } from '../../../execution-modes';
 import { useEditorActions } from './useEditorActions';
 import { useResultsStore } from '../../../store/results';
-import type { EditorSelection } from '../../../types';
+import type { EditorSelection, SchemaResult } from '../../../types';
+import { SchemaView } from '../schema/SchemaView';
+import { analyzeSchema } from '../../../ipc';
 import styles from './EditorArea.module.css';
+
+function SchemaTabHost({ connectionId, database, collection }: { connectionId: string; database: string; collection: string }) {
+  const [result, setResult] = useState<SchemaResult | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [sampleSize, setSampleSize] = useState(1000);
+
+  const run = useCallback(() => {
+    setLoading(true);
+    setError(null);
+    analyzeSchema(connectionId, database, collection, sampleSize)
+      .then((r) => setResult(r))
+      .catch((e) => setError(String(e)))
+      .finally(() => setLoading(false));
+  }, [connectionId, database, collection, sampleSize]);
+
+  useEffect(() => { run(); }, [run]);
+
+  return (
+    <SchemaView
+      result={result}
+      loading={loading}
+      error={error}
+      sampleSize={sampleSize}
+      onSampleSizeChange={setSampleSize}
+      onReanalyze={run}
+    />
+  );
+}
 
 export function EditorArea() {
   const {
@@ -153,6 +184,14 @@ export function EditorArea() {
               </div>
             </Panel>
           </PanelGroup>
+        )}
+        {active?.type === 'schema' && active.connectionId && active.database && active.collection && (
+          <SchemaTabHost
+            key={active.id}
+            connectionId={active.connectionId}
+            database={active.database}
+            collection={active.collection}
+          />
         )}
       </div>
     </div>

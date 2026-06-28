@@ -28,7 +28,7 @@ describe('ConnectionTree', () => {
       .mockResolvedValueOnce([{ name: 'users' }, { name: 'orders' }]);
 
     const user = userEvent.setup();
-    render(<ConnectionTree connectionId="c1" onOpenCollection={() => {}} />);
+    render(<ConnectionTree connectionId="c1" onOpenCollection={() => {}} onOpenSchema={() => {}} />);
 
     await waitFor(() => expect(screen.getByText('mydb')).toBeInTheDocument());
     await user.click(screen.getByText('mydb'));
@@ -62,6 +62,7 @@ describe('ConnectionTree', () => {
           <ConnectionTree
             connectionId={connectionId}
             onOpenCollection={vi.fn()}
+            onOpenSchema={vi.fn()}
           />
         )}
       />,
@@ -125,6 +126,7 @@ describe('ConnectionTree', () => {
           <ConnectionTree
             connectionId={connectionId}
             onOpenCollection={vi.fn()}
+            onOpenSchema={vi.fn()}
           />
         )}
       />,
@@ -191,6 +193,7 @@ describe('ConnectionTree', () => {
           <ConnectionTree
             connectionId={connectionId}
             onOpenCollection={vi.fn()}
+            onOpenSchema={vi.fn()}
           />
         )}
       />,
