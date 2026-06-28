@@ -3,10 +3,10 @@ import type { AIConfig, AIProvider, ChatRequest, ChatResponse, ToolDef, ToolCall
 import { ToolsUnsupportedError } from './AIProvider';
 
 /**
- * Default temperature when the caller doesn't specify one.
- * Matches the value documented in the design spec.
+ * Default temperature when the caller doesn't specify one. Low on purpose: this
+ * is a query assistant, so we want deterministic, runnable Mongo over variety.
  */
-const DEFAULT_TEMPERATURE = 0.7;
+const DEFAULT_TEMPERATURE = 0.2;
 
 /**
  * Provider implementation backed by the official `openai` SDK.

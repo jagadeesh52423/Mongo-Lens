@@ -24,6 +24,13 @@ describe('ContextCollector.collectAll', () => {
     ]);
     expect(await cc.collectAll()).toBe('A\n\nB');
   });
+
+  it('caps an oversized section and marks it truncated', async () => {
+    const cc = new ContextCollector([{ collect: async () => 'x'.repeat(5000) }]);
+    const out = await cc.collectAll();
+    expect(out.length).toBeLessThan(5000);
+    expect(out.endsWith('…(truncated)')).toBe(true);
+  });
 });
 
 describe('ConnectionContextCollector', () => {

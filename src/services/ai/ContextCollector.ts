@@ -14,6 +14,20 @@ import { CollectionSampleContextCollector } from './collectors/CollectionSampleC
 const RESULTS_PREVIEW_LIMIT = 5;
 
 /**
+ * Per-section char cap for the injected context block. Each collector runs on
+ * every send and some inject unbounded text (whole editor tab, wide docs), so
+ * cap each section to keep the system prompt from ballooning the token budget.
+ */
+const SECTION_CHAR_CAP = 4000;
+
+/** Truncate to the cap with a marker so the model knows it's seeing a slice. */
+function capSection(part: string): string {
+  return part.length > SECTION_CHAR_CAP
+    ? `${part.slice(0, SECTION_CHAR_CAP)}\n…(truncated)`
+    : part;
+}
+
+/**
  * Implement this interface to add a new context source to the AI system prompt
  * (e.g. git history, performance metrics, cluster topology).
  *
@@ -150,6 +164,6 @@ export class ContextCollector {
         }),
       ),
     );
-    return parts.map((p) => p.trim()).filter((p) => p.length > 0).join('\n\n');
+    return parts.map((p) => p.trim()).filter((p) => p.length > 0).map(capSection).join('\n\n');
   }
 }
