@@ -631,6 +631,21 @@ const DATA_OPS = {
       .deleteOne(EJSON.deserialize(req.filter || {}));
     return { deletedCount: result.deletedCount };
   },
+  async analyzeSchema(db, req) {
+    const { parseSchema } = require('mongodb-schema');
+    const size =
+      Number.isInteger(req.sampleSize) && req.sampleSize > 0 ? req.sampleSize : 1000;
+    const cursor = applyMaxTime(
+      db.collection(req.collection).aggregate([{ $sample: { size } }], { allowDiskUse: true }),
+    );
+    const schema = await parseSchema(cursor);
+    // relaxed=true: schema is metadata (probabilities, counts), not BSON docs — native JSON numbers are correct here.
+    return {
+      schema: EJSON.serialize(schema, { relaxed: true }),
+      sampled: schema.count,
+      sampleSize: size,
+    };
+  },
 };
 
 async function runData(req) {

@@ -275,6 +275,28 @@ async function runSelftest(args) {
   assert.strictEqual(gone.data.total, 0, `doc must be gone after delete, total=${gone.data.total}`);
   assert.strictEqual(client.readyCount, 1, 'data ops must not have triggered a reconnect (__ready seen once)');
 
+  // analyzeSchema: seed two docs with differing shapes, then assert the schema
+  // op returns field probabilities and a nested field.
+  const SCHEMA_COLL = 'mongolens_selftest_schema';
+  await client.run({
+    id: 's-seed', db: SELFTEST_DB, page: 0, pageSize: 5,
+    script:
+      `db.${SCHEMA_COLL}.deleteMany({})\n` +
+      `db.${SCHEMA_COLL}.insertOne({name:'a', age:1, addr:{city:'x'}})\n` +
+      `db.${SCHEMA_COLL}.insertOne({name:'b', tags:['t1','t2']})`,
+  });
+  const sch = await client.data({
+    id: 's-an', op: 'analyzeSchema', db: SELFTEST_DB, collection: SCHEMA_COLL, sampleSize: 1000,
+  });
+  assert.strictEqual(sch.error, null, `analyzeSchema errored: ${sch.error}`);
+  assert.strictEqual(sch.data.sampled, 2, `analyzeSchema sampled expected 2, got ${sch.data.sampled}`);
+  const fieldNames = sch.data.schema.fields.map((f) => f.name);
+  assert.ok(fieldNames.includes('name'), 'schema must include top-level field "name"');
+  assert.ok(fieldNames.includes('addr'), 'schema must include nested-parent field "addr"');
+  const nameField = sch.data.schema.fields.find((f) => f.name === 'name');
+  assert.ok(typeof nameField.probability === 'number', 'field must carry a numeric probability');
+  await client.data({ id: 's-drop', op: 'deleteOne', db: SELFTEST_DB, collection: SCHEMA_COLL, filter: {} });
+
   process.stdout.write(
     'SELFTEST PASS: 1 process, 1 connect, 2 runs reused it, cancel framed correctly, ' +
     'data ops (listCollections + update/find/delete round-trip) shared the process\n',

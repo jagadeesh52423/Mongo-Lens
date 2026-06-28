@@ -3,6 +3,7 @@
   "name": "mongomacapp-runner",
   "version": "1.0.0",
   "dependencies": {
-    "mongodb": "^6.8.0"
+    "mongodb": "^6.8.0",
+    "mongodb-schema": "^12.2.0"
   }
 }
