@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { listDatabases, listCollections } from '../../../ipc';
 import type { CollectionNode } from '../../../types';
 import { treeGuides, type GuideSegment } from './treeGuides';
@@ -72,6 +72,18 @@ export function ConnectionTree({ connectionId, onOpenCollection, onOpenSchema }:
   const menuRef = useRef<HTMLDivElement | null>(null);
 
   const closeMenu = useCallback(() => setMenu(null), []);
+
+  // After the menu renders, clamp its position so it stays inside the viewport.
+  useLayoutEffect(() => {
+    if (!menu || !menuRef.current) return;
+    const { offsetWidth: w, offsetHeight: h } = menuRef.current;
+    const margin = 8;
+    const clampedX = Math.min(menu.x, window.innerWidth - w - margin);
+    const clampedY = Math.min(menu.y, window.innerHeight - h - margin);
+    if (clampedX !== menu.x || clampedY !== menu.y) {
+      setMenu((m) => m && { ...m, x: clampedX, y: clampedY });
+    }
+  }, [menu?.x, menu?.y]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!menu) return;
