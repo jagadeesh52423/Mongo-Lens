@@ -40,6 +40,58 @@ describe('ConnectionTree schema icon', () => {
   });
 });
 
+describe('ConnectionTree right-click context menu', () => {
+  it('right-clicking a collection row opens a menu with Open collection and Analyze schema items', async () => {
+    const onOpenSchema = vi.fn();
+    const onOpenCollection = vi.fn();
+    invokeMock
+      .mockResolvedValueOnce(['testdb'])
+      .mockResolvedValueOnce([{ name: 'orders' }]);
+
+    render(
+      <ConnectionTree
+        connectionId="c2"
+        onOpenCollection={onOpenCollection}
+        onOpenSchema={onOpenSchema}
+      />
+    );
+
+    await waitFor(() => screen.getByText('testdb'));
+    fireEvent.click(screen.getByText('testdb'));
+    await waitFor(() => screen.getByText('orders'));
+
+    fireEvent.contextMenu(screen.getByText('orders'));
+    expect(screen.getByRole('menu')).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Analyze schema' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Open collection' })).toBeInTheDocument();
+  });
+
+  it('clicking Analyze schema in the context menu calls onOpenSchema and closes the menu', async () => {
+    const onOpenSchema = vi.fn();
+    invokeMock
+      .mockResolvedValueOnce(['testdb'])
+      .mockResolvedValueOnce([{ name: 'orders' }]);
+
+    render(
+      <ConnectionTree
+        connectionId="c3"
+        onOpenCollection={() => {}}
+        onOpenSchema={onOpenSchema}
+      />
+    );
+
+    await waitFor(() => screen.getByText('testdb'));
+    fireEvent.click(screen.getByText('testdb'));
+    await waitFor(() => screen.getByText('orders'));
+
+    fireEvent.contextMenu(screen.getByText('orders'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Analyze schema' }));
+
+    expect(onOpenSchema).toHaveBeenCalledWith('testdb', 'orders');
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+  });
+});
+
 describe('ConnectionPanel env color dot (read from useConnectionsV2)', () => {
   it('shows the env color dot for a connected connection that has a color', async () => {
     useConnectionsV2.setState({ connectedIds: new Set(['1']) });

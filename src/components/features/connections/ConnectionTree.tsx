@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { listDatabases, listCollections } from '../../../ipc';
 import type { CollectionNode } from '../../../types';
 import { treeGuides, type GuideSegment } from './treeGuides';
@@ -67,6 +67,29 @@ export function ConnectionTree({ connectionId, onOpenCollection, onOpenSchema }:
   const [err, setErr] = useState<string | null>(null);
   const [activeDb, setActiveDb] = useState<string | null>(null);
   const [selected, setSelected] = useState<{ db: string; col: string } | null>(null);
+
+  const [menu, setMenu] = useState<{ x: number; y: number; db: string; col: string } | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  const closeMenu = useCallback(() => setMenu(null), []);
+
+  useEffect(() => {
+    if (!menu) return;
+    function onDown(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) closeMenu();
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') closeMenu();
+    }
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('scroll', closeMenu, { capture: true });
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('scroll', closeMenu, { capture: true });
+    };
+  }, [menu, closeMenu]);
 
   const bufferRef = useRef('');
   const timerRef = useRef<number | null>(null);
@@ -201,6 +224,10 @@ export function ConnectionTree({ connectionId, onOpenCollection, onOpenSchema }:
                     wrapperRef.current?.focus();
                   }}
                   onDoubleClick={() => onOpenCollection(db, c.name)}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setMenu({ x: e.clientX, y: e.clientY, db, col: c.name });
+                  }}
                 >
                   <GuideStrip segments={treeGuides([dbIsNotLast], isLastCol)} />
                   <span className={styles.content}>
@@ -224,6 +251,29 @@ export function ConnectionTree({ connectionId, onOpenCollection, onOpenSchema }:
           </div>
         );
       })}
+      {menu && (
+        <div
+          ref={menuRef}
+          className={styles.ctxMenu}
+          style={{ left: menu.x, top: menu.y }}
+          role="menu"
+        >
+          <button
+            className={styles.ctxItem}
+            role="menuitem"
+            onClick={() => { closeMenu(); onOpenCollection(menu.db, menu.col); }}
+          >
+            Open collection
+          </button>
+          <button
+            className={styles.ctxItem}
+            role="menuitem"
+            onClick={() => { closeMenu(); onOpenSchema(menu.db, menu.col); }}
+          >
+            Analyze schema
+          </button>
+        </div>
+      )}
     </div>
   );
 }
