@@ -1,16 +1,175 @@
-.root { display: flex; flex-direction: column; height: 100%; min-height: 0; }
-.header { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--border, #2a2a2a); }
+/* BSON type token colors — scoped to root so children inherit them.
+   Prefer app theme vars where available; fall back to mockup colours. */
+.root {
+  --schema-t-string:   #4ec9b0;
+  --schema-t-number:   #b5cea8;
+  --schema-t-decimal:  #d7ba7d;
+  --schema-t-objectid: #c586c0;
+  --schema-t-date:     #dcdcaa;
+  --schema-t-bool:     #569cd6;
+  --schema-t-array:    #ce9178;
+  --schema-t-doc:      #9cdcfe;
+  --schema-t-null:     var(--fg-dim, #6a6a6a);
+  --schema-t-fallback: var(--fg-muted, #858585);
+
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border, #2a2a2a);
+  flex-shrink: 0;
+}
+
 .summary { flex: 1; opacity: 0.75; font-size: 12px; }
+
+/* Tree / Flat mode toggle pill */
+.modeToggle {
+  display: flex;
+  border: 1px solid var(--border, #3c3c3c);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.modeBtn {
+  background: none;
+  border: none;
+  padding: 2px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--fg-muted, #858585);
+  line-height: 1.6;
+}
+
+.modeBtnActive {
+  background: var(--bg-elev-2, #2d2d30);
+  color: var(--fg, #d4d4d4);
+}
+
 .select, .button { font-size: 12px; }
-.body { flex: 1; overflow: auto; padding: 8px 10px; min-height: 0; }
+
+.body { flex: 1; overflow: auto; min-height: 0; }
+
 .state { opacity: 0.75; padding: 12px; display: flex; gap: 10px; align-items: center; }
-.field { padding: 2px 0; }
-.row { display: flex; align-items: center; gap: 8px; }
-.name { font-family: var(--mono, monospace); }
-.presenceBar { position: relative; width: 80px; height: 6px; background: var(--border, #2a2a2a); border-radius: 3px; overflow: hidden; }
-.presenceFill { position: absolute; inset: 0 auto 0 0; background: var(--accent, #4a9eff); }
-.presence { width: 38px; text-align: right; font-size: 12px; opacity: 0.8; }
-.badges { display: flex; gap: 4px; flex-wrap: wrap; }
-.badge { font-size: 11px; padding: 1px 6px; border-radius: 10px; background: var(--badge-bg, #2a2a2a); }
-.samples { display: flex; gap: 6px; flex-wrap: wrap; margin: 2px 0 2px 0; }
-.sample { font-size: 11px; opacity: 0.7; }
+
+/* ── TABLE ─────────────────────────────────────────────────── */
+.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
+
+.th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg-elev-1, #252526);
+  text-align: left;
+  color: var(--fg-muted, #858585);
+  font-weight: 600;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 7px 14px;
+  border-bottom: 1px solid var(--border, #2a2a2a);
+}
+
+.tblRow td {
+  padding: 6px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  vertical-align: middle;
+}
+
+.tblRow:hover td { background: var(--bg-elev-1, #252526); }
+
+/* ── FIELD cell ─────────────────────────────────────────────── */
+.fieldCell { min-width: 180px; }
+
+.fieldName { display: flex; align-items: center; }
+
+/* One indent guide span per depth level — vertical rule via border-left */
+.indGuide {
+  display: inline-block;
+  width: 18px;
+  height: 22px;
+  border-left: 1px solid var(--border, #3a3a3a);
+  margin-left: 4px;
+  flex: none;
+}
+
+.chev {
+  display: inline-block;
+  width: 14px;
+  text-align: center;
+  font-size: 10px;
+  color: var(--fg-dim, #6a6a6a);
+  flex: none;
+  user-select: none;
+}
+
+.chevEmpty { display: inline-block; width: 14px; flex: none; }
+
+.fname { font-family: var(--font-mono, monospace); color: var(--fg, #d4d4d4); }
+.fnameParent { color: var(--schema-t-doc); }
+
+/* ── FLAT PATH cell ─────────────────────────────────────────── */
+.flatPath { font-family: var(--font-mono, monospace); }
+.flatPrefix { color: var(--fg-muted, #858585); }
+.flatLeaf { color: var(--fg, #d4d4d4); }
+
+/* ── TYPES cell ─────────────────────────────────────────────── */
+.typesCell { min-width: 140px; }
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 10px;
+  background: var(--bg-elev-2, #2a2a2a);
+  border: 1px solid var(--border, #3c3c3c);
+  margin-right: 4px;
+  margin-bottom: 2px;
+  white-space: nowrap;
+}
+
+.typeDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  flex: none;
+}
+
+.typePct { color: var(--fg-muted, #858585); font-variant-numeric: tabular-nums; }
+
+/* ── PRESENCE cell ──────────────────────────────────────────── */
+.presenceCell { min-width: 100px; }
+.presence { display: flex; align-items: center; gap: 7px; }
+.pbar {
+  position: relative;
+  width: 56px;
+  height: 6px;
+  background: var(--bg-elev-2, #333);
+  border-radius: 3px;
+  overflow: hidden;
+  flex: none;
+}
+.pfill { position: absolute; inset: 0 auto 0 0; background: var(--accent, #4a9eff); }
+.pct { color: var(--fg-muted, #858585); font-size: 12px; font-variant-numeric: tabular-nums; min-width: 34px; }
+
+/* ── SAMPLE cell ────────────────────────────────────────────── */
+.sampleCell { min-width: 120px; }
+.chip {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: var(--fg-muted, #858585);
+  background: var(--bg-elev-2, #2d2d30);
+  padding: 1px 7px;
+  border-radius: 4px;
+  white-space: nowrap;
+  margin-right: 4px;
+}
