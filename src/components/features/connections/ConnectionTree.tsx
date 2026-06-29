@@ -238,6 +238,10 @@ export function ConnectionTree({ connectionId, onOpenCollection, onOpenSchema }:
                   onDoubleClick={() => onOpenCollection(db, c.name)}
                   onContextMenu={(e) => {
                     e.preventDefault();
+                    // Stop the collection right-click from bubbling to the
+                    // connection row's onContextMenu (ConnectionList), which
+                    // would also open the connection menu (Duplicate/Delete…).
+                    e.stopPropagation();
                     setMenu({ x: e.clientX, y: e.clientY, db, col: c.name });
                   }}
                 >
