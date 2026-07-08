@@ -347,13 +347,13 @@ function createSession({ id, page, pageSize, script, isCancelled }) {
       catch: (rej) => materialize().catch(rej),
       finally: (fn) => materialize().finally(fn),
       toArray: () => materialize(),
-      forEach: (fn) => toArrayCapped(cursor, userLimit).then(({ docs }) => { docs.forEach(fn); }),
-      map: (fn) => toArrayCapped(cursor, userLimit).then(({ docs }) => docs.map(fn)),
+      forEach: (fn) => toArrayCapped(cursor, userLimit).then(({ docs, truncated }) => { if (truncated) emitNotice(truncationNotice(docs.length), log); docs.forEach(fn); }),
+      map: (fn) => toArrayCapped(cursor, userLimit).then(({ docs, truncated }) => { if (truncated) emitNotice(truncationNotice(docs.length), log); return docs.map(fn); }),
       count: () => {
-        const p = countPromise !== undefined ? Promise.resolve(countPromise) : toArrayCapped(cursor, userLimit).then(({ docs }) => docs.length);
+        const p = countPromise !== undefined ? Promise.resolve(countPromise) : toArrayCapped(cursor, userLimit).then(({ docs, truncated }) => { if (truncated) emitNotice(truncationNotice(docs.length), log); return docs.length; });
         return p.then((n) => { emitGroup(n, log); return n; });
       },
-      size: () => toArrayCapped(cursor, userLimit).then(({ docs }) => { emitGroup(docs.length, log); return docs.length; }),
+      size: () => toArrayCapped(cursor, userLimit).then(({ docs, truncated }) => { if (truncated) emitNotice(truncationNotice(docs.length), log); emitGroup(docs.length, log); return docs.length; }),
       explain: (verbosity) => cursor.explain(verbosity).then((plan) => { emitGroup(plan, log); return plan; }),
     };
 

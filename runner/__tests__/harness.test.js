@@ -338,6 +338,16 @@ describe.skipIf(!canRun)('harness integration tests', () => {
     }
   });
 
+  // B3: forEach emits a truncation notice when toArrayCapped caps the result
+  it('B3: forEach over a >MAX_DOCS set emits a truncation notice', async () => {
+    const result = await spawnHarness(
+      'db.alert_tracker.find({}).forEach(d => {})',
+      { env: { MONGO_MAX_DOCS: '1' } },
+    );
+    expect(result.error).toBeNull();
+    expect(result.logs.some((m) => /truncat/i.test(m))).toBe(true);
+  });
+
   // Long fields must serialize as their exact integer string, not {low, high, unsigned} (data loss)
   it('Long field serializes as its exact integer string, not {low,high}', async () => {
     const mongoRequire = createRequire(path.join(MONGO_MODULES_DIR, '..', 'anchor.js'));
