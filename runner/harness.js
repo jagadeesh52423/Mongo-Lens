@@ -434,8 +434,9 @@ function createSession({ id, page, pageSize, script, isCancelled }) {
               // Terminal stages ($merge/$out) must be last — skip pagination
               return makeCursorProxy(applyMaxTime(val.call(target, pipeline)));
             }
-            const paginatedPipeline = [...pipeline, { $skip: page * pageSize }, { $limit: pageSize }];
-            const rawCursor = applyMaxTime(val.call(target, paginatedPipeline));
+            // materialize() applies skip/limit via AggregationCursor.addStage(); baking
+            // them into the pipeline too causes double-skip on page 2+ (empty results).
+            const rawCursor = applyMaxTime(val.call(target, pipeline));
             const countPipeline = [...pipeline, { $count: 'total' }];
             const countPromise = applyMaxTime(target.aggregate(countPipeline)).toArray()
               .then((r) => (r[0]?.total ?? 0))
