@@ -284,6 +284,9 @@ function createSession({ id, page, pageSize, script, isCancelled }) {
     const safe = JSON.parse(JSON.stringify(arr, (_k, v) => {
       if (typeof v === 'bigint') return v.toString();
       if (v && v._bsontype === 'ObjectId') return v.toString();
+      if (v && typeof v.$numberDecimal === 'string') return v.$numberDecimal; // Decimal128.toJSON() → EJSON form
+      if (v && v._bsontype === 'Long') return v.toString();
+      if (v && v._bsontype === 'Binary') return v.toString('base64');
       return v;
     }));
     const idx = groupIndex++;

@@ -6,6 +6,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { createRequire } from 'module';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 
@@ -312,5 +313,51 @@ describe.skipIf(!canRun)('harness integration tests', () => {
     expect(result.error).toBeNull();
     expect(result.data.total).toBeGreaterThanOrEqual(0);
     expect(Array.isArray(result.data.docs)).toBe(true);
+  });
+
+  // Decimal128 fields must serialize as their decimal string, not {} (data loss)
+  it('Decimal128 field serializes as its decimal string, not {}', async () => {
+    const mongoRequire = createRequire(path.join(MONGO_MODULES_DIR, '..', 'anchor.js'));
+    const { MongoClient, Decimal128 } = mongoRequire('mongodb');
+
+    const tmpCol = 'harness_test_dec128_tmp';
+    const tmpClient = new MongoClient(DEFAULTS.uri);
+    await tmpClient.connect();
+    const col = tmpClient.db(DEFAULTS.db).collection(tmpCol);
+    await col.deleteMany({});
+    await col.insertOne({ amount: Decimal128.fromString('123.45') });
+
+    try {
+      const result = await spawnHarness(`db.${tmpCol}.find({})`);
+      expect(result.error).toBeNull();
+      expect(result.groups.length).toBeGreaterThan(0);
+      expect(result.groups[0].docs[0].amount).toBe('123.45');
+    } finally {
+      await col.deleteMany({});
+      await tmpClient.close();
+    }
+  });
+
+  // Long fields must serialize as their exact integer string, not {low, high, unsigned} (data loss)
+  it('Long field serializes as its exact integer string, not {low,high}', async () => {
+    const mongoRequire = createRequire(path.join(MONGO_MODULES_DIR, '..', 'anchor.js'));
+    const { MongoClient, Long } = mongoRequire('mongodb');
+
+    const tmpCol = 'harness_test_long_tmp';
+    const tmpClient = new MongoClient(DEFAULTS.uri);
+    await tmpClient.connect();
+    const col = tmpClient.db(DEFAULTS.db).collection(tmpCol);
+    await col.deleteMany({});
+    await col.insertOne({ count: Long.fromNumber(9876543210) });
+
+    try {
+      const result = await spawnHarness(`db.${tmpCol}.find({})`);
+      expect(result.error).toBeNull();
+      expect(result.groups.length).toBeGreaterThan(0);
+      expect(result.groups[0].docs[0].count).toBe('9876543210');
+    } finally {
+      await col.deleteMany({});
+      await tmpClient.close();
+    }
   });
 });
