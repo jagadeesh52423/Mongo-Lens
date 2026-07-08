@@ -348,13 +348,14 @@ describe.skipIf(!canRun)('harness integration tests', () => {
     await tmpClient.connect();
     const col = tmpClient.db(DEFAULTS.db).collection(tmpCol);
     await col.deleteMany({});
-    await col.insertOne({ count: Long.fromNumber(9876543210) });
+    // 2^53+1: exceeds MAX_SAFE_INTEGER so the driver returns a Long object (not auto-promoted)
+    await col.insertOne({ count: Long.fromString('9007199254740993') });
 
     try {
       const result = await spawnHarness(`db.${tmpCol}.find({})`);
       expect(result.error).toBeNull();
       expect(result.groups.length).toBeGreaterThan(0);
-      expect(result.groups[0].docs[0].count).toBe('9876543210');
+      expect(result.groups[0].docs[0].count).toBe('9007199254740993');
     } finally {
       await col.deleteMany({});
       await tmpClient.close();
