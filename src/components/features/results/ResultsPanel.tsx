@@ -161,12 +161,12 @@ export function ResultsPanel({
     if (res.isRunning) return 'Running…';
     const ms = res.executionMs ?? 0;
     if (pagination && pagination.total >= 0 && allDocs.length > 0) {
-      const startIndex = pagination.page * pageSize + 1;
+      const startIndex = pagination.page * pagination.pageSize + 1;
       const endIndex = startIndex + allDocs.length - 1;
       return `${startIndex} - ${endIndex} / ${pagination.total} docs · ${ms} ms`;
     }
     return `${allDocs.length} docs · ${ms} ms`;
-  }, [res, pagination, pageSize, allDocs.length]);
+  }, [res, pagination, allDocs.length]);
 
   const isEmpty = !res || (
     res.groups.length === 0 && logs.length === 0 && !res.isRunning && !res.lastError && !res.pagination

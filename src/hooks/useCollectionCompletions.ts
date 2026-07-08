@@ -13,9 +13,19 @@ export function useCollectionCompletions(
       setList([]);
       return;
     }
+    let cancelled = false;
     listCollections(connectionId, database)
-      .then(setList)
-      .catch(() => setList([]));
+      .then((collections) => {
+        if (cancelled) return;
+        setList(collections);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setList([]);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [connectionId, database]);
 
   return list;

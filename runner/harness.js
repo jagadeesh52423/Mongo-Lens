@@ -344,13 +344,13 @@ function createSession({ id, page, pageSize, script, isCancelled }) {
       catch: (rej) => materialize().catch(rej),
       finally: (fn) => materialize().finally(fn),
       toArray: () => materialize(),
-      forEach: (fn) => cursor.toArray().then((docs) => { docs.forEach(fn); }),
-      map: (fn) => cursor.toArray().then((docs) => docs.map(fn)),
+      forEach: (fn) => toArrayCapped(cursor, userLimit).then(({ docs }) => { docs.forEach(fn); }),
+      map: (fn) => toArrayCapped(cursor, userLimit).then(({ docs }) => docs.map(fn)),
       count: () => {
-        const p = countPromise !== undefined ? Promise.resolve(countPromise) : cursor.toArray().then((docs) => docs.length);
+        const p = countPromise !== undefined ? Promise.resolve(countPromise) : toArrayCapped(cursor, userLimit).then(({ docs }) => docs.length);
         return p.then((n) => { emitGroup(n, log); return n; });
       },
-      size: () => cursor.toArray().then((docs) => { emitGroup(docs.length, log); return docs.length; }),
+      size: () => toArrayCapped(cursor, userLimit).then(({ docs }) => { emitGroup(docs.length, log); return docs.length; }),
       explain: (verbosity) => cursor.explain(verbosity).then((plan) => { emitGroup(plan, log); return plan; }),
     };
 
@@ -550,8 +550,13 @@ async function doInit(init) {
 
 async function runScript(req) {
   const id = req.id;
+  if (!client) {
+    writeLine({ id, __error: 'harness shutting down' });
+    writeLine({ id, __done: true });
+    return;
+  }
   const dbName = req.db || defaultDb;
-  const page = Number.isInteger(req.page) ? req.page : 0;
+  const page = Math.max(0, Number.isInteger(req.page) ? req.page : 0);
   const pageSize = Number.isInteger(req.pageSize) && req.pageSize > 0 ? req.pageSize : DEFAULT_PAGE_SIZE;
   const reqLog = logger.child({ reqId: id });
   reqLog.info('run start', { dbName, page, pageSize });
@@ -610,12 +615,14 @@ const DATA_OPS = {
   async find(db, req) {
     const coll = db.collection(req.collection);
     const filter = EJSON.deserialize(req.filter || {});
-    const page = Number.isInteger(req.page) ? req.page : 0;
+    const page = Math.max(0, Number.isInteger(req.page) ? req.page : 0);
     const pageSize =
       Number.isInteger(req.pageSize) && req.pageSize > 0 ? req.pageSize : DEFAULT_PAGE_SIZE;
-    // Exact count (matches the prior browse_collection behaviour); browse always
-    // passes an empty filter, the same query the Rust command issued.
-    const total = await coll.countDocuments(filter, COUNT_OPTIONS);
+    // Empty filter: estimatedDocumentCount() is O(1); countDocuments({}) forces a COLLSCAN.
+    const isEmptyFilter = filter && typeof filter === 'object' && Object.keys(filter).length === 0;
+    const total = isEmptyFilter
+      ? await coll.estimatedDocumentCount(COUNT_OPTIONS).catch(() => -1)
+      : await coll.countDocuments(filter, COUNT_OPTIONS).catch(() => -1);
     const cursor = applyMaxTime(coll.find(filter).skip(page * pageSize).limit(pageSize));
     const docs = await cursor.toArray();
     return { docs: EJSON.serialize(docs, { relaxed: false }), total, page, pageSize };
@@ -651,6 +658,11 @@ const DATA_OPS = {
 
 async function runData(req) {
   const id = req.id;
+  if (!client) {
+    writeLine({ id, __error: 'harness shutting down' });
+    writeLine({ id, __done: true });
+    return;
+  }
   const op = DATA_OPS[req.op];
   if (!op) {
     writeLine({ id, __error: `unknown data op: ${req.op}` });
@@ -739,10 +751,11 @@ function onLine(line) {
 
   if (msg.action === 'shutdown') { handleShutdown(); return; }
   if (msg.action === 'cancel') { handleCancel(msg.id); return; }
-  if (msg.action === 'run') { queue.push(msg); pump(); return; }
+  // Guard: client is set to null during shutdown; ignore run/data after that.
+  if (msg.action === 'run') { if (client) { queue.push(msg); pump(); } return; }
   // Data ops are fast control-plane calls; run them directly (off the serial
   // run queue) — the driver multiplexes them safely on the shared client.
-  if (msg.action === 'data') { runData(msg); return; }
+  if (msg.action === 'data') { if (client) { runData(msg); } return; }
   // Unknown action: ignore (forward-compat with newer request types).
 }
 

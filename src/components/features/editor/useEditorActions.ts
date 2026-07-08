@@ -92,14 +92,19 @@ export function useEditorActions(active: EditorTab | undefined) {
 
   async function handleSaveAs(name: string, tags: string[]) {
     if (!active || active.type !== 'script') return;
-    const created = await createScript(name, active.content, tags, active.connectionId);
-    updateTab(active.id, {
-      title: name,
-      savedScriptId: created.id,
-      savedScriptTags: created.tags,
-      isDirty: false,
-    });
-    bumpScriptsVersion();
+    try {
+      const created = await createScript(name, active.content, tags, active.connectionId);
+      updateTab(active.id, {
+        title: name,
+        savedScriptId: created.id,
+        savedScriptTags: created.tags,
+        isDirty: false,
+      });
+      bumpScriptsVersion();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      alert(`Failed to save: ${msg}`);
+    }
   }
 
   function setActivePageSize(size: number) {

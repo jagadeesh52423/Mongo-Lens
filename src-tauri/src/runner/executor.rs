@@ -61,7 +61,9 @@ pub struct RunnerStatus {
 /// Resolve node binary path via login shell once, cache in NODE_PATH.
 pub(crate) fn resolve_node() -> Option<&'static str> {
     let path = NODE_PATH.get_or_init(|| {
-        Command::new("/bin/zsh")
+        // Use $SHELL so bash/fish users get their login PATH; fall back to zsh.
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+        Command::new(&shell)
             .args(["-l", "-c", "which node"])
             .output()
             .ok()
