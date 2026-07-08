@@ -18,6 +18,14 @@ interface Props {
   groupIndex?: number;
 }
 
+function stableRowKey(d: unknown, i: number): string | number {
+  if (d !== null && typeof d === 'object') {
+    const id = (d as Record<string, unknown>)._id;
+    if (id !== undefined && id !== null) return String(id);
+  }
+  return i;
+}
+
 export function columnsOf(docs: unknown[]): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
@@ -96,7 +104,7 @@ export function TableView({ docs, sortKey, sortDir, onToggleSort, groupIndex = 0
         </thead>
         <tbody>
           {docs.map((d, i) => (
-            <tr key={i}>
+            <tr key={stableRowKey(d, i)}>
               {columns.map((c) => {
                 const doc =
                   d !== null && typeof d === 'object'

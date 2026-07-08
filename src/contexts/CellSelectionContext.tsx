@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useState, type ReactNode } from 'react';
 
 export interface SelectedCell {
   rowIndex: number;
@@ -23,8 +23,9 @@ const CellSelectionContext = createContext<CellSelectionContextValue | null>(nul
 
 export function CellSelectionProvider({ children }: { children: ReactNode }) {
   const [selected, setSelected] = useState<SelectedCell | null>(null);
+  const clear = useCallback(() => setSelected(null), []);
   return (
-    <CellSelectionContext.Provider value={{ selected, select: setSelected, clear: () => setSelected(null) }}>
+    <CellSelectionContext.Provider value={{ selected, select: setSelected, clear }}>
       {children}
     </CellSelectionContext.Provider>
   );
