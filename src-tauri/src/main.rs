@@ -24,6 +24,47 @@ use std::path::PathBuf;
 use tauri::menu::Menu;
 use tauri::Manager;
 
+fn build_menu(handle: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
+    use tauri::menu::{AboutMetadata, PredefinedMenuItem, Submenu};
+    let pkg = handle.package_info();
+    let cfg = handle.config();
+    let about = AboutMetadata {
+        name: Some(pkg.name.clone()),
+        version: Some(pkg.version.to_string()),
+        copyright: cfg.bundle.copyright.clone(),
+        authors: cfg.bundle.publisher.clone().map(|p| vec![p]),
+        ..Default::default()
+    };
+    let app_submenu = Submenu::with_items(handle, pkg.name.as_str(), true, &[
+        &PredefinedMenuItem::about(handle, None, Some(about))?,
+        &PredefinedMenuItem::separator(handle)?,
+        &PredefinedMenuItem::services(handle, None)?,
+        &PredefinedMenuItem::separator(handle)?,
+        &PredefinedMenuItem::hide(handle, None)?,
+        &PredefinedMenuItem::hide_others(handle, None)?,
+        &PredefinedMenuItem::separator(handle)?,
+        &PredefinedMenuItem::quit(handle, None)?,
+    ])?;
+    let edit_submenu = Submenu::with_items(handle, "Edit", true, &[
+        &PredefinedMenuItem::undo(handle, None)?,
+        &PredefinedMenuItem::redo(handle, None)?,
+        &PredefinedMenuItem::separator(handle)?,
+        &PredefinedMenuItem::cut(handle, None)?,
+        &PredefinedMenuItem::copy(handle, None)?,
+        &PredefinedMenuItem::paste(handle, None)?,
+        &PredefinedMenuItem::select_all(handle, None)?,
+    ])?;
+    let view_submenu = Submenu::with_items(handle, "View", true, &[
+        &PredefinedMenuItem::fullscreen(handle, None)?,
+    ])?;
+    // close_window() omitted — Cmd+W is handled in JS; no native accelerator needed
+    let window_submenu = Submenu::with_items(handle, "Window", true, &[
+        &PredefinedMenuItem::minimize(handle, None)?,
+        &PredefinedMenuItem::maximize(handle, None)?,
+    ])?;
+    Menu::with_items(handle, &[&app_submenu, &edit_submenu, &view_submenu, &window_submenu])
+}
+
 fn main() {
     if let Err(e) = run() {
         eprintln!("Mongo Lens failed to start: {}", e);
@@ -36,7 +77,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_store::Builder::default().build())
-        .menu(|handle| Menu::default(handle))
+        .menu(build_menu)
         .setup(move |app| {
             let base = dirs_dir()?;
             fs::create_dir_all(&base)

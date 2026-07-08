@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { keyboardService } from '../../../services/KeyboardService';
 import { DEFAULT_SHORTCUTS } from '../../../shortcuts/defaults';
+import { useTabActions } from '../../../hooks/useTabActions';
 
 // Define the global open-settings shortcut at module load. Defining the
 // shortcut is idempotent — the KeyboardService maps it to an ID, and the
@@ -24,6 +25,7 @@ interface Props {
  * registrations — no other files need to change.
  */
 export function AppKeyboardWiring({ onToggleSettings }: Props) {
+  useTabActions();
   useEffect(() => {
     // Prevent WKWebView from forwarding Escape to the native macOS responder
     // chain, which exits fullscreen. Capture phase fires before any element

@@ -9,7 +9,6 @@ import { EditorTabBar } from './EditorTabBar';
 import { ResultsPanel } from '../results/ResultsPanel';
 import { useCollectionCompletions } from '../../../hooks/useCollectionCompletions';
 import { SplitHandle } from '../../shared/SplitHandle';
-import { useTabActions } from '../../../hooks/useTabActions';
 import { newScriptTab } from '../../../utils/newScriptTab';
 import { getStatementAtCursor } from '../../../utils/statementDetection';
 import { getExecutionModes } from '../../../execution-modes';
@@ -61,7 +60,6 @@ export function EditorArea() {
     active?.database ?? activeDatabase,
   );
   const isRunning = useResultsStore((s) => (active ? !!s.byTab[active.id]?.isRunning : false));
-  useTabActions();
 
   // Adopt the active connection for a script tab that has none yet. A tab
   // opened before any connection was active starts with connectionId
