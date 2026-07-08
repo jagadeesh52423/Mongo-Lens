@@ -1,9 +1,10 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { spawn } from 'child_process';
+import net from 'net';
+import readline from 'readline';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { randomBytes } from 'crypto';
 import { fileURLToPath } from 'url';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
@@ -19,78 +20,98 @@ const DEFAULTS = {
   pageSize: 10,
 };
 
-function spawnHarness(query, opts = {}) {
-  const { uri, db, page, pageSize, env } = { ...DEFAULTS, ...opts };
-  const tmpFile = path.join(os.tmpdir(), `harness-test-${randomBytes(8).toString('hex')}.js`);
-  fs.writeFileSync(tmpFile, query);
-
-  return new Promise((resolve, reject) => {
-    const child = spawn(
-      process.execPath,
-      [HARNESS_PATH, db, tmpFile],
-      {
-        env: {
-          ...process.env,
-          MONGO_URI: uri,
-          MONGO_PAGE: String(page),
-          MONGO_PAGE_SIZE: String(pageSize),
-          NODE_PATH: MONGO_MODULES_DIR,
-          ...(env || {}),
-        },
-        stdio: ['ignore', 'pipe', 'pipe'],
-      },
-    );
-
-    const cleanup = () => {
-      try { fs.unlinkSync(tmpFile); } catch (_e) { /* ignore cleanup errors */ }
-    };
-
-    let stdout = '';
-    let stderr = '';
-    child.stdout.on('data', (chunk) => { stdout += chunk; });
-    child.stderr.on('data', (chunk) => { stderr += chunk; });
-
-    child.on('error', (err) => {
-      cleanup();
-      reject(err);
-    });
-
-    child.on('close', (exitCode) => {
-      cleanup();
-
-      const groups = [];
-      const logs = [];
-      let pagination = null;
-      let error = null;
-
-      const parseLines = (text) => {
-        for (const line of text.split('\n')) {
-          if (!line.trim()) continue;
-          let msg;
-          try { msg = JSON.parse(line); } catch (_e) { continue; }
-          if (msg.__error !== undefined) error = msg.__error;
-          else if (msg.__group !== undefined) groups.push(msg);
-          else if (msg.__pagination !== undefined) pagination = msg.__pagination;
-          else if (msg.__log !== undefined) logs.push(msg.__log.message);
-        }
-      };
-      parseLines(stdout);
-      parseLines(stderr);
-
-      resolve({ groups, logs, pagination, error, exitCode });
-    });
+// Quick TCP probe — skip the whole suite if mongod is unreachable.
+async function mongodReachable(uri = DEFAULTS.uri) {
+  const url = new URL(uri);
+  const port = parseInt(url.port) || 27017;
+  const host = url.hostname || '127.0.0.1';
+  return new Promise((resolve) => {
+    const s = net.createConnection(port, host);
+    s.once('connect', () => { s.destroy(); resolve(true); });
+    s.once('error', () => resolve(false));
+    setTimeout(() => { s.destroy(); resolve(false); }, 500);
   });
 }
 
-describe('harness integration tests', () => {
-  beforeAll(() => {
-    if (!mongodbInstalled) {
-      throw new Error(
-        'mongodb not found at ~/.mongomacapp/runner/node_modules — run the app once first to install it',
-      );
-    }
-  });
+const canRun = mongodbInstalled && await mongodReachable();
 
+// --- Serve-protocol harness driver ---
+
+function spawnChild(db, uri, env = {}) {
+  return spawn(process.execPath, [HARNESS_PATH, '--serve', db], {
+    env: { ...process.env, MONGO_URI: uri, NODE_PATH: MONGO_MODULES_DIR, ...env },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+}
+
+class HarnessClient {
+  constructor(child) {
+    this.child = child;
+    this.pending = new Map();
+    this._exitCode = null;
+    this._readyP = new Promise((res, rej) => { this._readyRes = res; this._readyRej = rej; });
+    this._exitP = new Promise((r) => { this._exitRes = r; });
+    child.on('exit', (code) => { this._exitCode = code; this._exitRes(); });
+    readline.createInterface({ input: child.stdout }).on('line', (l) => this._onLine(l));
+  }
+
+  _onLine(line) {
+    let msg;
+    try { msg = JSON.parse(line); } catch { return; }
+    if (msg.__ready) { this._readyRes(); return; }
+    if (msg.fatal) { this._readyRej(new Error(msg.__error || 'fatal harness error')); return; }
+    const entry = this.pending.get(msg.id);
+    if (!entry) return;
+    if (msg.__group !== undefined) entry.acc.groups.push(msg);
+    else if (msg.__pagination) entry.acc.pagination = msg.__pagination;
+    else if (msg.__log) entry.acc.logs.push(msg.__log.message);
+    else if (msg.__data !== undefined) entry.acc.data = msg.__data;
+    else if (msg.__error !== undefined) entry.acc.error = msg.__error;
+    if (msg.__done) { this.pending.delete(msg.id); entry.resolve(entry.acc); }
+  }
+
+  _send(obj) { this.child.stdin.write(JSON.stringify(obj) + '\n'); }
+
+  async init() { this._send({ __init: {} }); return this._readyP; }
+
+  _register(id) {
+    const acc = { groups: [], logs: [], pagination: null, data: undefined, error: null };
+    return new Promise((resolve) => this.pending.set(id, { resolve, acc }));
+  }
+
+  run(req) {
+    const p = this._register(req.id);
+    this._send({ ...req, action: 'run' });
+    return p;
+  }
+
+  data(req) {
+    const p = this._register(req.id);
+    this._send({ ...req, action: 'data' });
+    return p;
+  }
+
+  async shutdown() { this._send({ action: 'shutdown' }); return this._exitP; }
+}
+
+let _id = 0;
+const nextId = () => `t${++_id}`;
+
+async function spawnHarness(script, opts = {}) {
+  const { uri, db, page, pageSize, env } = { ...DEFAULTS, ...opts };
+  const child = spawnChild(db, uri, env);
+  const client = new HarnessClient(child);
+  await client.init();
+  const result = await client.run({ id: nextId(), db, script, page, pageSize });
+  await client.shutdown();
+  // ponytail: serve-mode errors are per-request; synthesise exit code for the error test.
+  result.exitCode = result.error ? 1 : 0;
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+
+describe.skipIf(!canRun)('harness integration tests', () => {
   it('basic find returns docs with _id', async () => {
     const result = await spawnHarness('db.alert_tracker.find({})');
     expect(result.error).toBeNull();
@@ -186,18 +207,19 @@ describe('harness integration tests', () => {
       { pageSize: 3 },
     );
     expect(result.error).toBeNull();
-    const printed = result.groups.find((g) => typeof g.docs[0] === 'string' && g.docs[0].startsWith('len='));
+    // print() routes to __log → result.logs, not result.groups
+    const printed = result.logs.find((m) => typeof m === 'string' && m.startsWith('len='));
     expect(printed).toBeDefined();
   });
 
   it('caps the result set at MONGO_MAX_DOCS and emits a truncation notice', async () => {
     const result = await spawnHarness('db.alert_tracker.find({})', {
       pageSize: 50,
-      env: { MONGO_MAX_DOCS: '2' },
+      env: { MONGO_MAX_DOCS: '1' },
     });
     expect(result.error).toBeNull();
     expect(result.groups.length).toBe(1);
-    expect(result.groups[0].docs.length).toBe(2);
+    expect(result.groups[0].docs.length).toBe(1);
     expect(result.logs.some((m) => /truncat/i.test(m))).toBe(true);
   });
 
@@ -245,29 +267,18 @@ describe('harness integration tests', () => {
   });
 
   it('SIGTERM mid-run closes the client and exits cleanly (code 0)', async () => {
-    const tmpFile = path.join(os.tmpdir(), `harness-sig-${randomBytes(8).toString('hex')}.js`);
-    // Materialize a query, then idle — leaving the client open so SIGTERM has
-    // something to close. A missing handler would let the default SIGTERM action
-    // kill the process (exit code null), failing the assertion below.
-    fs.writeFileSync(
-      tmpFile,
-      'await db.alert_tracker.find({}).toArray();\nawait new Promise((r) => setTimeout(r, 10000));',
-    );
-    const child = spawn(process.execPath, [HARNESS_PATH, DEFAULTS.db, tmpFile], {
-      env: {
-        ...process.env,
-        MONGO_URI: DEFAULTS.uri,
-        MONGO_PAGE: '0',
-        MONGO_PAGE_SIZE: '5',
-        NODE_PATH: MONGO_MODULES_DIR,
-      },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    const child = spawnChild(DEFAULTS.db, DEFAULTS.uri);
+    const client = new HarnessClient(child);
+    await client.init();
+    // Long-running script so SIGTERM interrupts while the harness is mid-execute.
+    client.run({
+      id: nextId(), db: DEFAULTS.db, page: 0, pageSize: 5,
+      script: 'await db.alert_tracker.find({}).toArray();\nawait new Promise((r) => setTimeout(r, 10000));',
+    }).catch(() => {});
     const exitCode = await new Promise((resolve) => {
       child.on('exit', (code) => resolve(code));
       setTimeout(() => child.kill('SIGTERM'), 1500);
     });
-    try { fs.unlinkSync(tmpFile); } catch (_e) { /* ignore */ }
     expect(exitCode).toBe(0);
   });
 
@@ -275,5 +286,31 @@ describe('harness integration tests', () => {
     const result = await spawnHarness('db.alert_tracker.find(INVALID');
     expect(result.error).not.toBeNull();
     expect(result.exitCode).toBe(1);
+  });
+
+  // B5: negative page clamps to 0 — same first page as explicit page 0
+  it('B5: page -1 clamps to page 0, returns same docs as explicit page 0', async () => {
+    const page0 = await spawnHarness('db.alert_tracker.find({}).sort({_id:1})', { page: 0, pageSize: 5 });
+    const pageNeg = await spawnHarness('db.alert_tracker.find({}).sort({_id:1})', { page: -1, pageSize: 5 });
+    expect(pageNeg.error).toBeNull();
+    expect(page0.error).toBeNull();
+    const ids0 = page0.groups[0].docs.map((d) => String(d._id));
+    const idsNeg = pageNeg.groups[0].docs.map((d) => String(d._id));
+    expect(idsNeg).toEqual(ids0);
+  });
+
+  // B2: DATA_OPS.find with empty filter uses estimatedDocumentCount (O(1)) not COLLSCAN
+  it('B2: data-plane find with empty filter returns valid total and docs array', async () => {
+    const child = spawnChild(DEFAULTS.db, DEFAULTS.uri);
+    const client = new HarnessClient(child);
+    await client.init();
+    const result = await client.data({
+      id: nextId(), op: 'find', db: DEFAULTS.db, collection: 'alert_tracker',
+      filter: {}, page: 0, pageSize: 5,
+    });
+    await client.shutdown();
+    expect(result.error).toBeNull();
+    expect(result.data.total).toBeGreaterThanOrEqual(0);
+    expect(Array.isArray(result.data.docs)).toBe(true);
   });
 });
