@@ -372,3 +372,39 @@ describe.skipIf(!canRun)('harness integration tests', () => {
     }
   });
 });
+
+// Regression guard for the filtered-query timeout: the advisory count query
+// must fail EARLIER than the Rust run deadline. When the two budgets were both
+// 30s, an unindexed countDocuments() COLLSCAN could only settle at t=30s — the
+// exact moment SCRIPT_TIMEOUT_SECS fired — so every `find({filter})` on a large
+// collection surfaced as "timed out" while `find()` (estimatedDocumentCount,
+// O(1)) worked. Source-level assert: no mongod, no slow fixture needed.
+// ponytail: greps the constants; a behavioural test needs a multi-GB unindexed
+// collection. Swap to that only if these ever stop being plain literals.
+describe('count budget vs run deadline', () => {
+  it('count maxTimeMS is strictly below the Rust script timeout', () => {
+    const harness = fs.readFileSync(HARNESS_PATH, 'utf8');
+    const rust = fs.readFileSync(
+      path.resolve(__dirname, '..', '..', 'src-tauri', 'src', 'commands', 'script.rs'),
+      'utf8',
+    );
+
+    const countMs = Number(
+      harness.match(/MONGO_COUNT_MAX_TIME_MS \?\? '(\d+)'/)?.[1],
+    );
+    const timeoutSecs = Number(
+      rust.match(/SCRIPT_TIMEOUT_SECS:\s*u64\s*=\s*(\d+)/)?.[1],
+    );
+
+    expect(Number.isFinite(countMs)).toBe(true);
+    expect(Number.isFinite(timeoutSecs)).toBe(true);
+    expect(countMs).toBeLessThan(timeoutSecs * 1000);
+  });
+
+  it('count uses its own budget, not the cursor MAX_TIME_MS', () => {
+    const harness = fs.readFileSync(HARNESS_PATH, 'utf8');
+    expect(harness).toMatch(/const COUNT_OPTIONS = COUNT_MAX_TIME_MS > 0/);
+    // aggregate's $count must not ride applyMaxTime (the 30s cursor budget)
+    expect(harness).not.toMatch(/applyMaxTime\(target\.aggregate\(countPipeline\)\)/);
+  });
+});

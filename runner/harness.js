@@ -86,9 +86,19 @@ process.on('SIGINT', () => handleSignal('SIGINT'));
 //   MONGO_MAX_TIME_MS — server-side per-operation time budget applied to
 //                       find/aggregate cursors and their count queries, so a
 //                       slow op fails fast instead of riding the kill timer.
+//   MONGO_COUNT_MAX_TIME_MS — separate, SHORTER budget for the total-count
+//                       query. The count is advisory (it only fills the pager);
+//                       the docs are the payload, but Promise.all holds them
+//                       hostage until the count settles. At the same 30s budget
+//                       as MAX_TIME_MS an unindexed countDocuments() COLLSCAN
+//                       could only fail at t=30s — exactly when the Rust side's
+//                       SCRIPT_TIMEOUT_SECS deadline fires — so every filtered
+//                       query lost that race by ~100ms and surfaced as a
+//                       timeout with no results. Must stay < SCRIPT_TIMEOUT_SECS.
 const MAX_DOCS = parseInt(process.env.MONGO_MAX_DOCS ?? '1000', 10);
 const MAX_TIME_MS = parseInt(process.env.MONGO_MAX_TIME_MS ?? '30000', 10);
-const COUNT_OPTIONS = MAX_TIME_MS > 0 ? { maxTimeMS: MAX_TIME_MS } : undefined;
+const COUNT_MAX_TIME_MS = parseInt(process.env.MONGO_COUNT_MAX_TIME_MS ?? '5000', 10);
+const COUNT_OPTIONS = COUNT_MAX_TIME_MS > 0 ? { maxTimeMS: COUNT_MAX_TIME_MS } : undefined;
 
 const DEFAULT_PAGE_SIZE = 50;
 
@@ -441,7 +451,8 @@ function createSession({ id, page, pageSize, script, isCancelled }) {
             // them into the pipeline too causes double-skip on page 2+ (empty results).
             const rawCursor = applyMaxTime(val.call(target, pipeline));
             const countPipeline = [...pipeline, { $count: 'total' }];
-            const countPromise = applyMaxTime(target.aggregate(countPipeline)).toArray()
+            // COUNT_OPTIONS (not applyMaxTime) — same advisory-count rule as find().
+            const countPromise = target.aggregate(countPipeline, COUNT_OPTIONS).toArray()
               .then((r) => (r[0]?.total ?? 0))
               .catch(() => -1);
             return makeCursorProxy(rawCursor, countPromise);
