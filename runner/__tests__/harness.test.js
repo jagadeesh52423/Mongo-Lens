@@ -382,23 +382,26 @@ describe.skipIf(!canRun)('harness integration tests', () => {
 // ponytail: greps the constants; a behavioural test needs a multi-GB unindexed
 // collection. Swap to that only if these ever stop being plain literals.
 describe('count budget vs run deadline', () => {
-  it('count maxTimeMS is strictly below the Rust script timeout', () => {
+  // Every harness-side budget must expire before the Rust side hangs up —
+  // otherwise the harness can only ever report its error too late, and the user
+  // sees a generic "timed out" instead of the real one (or nothing at all).
+  it('harness budgets are strictly below both Rust deadlines', () => {
     const harness = fs.readFileSync(HARNESS_PATH, 'utf8');
-    const rust = fs.readFileSync(
-      path.resolve(__dirname, '..', '..', 'src-tauri', 'src', 'commands', 'script.rs'),
-      'utf8',
-    );
+    const src = (...p) => fs.readFileSync(path.resolve(__dirname, '..', '..', 'src-tauri', 'src', ...p), 'utf8');
 
-    const countMs = Number(
-      harness.match(/MONGO_COUNT_MAX_TIME_MS \?\? '(\d+)'/)?.[1],
-    );
-    const timeoutSecs = Number(
-      rust.match(/SCRIPT_TIMEOUT_SECS:\s*u64\s*=\s*(\d+)/)?.[1],
-    );
+    const num = (text, re) => Number(text.match(re)?.[1]);
+    const countMs = num(harness, /MONGO_COUNT_MAX_TIME_MS \?\? '(\d+)'/);
+    const cursorMs = num(harness, /MONGO_MAX_TIME_MS \?\? '(\d+)'/);
+    const scriptSecs = num(src('commands', 'script.rs'), /SCRIPT_TIMEOUT_SECS:\s*u64\s*=\s*(\d+)/);
+    const dataSecs = num(src('mongo', 'mod.rs'), /DATA_TIMEOUT_SECS:\s*u64\s*=\s*(\d+)/);
 
-    expect(Number.isFinite(countMs)).toBe(true);
-    expect(Number.isFinite(timeoutSecs)).toBe(true);
-    expect(countMs).toBeLessThan(timeoutSecs * 1000);
+    for (const v of [countMs, cursorMs, scriptSecs, dataSecs]) {
+      expect(Number.isFinite(v)).toBe(true);
+    }
+    const deadlineMs = Math.min(scriptSecs, dataSecs) * 1000;
+    expect(cursorMs).toBeLessThan(deadlineMs);
+    expect(countMs).toBeLessThan(deadlineMs);
+    expect(countMs).toBeLessThanOrEqual(cursorMs); // count is advisory; never the longest pole
   });
 
   it('count uses its own budget, not the cursor MAX_TIME_MS', () => {

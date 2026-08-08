@@ -84,8 +84,13 @@ process.on('SIGINT', () => handleSignal('SIGINT'));
 //                       Without this, cursor.toArray() on a large collection
 //                       buffers the whole result set into memory -> OOM/UI freeze.
 //   MONGO_MAX_TIME_MS — server-side per-operation time budget applied to
-//                       find/aggregate cursors and their count queries, so a
-//                       slow op fails fast instead of riding the kill timer.
+//                       find/aggregate cursors, so a slow op fails fast
+//                       instead of riding the kill timer. Kept BELOW the Rust
+//                       deadlines (SCRIPT_TIMEOUT_SECS / DATA_TIMEOUT_SECS,
+//                       both 30s) so the harness can still report the real
+//                       error ("operation exceeded time limit") before the
+//                       Rust side hangs up and replaces it with a generic
+//                       timeout. At an equal 30s it never could.
 //   MONGO_COUNT_MAX_TIME_MS — separate, SHORTER budget for the total-count
 //                       query. The count is advisory (it only fills the pager);
 //                       the docs are the payload, but Promise.all holds them
@@ -96,7 +101,7 @@ process.on('SIGINT', () => handleSignal('SIGINT'));
 //                       query lost that race by ~100ms and surfaced as a
 //                       timeout with no results. Must stay < SCRIPT_TIMEOUT_SECS.
 const MAX_DOCS = parseInt(process.env.MONGO_MAX_DOCS ?? '1000', 10);
-const MAX_TIME_MS = parseInt(process.env.MONGO_MAX_TIME_MS ?? '30000', 10);
+const MAX_TIME_MS = parseInt(process.env.MONGO_MAX_TIME_MS ?? '25000', 10);
 const COUNT_MAX_TIME_MS = parseInt(process.env.MONGO_COUNT_MAX_TIME_MS ?? '5000', 10);
 const COUNT_OPTIONS = COUNT_MAX_TIME_MS > 0 ? { maxTimeMS: COUNT_MAX_TIME_MS } : undefined;
 
