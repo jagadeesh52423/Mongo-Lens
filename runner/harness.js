@@ -639,11 +639,15 @@ const DATA_OPS = {
       Number.isInteger(req.pageSize) && req.pageSize > 0 ? req.pageSize : DEFAULT_PAGE_SIZE;
     // Empty filter: estimatedDocumentCount() is O(1); countDocuments({}) forces a COLLSCAN.
     const isEmptyFilter = filter && typeof filter === 'object' && Object.keys(filter).length === 0;
-    const total = isEmptyFilter
-      ? await coll.estimatedDocumentCount(COUNT_OPTIONS).catch(() => -1)
-      : await coll.countDocuments(filter, COUNT_OPTIONS).catch(() => -1);
+    // Count and docs in parallel — the count is advisory (it fills the pager)
+    // and awaiting it first made every browse pay count-then-find serially.
     const cursor = applyMaxTime(coll.find(filter).skip(page * pageSize).limit(pageSize));
-    const docs = await cursor.toArray();
+    const [total, docs] = await Promise.all([
+      isEmptyFilter
+        ? coll.estimatedDocumentCount(COUNT_OPTIONS).catch(() => -1)
+        : coll.countDocuments(filter, COUNT_OPTIONS).catch(() => -1),
+      cursor.toArray(),
+    ]);
     return { docs: EJSON.serialize(docs, { relaxed: false }), total, page, pageSize };
   },
   async updateOne(db, req) {
@@ -770,11 +774,14 @@ function onLine(line) {
 
   if (msg.action === 'shutdown') { handleShutdown(); return; }
   if (msg.action === 'cancel') { handleCancel(msg.id); return; }
-  // Guard: client is set to null during shutdown; ignore run/data after that.
-  if (msg.action === 'run') { if (client) { queue.push(msg); pump(); } return; }
+  // No `if (client)` guard here: dropping a request without a reply strands the
+  // Rust caller on its own deadline (30s) and surfaces as a generic timeout.
+  // runScript/runData both answer `!client` with "harness shutting down" +
+  // __done, so let them — a request must ALWAYS get a terminal frame.
+  if (msg.action === 'run') { queue.push(msg); pump(); return; }
   // Data ops are fast control-plane calls; run them directly (off the serial
   // run queue) — the driver multiplexes them safely on the shared client.
-  if (msg.action === 'data') { if (client) { runData(msg); } return; }
+  if (msg.action === 'data') { runData(msg); return; }
   // Unknown action: ignore (forward-compat with newer request types).
 }
 

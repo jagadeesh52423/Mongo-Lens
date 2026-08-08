@@ -411,3 +411,30 @@ describe('count budget vs run deadline', () => {
     expect(harness).not.toMatch(/applyMaxTime\(target\.aggregate\(countPipeline\)\)/);
   });
 });
+
+// A request must ALWAYS get a terminal frame. onLine used to guard run/data
+// with `if (client)`, so anything arriving after shutdown nulled the client was
+// dropped silently — the Rust caller then sat on its own 30s deadline and
+// reported a generic timeout instead of the real reason. Both lines go out in
+// one write so readline delivers them back-to-back: shutdown nulls the client,
+// then the run must still be answered.
+describe.runIf(canRun)('no silent drops', () => {
+  it('a run arriving after shutdown still gets an error + __done', async () => {
+    const client = new HarnessClient(spawnChild(DEFAULTS.db, DEFAULTS.uri));
+    await client.init();
+
+    const id = nextId();
+    const answered = client._register(id);
+    client.child.stdin.write(
+      JSON.stringify({ action: 'shutdown' }) + '\n' +
+      JSON.stringify({ id, action: 'run', db: DEFAULTS.db, script: 'db.foo.find({})', page: 0, pageSize: 10 }) + '\n',
+    );
+
+    const result = await Promise.race([
+      answered,
+      new Promise((r) => setTimeout(() => r('NO_REPLY'), 5000)),
+    ]);
+    expect(result).not.toBe('NO_REPLY');
+    expect(result.error).toMatch(/shutting down/);
+  });
+});
