@@ -1,8 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useEditorStore } from '../store/editor';
 import type { EditorTab } from '../types';
-import { keyboardService, useKeyboardService } from '../services/KeyboardService';
-import { DEFAULT_SHORTCUTS } from '../shortcuts/defaults';
+import { useKeyboardService } from '../services/KeyboardService';
 import { newScriptTab } from '../utils/newScriptTab';
 
 interface TabActionState {
@@ -63,11 +62,6 @@ const ALL_ACTIONS: TabActionDef[] = [
     };
   }),
 ];
-
-const TAB_ACTION_IDS = new Set(ALL_ACTIONS.map((a) => a.id));
-DEFAULT_SHORTCUTS
-  .filter((def) => TAB_ACTION_IDS.has(def.id))
-  .forEach((def) => keyboardService.defineShortcut(def));
 
 export function useTabActions(): void {
   const svc = useKeyboardService();

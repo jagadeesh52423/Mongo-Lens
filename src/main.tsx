@@ -7,6 +7,7 @@ import './styles/globals.css';
 import { loadSettings, useSettingsStore } from './store/settings';
 import { applyTheme, applyMonacoTheme } from './themes/applyTheme';
 import { keyboardService } from './services/KeyboardService';
+import { DEFAULT_SHORTCUTS } from './shortcuts/defaults';
 import { createLogger, LoggerProvider, type Logger, type LogLevel } from './services/logger';
 
 function pickEnv(): 'dev' | 'prod' | 'test' {
@@ -23,6 +24,14 @@ const logger: Logger = createLogger({
 });
 
 keyboardService.setLogger(logger.child({ logger: 'services.keyboard' }));
+
+// Every built-in shortcut is DEFINED here, once, at boot. Components only
+// REGISTER handlers (keyboardService.register) — defining is not their job, and
+// scattering it left several modules doing find()/filter() dances over
+// DEFAULT_SHORTCUTS just to define their own slice. Runs before bootSettings()
+// so applyOverrides() below has a full definition map to rebind against.
+// Dynamic shortcuts (RecordActionRegistry) still self-define on registration.
+DEFAULT_SHORTCUTS.forEach((def) => keyboardService.defineShortcut(def));
 
 async function bootSettings(): Promise<void> {
   try {

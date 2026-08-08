@@ -63,6 +63,16 @@ export function deserializeKeyCombo(s: string): KeyCombo {
 
 const noop = (): void => {};
 
+function matches(e: KeyboardEvent, k: KeyCombo): boolean {
+  return (
+    e.key.toLowerCase() === k.key.toLowerCase() &&
+    !!e.metaKey === !!k.cmd &&
+    !!e.ctrlKey === !!k.ctrl &&
+    !!e.shiftKey === !!k.shift &&
+    !!e.altKey === !!k.alt
+  );
+}
+
 export class KeyboardService {
   // Permanent registry — survives component unmount, source of truth for settings UI.
   private definitions = new Map<string, ShortcutDefinition>();
@@ -118,25 +128,26 @@ export class KeyboardService {
     ) {
       return;
     }
+    // Nearest scope wins. resolveScopes() walks the focused element's ancestors
+    // child-first, so a LOWER index means a more specific scope; 'global' is the
+    // weakest and only fires when nothing scoped matched. Without this the
+    // winner was `handlers` insertion order — i.e. component mount order — and
+    // the settings UI deliberately allows the same combo in different scopes
+    // (ShortcutsSection skips conflicts across scopes), so nested zones like
+    // 'results' / 'results-table' could resolve differently run to run.
     const scopes = this.resolveScopes(document.activeElement);
+    let best: { depth: number; handler: () => void } | null = null;
     for (const [id, handler] of this.handlers.entries()) {
       const def = this.definitions.get(id);
-      if (!def) continue;
-      if (def.scope !== 'global' && !scopes.includes(def.scope)) continue;
-      const k = def.keys;
-      if (
-        e.key.toLowerCase() === k.key.toLowerCase() &&
-        !!e.metaKey === !!k.cmd &&
-        !!e.ctrlKey === !!k.ctrl &&
-        !!e.shiftKey === !!k.shift &&
-        !!e.altKey === !!k.alt
-      ) {
-        e.preventDefault();
-        e.stopPropagation();
-        handler();
-        return;
-      }
+      if (!def || !matches(e, def.keys)) continue;
+      const depth = def.scope === 'global' ? Infinity : scopes.indexOf(def.scope);
+      if (depth < 0) continue; // scoped shortcut, but focus is outside its zone
+      if (!best || depth < best.depth) best = { depth, handler };
     }
+    if (!best) return;
+    e.preventDefault();
+    e.stopPropagation();
+    best.handler();
   }
 
   getDefinitions(): ShortcutDefinition[] {

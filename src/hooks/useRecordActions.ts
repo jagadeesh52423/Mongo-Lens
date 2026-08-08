@@ -2,8 +2,7 @@ import { useEffect, useRef } from 'react';
 import type { MutableRefObject } from 'react';
 import { useCellSelection } from '../contexts/CellSelectionContext';
 import type { SelectedCell } from '../contexts/CellSelectionContext';
-import { keyboardService, useKeyboardService } from '../services/KeyboardService';
-import { DEFAULT_SHORTCUTS } from '../shortcuts/defaults';
+import { useKeyboardService } from '../services/KeyboardService';
 import { recordActionRegistry } from '../services/records/RecordActionRegistry';
 import type { RecordContext } from '../services/records/RecordContext';
 import type { RecordActionHost } from '../services/records/RecordActionHost';
@@ -56,15 +55,6 @@ const NAV_ACTIONS: NavActionDef[] = [
   { id: 'cell.navigateLeft', rowDelta: 0, colDelta: -1 },
   { id: 'cell.navigateRight', rowDelta: 0, colDelta: 1 },
 ];
-
-// Define copy + nav shortcuts from defaults.ts (record actions self-register via registry).
-const HOOK_OWNED_IDS = new Set<string>([
-  ...COPY_ACTIONS.map((a) => a.id),
-  ...NAV_ACTIONS.map((a) => a.id),
-]);
-DEFAULT_SHORTCUTS
-  .filter((def) => HOOK_OWNED_IDS.has(def.id))
-  .forEach((def) => keyboardService.defineShortcut(def));
 
 export function useRecordActions(
   context: RecordContext,

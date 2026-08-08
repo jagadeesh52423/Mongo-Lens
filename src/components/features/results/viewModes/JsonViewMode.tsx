@@ -2,13 +2,7 @@ import { useEffect, useRef } from 'react';
 import { JsonView } from '../JsonView';
 import styles from './viewMode.module.css';
 import { keyboardService } from '../../../../services/KeyboardService';
-import { DEFAULT_SHORTCUTS } from '../../../../shortcuts/defaults';
 import type { ResultViewMode } from './ViewModeRegistry';
-
-// Define the select-all shortcut once at module load so the registration below
-// always has a known definition to bind to.
-const selectAllDef = DEFAULT_SHORTCUTS.find((d) => d.id === 'results.selectAll');
-if (selectAllDef) keyboardService.defineShortcut(selectAllDef);
 
 function JsonViewModeComponent({
   group,

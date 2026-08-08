@@ -1,13 +1,6 @@
 import { useEffect } from 'react';
 import { keyboardService } from '../../../services/KeyboardService';
-import { DEFAULT_SHORTCUTS } from '../../../shortcuts/defaults';
 import { useTabActions } from '../../../hooks/useTabActions';
-
-// Define the global open-settings shortcut at module load. Defining the
-// shortcut is idempotent — the KeyboardService maps it to an ID, and the
-// `register` call below attaches the actual handler.
-const openSettingsDef = DEFAULT_SHORTCUTS.find((d) => d.id === 'open-settings');
-if (openSettingsDef) keyboardService.defineShortcut(openSettingsDef);
 
 interface Props {
   onToggleSettings: () => void;

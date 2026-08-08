@@ -32,3 +32,14 @@ Object.defineProperty(globalThis, 'localStorage', { value: __lsShim, configurabl
 if (typeof window !== 'undefined') {
   Object.defineProperty(window, 'localStorage', { value: __lsShim, configurable: true, writable: true });
 }
+
+// Shortcut definitions are app-wide boot state: main.tsx defines all of
+// DEFAULT_SHORTCUTS before anything renders. Mirror that here so a component
+// test sees the same definition map as production. Previously each module
+// defined its own slice at import time, which meant a test only had whatever
+// definitions its imports happened to drag in — implicit, and wrong whenever a
+// component registered a handler for an id defined by some other module.
+import { keyboardService } from '../services/KeyboardService';
+import { DEFAULT_SHORTCUTS } from '../shortcuts/defaults';
+
+DEFAULT_SHORTCUTS.forEach((def) => keyboardService.defineShortcut(def));

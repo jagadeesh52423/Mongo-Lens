@@ -202,6 +202,64 @@ describe('KeyboardService', () => {
 
     document.body.removeChild(outer);
   });
+
+  // The settings UI allows the same combo in different scopes (it only rejects
+  // conflicts within one scope), so nested zones CAN both match a keystroke.
+  // Resolution must be by scope specificity, not by registration order — which
+  // in the app is component mount order, i.e. effectively arbitrary. Both
+  // orderings are asserted so the test fails whichever way the map happens to
+  // be built.
+  it.each([
+    ['outer registered first', ['outer', 'inner']],
+    ['inner registered first', ['inner', 'outer']],
+  ])('nested scopes: nearest scope wins (%s)', (_label, order) => {
+    const outerAction = vi.fn();
+    const innerAction = vi.fn();
+    svc.defineShortcut({ id: 'outer', keys: { cmd: true, key: 'c' }, label: 'Outer', scope: 'results' });
+    svc.defineShortcut({ id: 'inner', keys: { cmd: true, key: 'c' }, label: 'Inner', scope: 'results-table' });
+    for (const id of order) {
+      svc.register(id, id === 'outer' ? outerAction : innerAction);
+    }
+
+    const outer = document.createElement('div');
+    outer.setAttribute('data-keyboard-scope', 'results');
+    const inner = document.createElement('div');
+    inner.setAttribute('data-keyboard-scope', 'results-table');
+    const cell = document.createElement('button');
+    inner.appendChild(cell);
+    outer.appendChild(inner);
+    document.body.appendChild(outer);
+    cell.focus();
+
+    svc.dispatch(makeKeyEvent({ key: 'c', metaKey: true }));
+    expect(innerAction).toHaveBeenCalledOnce();
+    expect(outerAction).not.toHaveBeenCalled();
+
+    document.body.removeChild(outer);
+  });
+
+  it('a scoped shortcut beats a global one on the same combo', () => {
+    const globalAction = vi.fn();
+    const scopedAction = vi.fn();
+    // global registered first — insertion order would have picked it.
+    svc.defineShortcut({ id: 'g', keys: { cmd: true, key: 'c' }, label: 'G', scope: 'global' });
+    svc.defineShortcut({ id: 's', keys: { cmd: true, key: 'c' }, label: 'S', scope: 'results' });
+    svc.register('g', globalAction);
+    svc.register('s', scopedAction);
+
+    const zone = document.createElement('div');
+    zone.setAttribute('data-keyboard-scope', 'results');
+    const btn = document.createElement('button');
+    zone.appendChild(btn);
+    document.body.appendChild(zone);
+    btn.focus();
+
+    svc.dispatch(makeKeyEvent({ key: 'c', metaKey: true }));
+    expect(scopedAction).toHaveBeenCalledOnce();
+    expect(globalAction).not.toHaveBeenCalled();
+
+    document.body.removeChild(zone);
+  });
 });
 
 describe('formatKeyCombo', () => {
